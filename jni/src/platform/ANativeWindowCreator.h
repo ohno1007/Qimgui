@@ -750,6 +750,15 @@ namespace android {
                     return {};
                 }
 
+                // The mirrorSurface symbol can fail to resolve on
+                // non-AOSP ROMs (different libgui build / renamed
+                // symbol). Calling a NULL fn-ptr was segfaulting the
+                // process the moment the system screen recorder added
+                // its VirtualDisplay layerStack.
+                if (nullptr == Functionals::GetInstance().SurfaceComposerClient__MirrorSurface) {
+                    return {};
+                }
+
                 auto mirrorSurface = Functionals::GetInstance().SurfaceComposerClient__MirrorSurface(data, surface.data);
                 if (nullptr == mirrorSurface.get()) {
                     return {};
