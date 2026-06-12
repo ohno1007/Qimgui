@@ -49,7 +49,14 @@ int main() {
         st.display_w = info.width; st.display_h = info.height;
         if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
         if (aimgui::kbd_input::ConsumeVolumePresses() > 0) st.collapsed = !st.collapsed;
-        if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();
+        // NOTE: ProcessMirrorDisplay() forks `dumpsys display` every
+        // frame and walks new-layerStack → MirrorSurface() on the way
+        // in. When the system screen recorder spins up its virtual
+        // display, the first hit on that branch segfaults the process.
+        // The mirror path is a ROM-compat workaround; on stock Android
+        // the surface's recording visibility is already governed by the
+        // skipScreenshot flag we pass at Build() time, so the mirror is
+        // redundant. Skip it.
         aimgui::kbd_input::Flush();
 
         ws.renderer()->NewFrame();
