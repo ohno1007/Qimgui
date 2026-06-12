@@ -8,7 +8,9 @@
 #include "platform/TouchHelperA.h"
 #include "ui/ui.h"
 
+#include <atomic>
 #include <chrono>
+#include <thread>
 
 int main() {
     using namespace android;
@@ -36,6 +38,24 @@ int main() {
     Touch::setOrientation((int)info.orientation);
     aimgui::kbd_input::Init();
 
+    // ProcessMirrorDisplay() forks `dumpsys display`, parses it, and
+    // for every previously-unseen layerStack calls MirrorSurface() on
+    // the SurfaceFlinger composer. Calling that from the render loop
+    // races the renderer's own SF transactions and crashes the moment
+    // the system screen recorder adds its VirtualDisplay layerStack.
+    // Move it onto a dedicated thread that wakes once a second. The
+    // helper internally throttles + caches per-layerStack state, so a
+    // 1 s poll is plenty for "user just hit record".
+    std::atomic<bool> mirror_running{true};
+    std::atomic<bool> mirror_active{!st.permeate_record};
+    std::thread mirror_thread([&]{
+        while (mirror_running.load(std::memory_order_acquire)) {
+            if (mirror_active.load(std::memory_order_acquire))
+                ANativeWindowCreator::ProcessMirrorDisplay();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
     aimgui::FramePacer pacer;
     auto last = clock::now();
     uint32_t orient = info.orientation;
@@ -49,14 +69,6 @@ int main() {
         st.display_w = info.width; st.display_h = info.height;
         if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
         if (aimgui::kbd_input::ConsumeVolumePresses() > 0) st.collapsed = !st.collapsed;
-        // NOTE: ProcessMirrorDisplay() forks `dumpsys display` every
-        // frame and walks new-layerStack → MirrorSurface() on the way
-        // in. When the system screen recorder spins up its virtual
-        // display, the first hit on that branch segfaults the process.
-        // The mirror path is a ROM-compat workaround; on stock Android
-        // the surface's recording visibility is already governed by the
-        // skipScreenshot flag we pass at Build() time, so the mirror is
-        // redundant. Skip it.
         aimgui::kbd_input::Flush();
 
         ws.renderer()->NewFrame();
@@ -71,11 +83,17 @@ int main() {
         if (st.request_permeate_toggle) {
             st.request_permeate_toggle = false;
             st.permeate_record = !st.permeate_record;
+            // Pause the mirror poller while the surface is gone so it
+            // can't MirrorSurface() against a destroyed SurfaceControl.
+            mirror_active.store(false, std::memory_order_release);
             ws.Destroy();
             if (!ws.Build(W, st.permeate_record)) { running = false; break; }
             st.renderer_name = ws.renderer()->Name();
+            mirror_active.store(!st.permeate_record, std::memory_order_release);
         }
     }
+    mirror_running.store(false, std::memory_order_release);
+    mirror_thread.join();
     aimgui::kbd_input::Shutdown();
     // Tear down renderer/surface BEFORE ImGui — backend Shutdown unhooks
     // from the active context.
