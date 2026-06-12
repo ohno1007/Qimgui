@@ -664,9 +664,18 @@ namespace android {
 
                 // Apply permission fixes
                 if (12 <= systemVersion) {
-                    // Android 12+: Use Transaction mechanism to set trusted overlay and highest layer
+                    // Android 12+: Use Transaction mechanism to set trusted overlay and highest layer.
+                    // TrustedOverlay is what makes MediaProjection-based
+                    // screen recorders skip the surface — keep it only
+                    // when the caller wants the surface hidden from
+                    // recordings (skipScrenshot=true). When the caller
+                    // wants to be recorded, leaving it off makes the
+                    // surface a normal overlay that the system recorder
+                    // captures without needing the mirror trick (which
+                    // depends on a libgui symbol that isn't present on
+                    // every ROM).
                     static SurfaceComposerClientTransaction transaction;
-                    transaction.SetTrustedOverlay(result, true);
+                    transaction.SetTrustedOverlay(result, skipScrenshot);
                     transaction.SetLayer(result, INT_MAX);
                     auto applyResult = transaction.Apply(false, true);
                 } else if (8 >= systemVersion) {
