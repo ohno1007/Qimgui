@@ -70,5 +70,8 @@ int main() {
         }
     }
     aimgui::kbd_input::Shutdown();
+    // Tear down renderer/surface BEFORE ImGui — backend Shutdown unhooks
+    // from the active context.
+    ws.Destroy();
     ImGui::DestroyContext();
 }
