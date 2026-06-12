@@ -17,6 +17,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Size-optimised flags shared by every target — mirror what the old
 # jni/Application.mk used so the resulting ELF stays small.
+# Note: -flto is intentionally omitted from both compile and link. The
+# old Application.mk listed it under APP_LDFLAGS only, so no objects ever
+# carried LTO IR and link-time LTO was a no-op. Turning real LTO on broke
+# ANativeWindowCreator::ProcessMirrorDisplay() (the hidden-visibility,
+# heavy-static-state mirror path crashed when a screen-recording virtual
+# display appeared). Keep the no-op for byte-for-byte parity with what
+# shipped before.
 add_compile_options(
     -Os
     -ffunction-sections
@@ -25,10 +32,9 @@ add_compile_options(
     -fvisibility-inlines-hidden
     -fno-unwind-tables
     -fno-asynchronous-unwind-tables
-    -fno-rtti
-    -flto)
+    -fno-rtti)
 add_compile_definitions(SURFACE_LOG_ENABLE=0)
-add_link_options(-Wl,--gc-sections -Wl,--icf=all -Wl,-s -flto)
+add_link_options(-Wl,--gc-sections -Wl,--icf=all -Wl,-s)
 
 set(JNI ${CMAKE_SOURCE_DIR}/jni)
 
