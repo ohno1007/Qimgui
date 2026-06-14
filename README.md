@@ -162,38 +162,47 @@ to stay on, and the only way to make the surface appear in recordings
 is the mirror trick: `SurfaceComposerClient::mirrorSurface()` re-parents
 a copy onto the recorder's VirtualDisplay layerStack.
 
-That works only when the `mirrorSurface` symbol resolves. The platform
-helper's mangled-name walk uses the Android 11+ name unconditionally:
+That works only when the `mirrorSurface` symbol resolves — and its
+**signature changed across versions**, so its mangled name did too:
 
 ```
-_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlE
+Android 11-13:  _ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlE
+                → mirrorSurface(SurfaceControl*)
+Android 14-16:  _ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlES2_
+                → mirrorSurface(SurfaceControl*, SurfaceControl* parent)
 ```
 
-On Android 16 (and likely 14/15 too) `createSurface` already needed a
-new mangled name (`...gui13LayerMetadata...`); `mirrorSurface` is
-believed to have shifted similarly but no fallback is wired up yet.
-On those ROMs the symbol stays `nullptr` and the helper now null-guards
-the call instead of jumping into it — so the app no longer segfaults the
-moment the system recorder spins up its VirtualDisplay, but the surface
-also won't be captured.
+The helper resolves **both** ABIs (a `MirrorSurface` 1-arg and a
+`MirrorSurface2` 2-arg function pointer) and calls whichever the ROM
+exports, passing `parent = nullptr` for the 2-arg form. Binding the
+2-arg overload to a 1-arg prototype reads a garbage parent pointer and
+segfaults the instant the recorder's VirtualDisplay appears, so the
+prototype has to match the number of parameters exactly.
 
-To restore recording visibility on Android 14+/16, add the new mangled
-name(s) as a fallback in the symbol walker in
-`jni/src/platform/ANativeWindowCreator.h` (look for
-`ResolveMethod(SurfaceComposerClient, MirrorSurface, ...)` ≈ line 324).
-Pull the actual symbol off the device with:
+If the hard-coded names miss (non-AOSP ROM), the helper **scans
+`libgui.so`'s dynamic symbol table** for the
+`SurfaceComposerClient::mirrorSurface` method token and binds the match
+*by ABI* — the mangled tail (`...EPNS_14SurfaceControlE` vs
+`...EPNS_14SurfaceControlES2_`) decides which function pointer it fills,
+so a wrong-arity overload is never bound. See `EnumerateDynSyms()` /
+`FindDynSymContaining()` in `jni/src/platform/ANativeWindowCreator.h`.
+
+The call still null-guards before jumping, so on the (rare) ROM where no
+matching symbol exists at all the app degrades gracefully — no crash when
+the system recorder spins up its VirtualDisplay, the surface just won't
+be captured. To inspect what a device actually exports:
 
 ```bash
 adb pull /system/lib64/libgui.so
 nm -D --demangle libgui.so | grep -i mirror
 ```
 
-Current state on this repo (as of `cda9435`):
+Current state on this repo:
 
 - ✅ Screen recording no longer crashes the app.
 - ✅ Taps pass through to apps below the overlay.
 - ✅ `防录屏 = ON` correctly hides the window from recordings (via `eSkipScreenshot`).
-- ❌ `防录屏 = OFF` does *not* yet make the window visible in recordings on Android 14+/16 (mirror symbol unresolved).
+- ✅ `防录屏 = OFF` makes the window visible in recordings on Android 14+/16 via the 2-arg `mirrorSurface(SurfaceControl*, parent)` overload (verified on Android 16).
 
 ### `ProcessMirrorDisplay()` runs from the render loop
 

@@ -30,8 +30,11 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <sys/system_properties.h>
+#include <elf.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -203,6 +206,106 @@ namespace android {
             inline explicit operator bool() const { return nullptr != pointer; }
         };
 
+        // Walk the dynamic symbol table of a shared object on disk and invoke
+        // visit(name) for every *defined* exported symbol. visit returns true
+        // to stop early. Reads straight off disk so it works regardless of how
+        // the .so was loaded.
+        template <typename Fn>
+        inline void EnumerateDynSyms(const char *libPath, Fn &&visit)
+        {
+            FILE *fp = fopen(libPath, "rb");
+            if (!fp)
+                return;
+
+            auto readAt = [&](void *dst, size_t size, long off) -> bool {
+                if (0 != fseek(fp, off, SEEK_SET))
+                    return false;
+                return fread(dst, 1, size, fp) == size;
+            };
+
+#ifdef __LP64__
+            using Ehdr = Elf64_Ehdr; using Shdr = Elf64_Shdr; using Sym = Elf64_Sym;
+#else
+            using Ehdr = Elf32_Ehdr; using Shdr = Elf32_Shdr; using Sym = Elf32_Sym;
+#endif
+
+            Ehdr ehdr{};
+            if (!readAt(&ehdr, sizeof(ehdr), 0) ||
+                0 != memcmp(ehdr.e_ident, ELFMAG, SELFMAG) ||
+                sizeof(Shdr) != ehdr.e_shentsize || 0 == ehdr.e_shnum)
+            {
+                fclose(fp);
+                return;
+            }
+
+            std::vector<Shdr> sections(ehdr.e_shnum);
+            if (!readAt(sections.data(), sizeof(Shdr) * ehdr.e_shnum, static_cast<long>(ehdr.e_shoff)))
+            {
+                fclose(fp);
+                return;
+            }
+
+            for (const auto &sh : sections)
+            {
+                if (SHT_DYNSYM != sh.sh_type || 0 == sh.sh_entsize)
+                    continue;
+                if (sh.sh_link >= sections.size())
+                    continue;
+
+                const Shdr &strtab = sections[sh.sh_link];
+
+                std::string strbuf(strtab.sh_size, '\0');
+                if (!readAt(strbuf.data(), strtab.sh_size, static_cast<long>(strtab.sh_offset)))
+                    continue;
+
+                std::vector<Sym> syms(sh.sh_size / sh.sh_entsize);
+                if (!readAt(syms.data(), sh.sh_size, static_cast<long>(sh.sh_offset)))
+                    continue;
+
+                for (const auto &sym : syms)
+                {
+                    if (0 == sym.st_name || sym.st_name >= strbuf.size())
+                        continue;
+                    if (SHN_UNDEF == sym.st_shndx) // skip undefined imports
+                        continue;
+
+                    if (visit(strbuf.data() + sym.st_name))
+                    {
+                        fclose(fp);
+                        return;
+                    }
+                }
+            }
+
+            fclose(fp);
+        }
+
+        // Return the first defined export whose mangled name contains `token`
+        // and (if given) ends with `requiredSuffix`. The suffix lets callers
+        // demand a specific ABI (parameter mangling) so we never bind an
+        // overload we don't know how to call.
+        inline std::string FindDynSymContaining(const char *libPath, const char *token,
+                                                const char *requiredSuffix = nullptr)
+        {
+            std::string result;
+            const size_t suffixLen = requiredSuffix ? strlen(requiredSuffix) : 0;
+
+            EnumerateDynSyms(libPath, [&](const char *name) -> bool {
+                if (!strstr(name, token))
+                    return false;
+                if (requiredSuffix)
+                {
+                    const size_t n = strlen(name);
+                    if (n < suffixLen || 0 != strcmp(name + n - suffixLen, requiredSuffix))
+                        return false;
+                }
+                result = name;
+                return true;
+            });
+
+            return result;
+        }
+
         struct Functionals
         {
             struct SymbolMethod
@@ -229,6 +332,8 @@ namespace android {
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface_and8)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, uint32_t windowType, uint32_t ownerUid) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface_and9)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, int32_t windowType, int32_t ownerUid) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__MirrorSurface)(void *thiz, void *mirrorFromSurface) = nullptr;
+            // Android 14+/16: mirrorSurface gained a second SurfaceControl* parent.
+            StrongPointer<void> (*SurfaceComposerClient__MirrorSurface2)(void *thiz, void *mirrorFromSurface, void *parent) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetInternalDisplayToken)() = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetBuiltInDisplay)(ui::DisplayType type) = nullptr;
             int32_t (*SurfaceComposerClient__GetDisplayState)(StrongPointer<void> &display, ui::DisplayState *displayState) = nullptr;
@@ -273,10 +378,12 @@ namespace android {
                 }
 
 #ifdef __LP64__
-                auto libgui = symbolMethod.Open("/system/lib64/libgui.so", RTLD_LAZY);
+                const char *libguiPath = "/system/lib64/libgui.so";
+                auto libgui = symbolMethod.Open(libguiPath, RTLD_LAZY);
                 auto libutils = symbolMethod.Open("/system/lib64/libutils.so", RTLD_LAZY);
 #else
-                auto libgui = symbolMethod.Open("/system/lib/libgui.so", RTLD_LAZY);
+                const char *libguiPath = "/system/lib/libgui.so";
+                auto libgui = symbolMethod.Open(libguiPath, RTLD_LAZY);
                 auto libutils = symbolMethod.Open("/system/lib/libutils.so", RTLD_LAZY);
 #endif
                 //libutils
@@ -321,8 +428,47 @@ namespace android {
                 }
                 
                 // MirrorSurface method - Android 11+
+                //
+                // Two ABIs exist across versions, both non-static members:
+                //   Android 11-13: mirrorSurface(SurfaceControl*)
+                //                  ... mangled tail "EPNS_14SurfaceControlE"
+                //   Android 14-16: mirrorSurface(SurfaceControl*, SurfaceControl* parent)
+                //                  ... mangled tail "EPNS_14SurfaceControlES2_"
+                // We resolve whichever the ROM exports and call it with the
+                // matching number of arguments (parent = nullptr). Calling the
+                // 2-arg overload with the 1-arg prototype segfaults the moment a
+                // screen recorder's VirtualDisplay appears, so the prototype must
+                // match exactly.
                 if (11 <= systemVersion) {
                     ResolveMethod(SurfaceComposerClient, MirrorSurface, libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlE");
+                    SurfaceComposerClient__MirrorSurface2 = reinterpret_cast<decltype(SurfaceComposerClient__MirrorSurface2)>(
+                        symbolMethod.Find(libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlES2_"));
+
+                    // ROM-specific mangling fallback: scan libgui's dynsym for
+                    // the SurfaceComposerClient::mirrorSurface method token,
+                    // selecting by ABI (parameter mangling) so each pointer only
+                    // ever binds a function we know how to call.
+                    if (nullptr == SurfaceComposerClient__MirrorSurface) {
+                        std::string n = FindDynSymContaining(libguiPath,
+                            "21SurfaceComposerClient13mirrorSurface", "EPNS_14SurfaceControlE");
+                        if (!n.empty())
+                            SurfaceComposerClient__MirrorSurface = reinterpret_cast<decltype(SurfaceComposerClient__MirrorSurface)>(symbolMethod.Find(libgui, n.c_str()));
+                    }
+                    if (nullptr == SurfaceComposerClient__MirrorSurface2) {
+                        std::string n = FindDynSymContaining(libguiPath,
+                            "21SurfaceComposerClient13mirrorSurface", "EPNS_14SurfaceControlES2_");
+                        if (!n.empty())
+                            SurfaceComposerClient__MirrorSurface2 = reinterpret_cast<decltype(SurfaceComposerClient__MirrorSurface2)>(symbolMethod.Find(libgui, n.c_str()));
+                    }
+
+                    if (nullptr == SurfaceComposerClient__MirrorSurface &&
+                        nullptr == SurfaceComposerClient__MirrorSurface2) {
+                        SURFACE_LOG_WARN("No callable mirrorSurface on this ROM; recordings won't capture overlay (no crash)");
+                    } else {
+                        SURFACE_LOG_INFO("mirrorSurface resolved (1-arg=%p 2-arg=%p)",
+                                         (void *)SurfaceComposerClient__MirrorSurface,
+                                         (void *)SurfaceComposerClient__MirrorSurface2);
+                    }
                 }
                 
                 // Display related methods - version specific selection
@@ -761,16 +907,21 @@ namespace android {
                     return {};
                 }
 
-                // The mirrorSurface symbol can fail to resolve on
-                // non-AOSP ROMs (different libgui build / renamed
-                // symbol). Calling a NULL fn-ptr was segfaulting the
-                // process the moment the system screen recorder added
-                // its VirtualDisplay layerStack.
-                if (nullptr == Functionals::GetInstance().SurfaceComposerClient__MirrorSurface) {
+                // The mirrorSurface symbol can fail to resolve on non-AOSP ROMs
+                // (different libgui build / renamed symbol). Calling a NULL
+                // fn-ptr was segfaulting the process the moment the system
+                // screen recorder added its VirtualDisplay layerStack. Pick the
+                // ABI that resolved: 1-arg (Android 11-13) or 2-arg with a null
+                // parent (Android 14+/16).
+                const auto &fn = Functionals::GetInstance();
+                StrongPointer<void> mirrorSurface{};
+                if (nullptr != fn.SurfaceComposerClient__MirrorSurface) {
+                    mirrorSurface = fn.SurfaceComposerClient__MirrorSurface(data, surface.data);
+                } else if (nullptr != fn.SurfaceComposerClient__MirrorSurface2) {
+                    mirrorSurface = fn.SurfaceComposerClient__MirrorSurface2(data, surface.data, nullptr);
+                } else {
                     return {};
                 }
-
-                auto mirrorSurface = Functionals::GetInstance().SurfaceComposerClient__MirrorSurface(data, surface.data);
                 if (nullptr == mirrorSurface.get()) {
                     return {};
                 }
