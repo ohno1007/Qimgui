@@ -1,0 +1,80 @@
+name: update-imgui
+
+# Rebuilds prebuilt/arm64-v8a/libimgui.a and refreshes the vendored ImGui
+# public headers at a pinned upstream tag, using the project's own imconfig.h
+# and compile flags. Verifies the whole app still links, then pushes the
+# result to a review branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dear ImGui release tag to build"
+        required: true
+        default: "v1.92.8"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Dear ImGui ${{ github.event.inputs.tag }}
+        run: |
+          git clone --depth 1 --branch "${{ github.event.inputs.tag }}" \
+            https://github.com/ocornut/imgui.git /tmp/imgui
+
+      - name: Build libimgui.a (arm64-v8a) with project imconfig + flags
+        run: |
+          set -eux
+          NDK="$ANDROID_NDK_LATEST_HOME"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
+
+          # Use the project's tuned config, not upstream's default.
+          cp jni/include/imgui/imconfig.h /tmp/imgui/imconfig.h
+
+          cd /tmp/imgui
+          FLAGS="-std=c++17 -fPIC -Os -ffunction-sections -fdata-sections \
+                 -fvisibility=hidden -fvisibility-inlines-hidden \
+                 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-rtti \
+                 -I. -Ibackends"
+
+          $CXX $FLAGS -c imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_widgets.cpp
+          $CXX $FLAGS -c backends/imgui_impl_opengl3.cpp
+          $CXX $FLAGS -DVK_USE_PLATFORM_ANDROID_KHR -DIMGUI_IMPL_VULKAN_NO_PROTOTYPES \
+               -c backends/imgui_impl_vulkan.cpp
+
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs libimgui.a \
+            imgui.o imgui_draw.o imgui_tables.o imgui_widgets.o \
+            imgui_impl_opengl3.o imgui_impl_vulkan.o
+
+      - name: Install rebuilt lib + refreshed headers into the tree
+        run: |
+          set -eux
+          cp /tmp/imgui/libimgui.a              prebuilt/arm64-v8a/libimgui.a
+          cp /tmp/imgui/imgui.h                 jni/include/imgui/imgui.h
+          cp /tmp/imgui/backends/imgui_impl_opengl3.h jni/include/imgui/backends/imgui_impl_opengl3.h
+          cp /tmp/imgui/backends/imgui_impl_vulkan.h  jni/include/imgui/backends/imgui_impl_vulkan.h
+          grep -E 'IMGUI_VERSION ' jni/include/imgui/imgui.h
+
+      - name: Verify the whole app still builds/links
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          ./build.sh
+          file libs/arm64-v8a/AImGui
+
+      - name: Push updated files to review branch
+        run: |
+          set -eux
+          VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' jni/include/imgui/imgui.h | head -1 | tr -d '"')
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/imgui-update
+          git add prebuilt/arm64-v8a/libimgui.a jni/include/imgui/imgui.h \
+                  jni/include/imgui/backends/imgui_impl_opengl3.h \
+                  jni/include/imgui/backends/imgui_impl_vulkan.h
+          git commit -m "Update Dear ImGui to ${{ github.event.inputs.tag }} ($VER)"
+          git push -f origin chore/imgui-update
