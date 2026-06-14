@@ -439,7 +439,7 @@ void DrawResizeGrip(const UiState* state) {
                        a.y + state->resize_target_size.y);
         fg->AddRect(a, b,
                     ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.95f)),
-                    12.0f, 0, 5.0f);
+                    12.0f, 5.0f, 0);
     }
 }
 
