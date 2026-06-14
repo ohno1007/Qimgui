@@ -373,10 +373,12 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
 
 void BloomVK::RegisterImGuiSnapshot() {
     if (!m_Ready || m_PrevSceneView == VK_NULL_HANDLE) return;
-    // ImGui's Vulkan impl gives us a descriptor set bound to (sampler, view,
-    // layout) suitable for use as ImTextureID.
+    // ImGui's Vulkan impl gives us a descriptor set bound to (view, layout)
+    // suitable for use as ImTextureID. Since ImGui v1.92.x the backend owns
+    // the sampler internally, so AddTexture no longer takes a VkSampler (our
+    // m_Sampler is still used directly for the bloom passes above).
     m_PrevSceneImGuiDS = ImGui_ImplVulkan_AddTexture(
-        m_Sampler, m_PrevSceneView,
+        m_PrevSceneView,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
