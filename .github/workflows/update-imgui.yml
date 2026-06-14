@@ -12,9 +12,15 @@ on:
         description: "Dear ImGui release tag to build"
         required: true
         default: "v1.92.8"
+  push:
+    branches:
+      - "ci/imgui-update"
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || 'v1.92.8' }}
 
 jobs:
   update:
@@ -22,9 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch Dear ImGui ${{ github.event.inputs.tag }}
+      - name: Fetch Dear ImGui ${{ env.TAG }}
         run: |
-          git clone --depth 1 --branch "${{ github.event.inputs.tag }}" \
+          git clone --depth 1 --branch "${{ env.TAG }}" \
             https://github.com/ocornut/imgui.git /tmp/imgui
 
       - name: Build libimgui.a (arm64-v8a) with project imconfig + flags
@@ -76,5 +82,5 @@ jobs:
           git add prebuilt/arm64-v8a/libimgui.a jni/include/imgui/imgui.h \
                   jni/include/imgui/backends/imgui_impl_opengl3.h \
                   jni/include/imgui/backends/imgui_impl_vulkan.h
-          git commit -m "Update Dear ImGui to ${{ github.event.inputs.tag }} ($VER)"
+          git commit -m "Update Dear ImGui to ${{ env.TAG }} ($VER)"
           git push -f origin chore/imgui-update
