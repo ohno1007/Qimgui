@@ -23,6 +23,11 @@ int main() {
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr; io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    // ImGui 1.92's stb font loader raises a *recoverable* IM_ASSERT_USER_ERROR
+    // when a system font fails to parse. By default that aborts the process
+    // (SIGABRT) on first text render. Disable the assert so a bad/unsupported
+    // system font degrades gracefully (logged, skipped) instead of crashing.
+    io.ConfigErrorRecoveryEnableAssert = false;
     ImGui::StyleColorsDark();
     aimgui::LoadDefaultAndSystemCJKFont(25.0f);
 
