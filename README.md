@@ -4,7 +4,7 @@ A minimal, elegant **Dear ImGui** framework that builds to a single Android
 ARM64 ELF executable — no JNI, no APK, no Activity. Runs as a native binary on
 top of SurfaceFlinger.
 
-- ImGui **v1.92.6**
+- ImGui **v1.92.8**
 - **Vulkan + OpenGL ES 3** backends with automatic VK→GL fallback
 - **System CJK font** auto-detected (`NotoSansCJK`, `DroidSansFallback`, …)
 - Post-process bloom on both backends
