@@ -7,6 +7,9 @@
 #include "platform/ANativeWindowCreator.h"
 #include "platform/TouchHelperA.h"
 #include "ui/ui.h"
+#ifdef AIMGUI_LIVE2D
+#include "live2d/live2d_view.h"
+#endif
 
 #include <chrono>
 
@@ -41,6 +44,15 @@ int main() {
     Touch::setOrientation((int)info.orientation);
     aimgui::kbd_input::Init();
 
+#ifdef AIMGUI_LIVE2D
+    // Optional Live2D layer. Model assets are pushed to the device under
+    // /data/local/tmp/live2d/<Model>/ (see docs/LIVE2D.md). Non-fatal if absent.
+    if (aimgui::live2d::Init()) {
+        aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+        aimgui::live2d::Resize(info.width, info.height);
+    }
+#endif
+
     aimgui::FramePacer pacer;
     auto last = clock::now();
     uint32_t orient = info.orientation;
@@ -58,6 +70,13 @@ int main() {
         aimgui::kbd_input::Flush();
 
         ws.renderer()->NewFrame();
+#ifdef AIMGUI_LIVE2D
+        // Draw the model into the freshly-begun GL framebuffer; ImGui (rendered
+        // in EndFrame) then composites its UI on top.
+        aimgui::live2d::Resize(info.width, info.height);
+        aimgui::live2d::Update(io.DeltaTime);
+        aimgui::live2d::Draw();
+#endif
         st.scene_snapshot_id = ws.renderer()->GetSceneSnapshotID();
         ImGui::NewFrame();
         aimgui::DrawUi(&st, &running);
@@ -74,6 +93,9 @@ int main() {
             st.renderer_name = ws.renderer()->Name();
         }
     }
+#ifdef AIMGUI_LIVE2D
+    aimgui::live2d::Shutdown();
+#endif
     aimgui::kbd_input::Shutdown();
     ws.Destroy();
     ImGui::DestroyContext();

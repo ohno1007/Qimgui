@@ -1,0 +1,3 @@
+# Don't commit model assets by default (licenses vary). Keep the README.
+/models/*
+!/models/README.md

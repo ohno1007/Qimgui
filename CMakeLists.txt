@@ -10,6 +10,10 @@
 cmake_minimum_required(VERSION 3.18)
 project(AImGui LANGUAGES CXX)
 
+# Optional Live2D Cubism model layer. OFF by default; requires the user-supplied
+# Cubism SDK (see docs/LIVE2D.md). When OFF, nothing below changes.
+option(AIMGUI_LIVE2D "Build with Live2D Cubism model support" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -81,3 +85,47 @@ target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
     aimgui_core aimgui_platform imgui
     log android EGL GLESv3)
+
+# ── Optional Live2D Cubism layer ─────────────────────────────────────────
+# Requires the user to drop the Cubism SDK's Core/ and Framework/ into
+# third_party/ (same SDK package → matching versions). See docs/LIVE2D.md.
+if(AIMGUI_LIVE2D)
+    set(LIVE2D_CORE      ${CMAKE_SOURCE_DIR}/third_party/Core)
+    set(LIVE2D_FRAMEWORK ${CMAKE_SOURCE_DIR}/third_party/CubismNativeFramework)
+
+    if(NOT EXISTS ${LIVE2D_CORE}/include/Live2DCubismCore.h)
+        message(FATAL_ERROR "AIMGUI_LIVE2D=ON but Cubism Core is missing at "
+            "${LIVE2D_CORE}. Copy the SDK's Core/ there — see docs/LIVE2D.md.")
+    endif()
+    if(NOT EXISTS ${LIVE2D_FRAMEWORK}/CMakeLists.txt)
+        message(FATAL_ERROR "AIMGUI_LIVE2D=ON but Cubism Framework is missing at "
+            "${LIVE2D_FRAMEWORK}. Copy the SDK's Framework/ there — see docs/LIVE2D.md.")
+    endif()
+
+    # Cubism Core (prebuilt static lib from the SDK).
+    add_library(Live2DCubismCore STATIC IMPORTED GLOBAL)
+    set_target_properties(Live2DCubismCore PROPERTIES
+        IMPORTED_LOCATION ${LIVE2D_CORE}/lib/android/${ANDROID_ABI}/libLive2DCubismCore.a)
+
+    # Cubism Framework (built from source; OpenGL ES renderer for Android).
+    set(FRAMEWORK_SOURCE OpenGL CACHE STRING "" FORCE)
+    set(FRAMEWORK_DEFINITIOINS CSM_TARGET_ANDROID_ES2 CACHE STRING "" FORCE)
+    add_subdirectory(${LIVE2D_FRAMEWORK} CubismFramework)
+    target_compile_definitions(Framework PUBLIC CSM_TARGET_ANDROID_ES2)
+    target_include_directories(Framework PUBLIC ${LIVE2D_CORE}/include)
+
+    add_library(aimgui_live2d STATIC
+        ${JNI}/src/live2d/live2d_view.cpp
+        ${JNI}/src/live2d/live2d_model.cpp
+        ${JNI}/src/live2d/live2d_texture.cpp)
+    target_include_directories(aimgui_live2d
+        PUBLIC  ${JNI}/src ${JNI}/include
+        PRIVATE ${LIVE2D_CORE}/include ${LIVE2D_FRAMEWORK}/src)
+    target_link_libraries(aimgui_live2d
+        PUBLIC  Framework Live2DCubismCore
+        PRIVATE GLESv3 EGL android log jnigraphics)
+
+    target_compile_definitions(AImGui PRIVATE AIMGUI_LIVE2D)
+    target_link_libraries(AImGui PRIVATE aimgui_live2d)
+    message(STATUS "AImGui: Live2D Cubism support ENABLED")
+endif()

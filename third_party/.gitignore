@@ -1,0 +1,4 @@
+# Live2D Cubism SDK components are proprietary / Live2D-licensed and must NOT
+# be committed here. Drop them in locally per docs/LIVE2D.md.
+/Core/
+/CubismNativeFramework/

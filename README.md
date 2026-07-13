@@ -109,6 +109,13 @@ UI content lives in `jni/src/ui/main_ui.cpp`. Add a new page:
 The window framework (sidebar, dynamic island, resize, shatter exit, ripple)
 lives in `ui.cpp` and shouldn't need touching for normal content changes.
 
+## Live2D (optional)
+
+An optional layer can render a **Live2D Cubism** model behind the UI. It's
+**off by default** and needs the Cubism SDK (which you download yourself —
+Live2D's Core runtime can't be redistributed). Enable with
+`./build.sh -DAIMGUI_LIVE2D=ON`. Full setup in [docs/LIVE2D.md](docs/LIVE2D.md).
+
 ## Known issues & gotchas
 
 A log of traps hit during the CMake migration + on-device testing. Keep these
