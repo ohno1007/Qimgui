@@ -107,24 +107,31 @@ if(AIMGUI_LIVE2D)
     set_target_properties(Live2DCubismCore PROPERTIES
         IMPORTED_LOCATION ${LIVE2D_CORE}/lib/android/${ANDROID_ABI}/libLive2DCubismCore.a)
 
-    # Cubism Framework (built from source; OpenGL ES renderer for Android).
-    set(FRAMEWORK_SOURCE OpenGL CACHE STRING "" FORCE)
-    set(FRAMEWORK_DEFINITIOINS CSM_TARGET_ANDROID_ES2 CACHE STRING "" FORCE)
+    # Cubism Framework (built from source; Vulkan renderer for Android).
+    set(FRAMEWORK_SOURCE Vulkan CACHE STRING "" FORCE)
+    set(FRAMEWORK_DEFINITIOINS "" CACHE STRING "" FORCE)
     add_subdirectory(${LIVE2D_FRAMEWORK} CubismFramework)
-    target_compile_definitions(Framework PUBLIC CSM_TARGET_ANDROID_ES2)
     target_include_directories(Framework PUBLIC ${LIVE2D_CORE}/include)
     # CubismUserModel::GetRenderer() uses dynamic_cast, so RTTI is required for
     # the Framework and our glue (the rest of the project builds -fno-rtti).
     target_compile_options(Framework PRIVATE -frtti)
+    target_link_libraries(Framework PUBLIC vulkan)
 
-    # Embed the Cubism GL shaders (required by the SDK 5 renderer, which loads
-    # them via a file loader) and, if present, the first bundled model — into
-    # the binary via a generated .incbin blob so the app runs standalone.
-    set(_l2d_shaders ${LIVE2D_FRAMEWORK}/src/Rendering/OpenGL/Shaders/Standard)
+    # Compile the Cubism Vulkan GLSL shaders to SPIR-V. The SDK ships a
+    # CMakeLists under Shaders/ that enumerates every (mask × blend-mode)
+    # permutation the renderer loads and compiles them with glslc into
+    # compiledShaders/*.spv (target: FrameworkShaders). Requires glslc on PATH
+    # (the NDK ships it under shader-tools/).
+    add_subdirectory(${LIVE2D_FRAMEWORK}/src/Rendering/Vulkan/Shaders FrameworkShaders)
+    set(_l2d_spv_dir ${CMAKE_BINARY_DIR}/FrameworkShaders/compiledShaders)
+
+    # Embed the compiled SPIR-V (served to the renderer by basename) and, if
+    # present, the first bundled model — into the binary via a generated
+    # .incbin blob so the app runs standalone.
     set(_l2d_gen_s ${CMAKE_BINARY_DIR}/live2d_embedded.S)
     set(_l2d_gen_c ${CMAKE_BINARY_DIR}/live2d_embedded.cpp)
-    set(_l2d_gen_args ${_l2d_gen_s} ${_l2d_gen_c} --shaders ${_l2d_shaders})
-    file(GLOB_RECURSE _l2d_dep_files ${_l2d_shaders}/*)
+    set(_l2d_gen_args ${_l2d_gen_s} ${_l2d_gen_c} --spv ${_l2d_spv_dir})
+    set(_l2d_dep_files ${compiled_shaders_framework})
     file(GLOB _l2d_model3 ${CMAKE_SOURCE_DIR}/live2d/models/*/*.model3.json)
     if(_l2d_model3)
         list(GET _l2d_model3 0 _l2d_m3first)
@@ -132,16 +139,16 @@ if(AIMGUI_LIVE2D)
         list(APPEND _l2d_gen_args --model ${_l2d_model_dir})
         file(GLOB_RECURSE _l2d_model_files ${_l2d_model_dir}/*)
         list(APPEND _l2d_dep_files ${_l2d_model_files})
-        message(STATUS "AImGui: embedding Live2D shaders + model ${_l2d_model_dir}")
+        message(STATUS "AImGui: embedding Live2D SPIR-V + model ${_l2d_model_dir}")
     else()
-        message(STATUS "AImGui: embedding Live2D shaders (no bundled model)")
+        message(STATUS "AImGui: embedding Live2D SPIR-V (no bundled model)")
     endif()
     add_custom_command(
         OUTPUT ${_l2d_gen_s} ${_l2d_gen_c}
         COMMAND ${CMAKE_COMMAND} -E env python3
                 ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py ${_l2d_gen_args}
-        DEPENDS ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py ${_l2d_dep_files}
-        COMMENT "Embedding Live2D shaders + model")
+        DEPENDS ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py FrameworkShaders ${_l2d_dep_files}
+        COMMENT "Embedding Live2D SPIR-V + model")
     enable_language(ASM)
     set(_l2d_embed_srcs ${_l2d_gen_s} ${_l2d_gen_c})
 
@@ -151,17 +158,21 @@ if(AIMGUI_LIVE2D)
         ${JNI}/src/live2d/live2d_texture.cpp
         ${_l2d_embed_srcs})
     target_compile_options(aimgui_live2d PRIVATE -frtti) # GetRenderer<>() dynamic_cast
+    target_compile_definitions(aimgui_live2d PRIVATE AIMGUI_LIVE2D AIMGUI_REAL_VULKAN)
     target_include_directories(aimgui_live2d
         PUBLIC  ${JNI}/src ${JNI}/include
         PRIVATE ${LIVE2D_CORE}/include ${LIVE2D_FRAMEWORK}/src)
     target_link_libraries(aimgui_live2d
         PUBLIC  Framework Live2DCubismCore
-        PRIVATE GLESv3 EGL android log jnigraphics)
+        PRIVATE vulkan android log jnigraphics)
 
     target_compile_definitions(AImGui PRIVATE AIMGUI_LIVE2D)
-    target_link_libraries(AImGui PRIVATE aimgui_live2d)
-    # aimgui_core holds window_session.cpp, which must force the GL backend
-    # (Cubism needs a live GL context) — so it needs the define too.
-    target_compile_definitions(aimgui_core PUBLIC AIMGUI_LIVE2D)
-    message(STATUS "AImGui: Live2D Cubism support ENABLED")
+    target_link_libraries(AImGui PRIVATE aimgui_live2d vulkan)
+    # aimgui_core holds renderer_vk/bloom_vk/window_session, which under Live2D
+    # force the Vulkan backend and link the *real* libvulkan (prototypes on) so
+    # they interoperate with Cubism's Vulkan renderer instead of the dlsym
+    # wrapper. Propagate the mode to everything that links aimgui_core.
+    target_compile_definitions(aimgui_core PUBLIC AIMGUI_LIVE2D AIMGUI_REAL_VULKAN)
+    target_link_libraries(aimgui_core PUBLIC vulkan)
+    message(STATUS "AImGui: Live2D Cubism support ENABLED (Vulkan)")
 endif()

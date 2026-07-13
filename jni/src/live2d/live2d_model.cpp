@@ -10,7 +10,7 @@
 #include <Effect/CubismPose.hpp>
 #include <Motion/CubismMotion.hpp>
 #include <Physics/CubismPhysics.hpp>
-#include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
+#include <Rendering/Vulkan/CubismRenderer_Vulkan.hpp>
 #include <Utils/CubismString.hpp>
 
 #include <android/log.h>
@@ -70,7 +70,9 @@ csmByte* Model::ReadModelFile(const csmString& relpath, csmSizeInt* outSize) {
     return ReadFile(full, outSize);
 }
 
-bool Model::LoadAssets(const char* dir, const char* model3json, int width, int height, bool embedded) {
+bool Model::LoadAssets(const Live2DVkContext& ctx, const char* dir, const char* model3json,
+                       int width, int height, bool embedded) {
+    _ctx = ctx;
     _embedded = embedded;
     _dir = "";
     if (!embedded) { _dir = dir; _dir += "/"; }
@@ -152,31 +154,34 @@ void Model::SetupModel(ICubismModelSetting* setting) {
 }
 
 void Model::SetupTextures() {
-    Rendering::CubismRenderer_OpenGLES2* renderer =
-        GetRenderer<Rendering::CubismRenderer_OpenGLES2>();
+    Rendering::CubismRenderer_Vulkan* renderer =
+        GetRenderer<Rendering::CubismRenderer_Vulkan>();
     if (!renderer || !_setting) return;
 
-    for (csmInt32 i = 0; i < _setting->GetTextureCount(); ++i) {
+    const csmInt32 count = _setting->GetTextureCount();
+    _textures.Resize(static_cast<csmUint32>(count));
+    for (csmInt32 i = 0; i < count; ++i) {
         const csmChar* name = _setting->GetTextureFileName(i);
         if (std::strlen(name) == 0) continue;
-        GLuint tex = 0;
+        bool ok = false;
         if (_embedded) {
             unsigned sz = 0;
             const unsigned char* p = EmbeddedGet(name, &sz);
-            tex = p ? LoadTextureFromMemory(p, sz) : 0;
+            ok = p && LoadTextureVkFromMemory(_ctx, p, sz, _textures[i]);
         } else {
             csmString path(_dir); path += name;
-            tex = LoadTexture(path.GetRawString());
+            ok = LoadTextureVk(_ctx, path.GetRawString(), _textures[i]);
         }
-        _textures.PushBack(tex);
-        renderer->BindTexture(static_cast<csmUint32>(i), tex);
+        if (!ok) { LOGW("texture load failed: %s", name); continue; }
+        // Cubism appends textures in binding order.
+        renderer->BindTexture(_textures[i]);
     }
     renderer->IsPremultipliedAlpha(true);
 }
 
 void Model::ReleaseTextures() {
     for (csmUint32 i = 0; i < _textures.GetSize(); ++i) {
-        if (_textures[i]) { GLuint t = _textures[i]; glDeleteTextures(1, &t); }
+        _textures[i].Destroy(_ctx.device);
     }
     _textures.Clear();
 }
@@ -197,8 +202,8 @@ void Model::Update(float dt) {
 
 void Model::Draw(CubismMatrix44& matrix) {
     if (!_loaded || _model == nullptr) return;
-    Rendering::CubismRenderer_OpenGLES2* renderer =
-        GetRenderer<Rendering::CubismRenderer_OpenGLES2>();
+    Rendering::CubismRenderer_Vulkan* renderer =
+        GetRenderer<Rendering::CubismRenderer_Vulkan>();
     if (!renderer) return;
 
     matrix.MultiplyByMatrix(_modelMatrix);

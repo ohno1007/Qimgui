@@ -1,15 +1,16 @@
 // A single Cubism model built on CubismUserModel, modelled after Live2D's
-// LAppModel sample but trimmed for this project. NOTE: first-draft glue — it is
-// compiled against the user-supplied Cubism SDK and is expected to need
-// on-device iteration (see docs/LIVE2D.md).
+// LAppModel sample but trimmed for this project. Vulkan renderer path.
 #pragma once
 
 #include <CubismFramework.hpp>
 #include <Model/CubismUserModel.hpp>
 #include <ICubismModelSetting.hpp>
-#include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
+#include <Rendering/Vulkan/CubismRenderer_Vulkan.hpp>
+#include <Rendering/Vulkan/CubismClass_Vulkan.hpp>
 #include <Type/csmVector.hpp>
 #include <Math/CubismMatrix44.hpp>
+
+#include "core/live2d_vk_bridge.h"
 
 namespace aimgui {
 namespace live2d {
@@ -24,7 +25,8 @@ public:
     // Load a model and all referenced assets. When embedded==true, files are
     // read from the binary (see live2d_embedded.h) and `dir` is ignored;
     // otherwise from <dir>/<...>. width/height size the clipping-mask target.
-    bool LoadAssets(const char* dir, const char* model3json, int width, int height, bool embedded);
+    bool LoadAssets(const Live2DVkContext& ctx, const char* dir,
+                    const char* model3json, int width, int height, bool embedded);
 
     // Advance motion / expression / physics / breath / blink by dt seconds.
     void Update(float dt);
@@ -44,12 +46,13 @@ private:
     // blob or from disk. Caller frees with CSM_FREE.
     Csm::csmByte* ReadModelFile(const Csm::csmString& relpath, Csm::csmSizeInt* outSize);
 
+    Live2DVkContext _ctx{};
     Csm::ICubismModelSetting* _setting = nullptr;
     Csm::csmString _dir;
     bool _embedded = false;
     Csm::csmVector<Csm::CubismIdHandle> _eyeBlinkIds;
     Csm::csmVector<Csm::CubismIdHandle> _lipSyncIds;
-    Csm::csmVector<unsigned int> _textures; // GL texture ids
+    Csm::csmVector<Csm::CubismImageVulkan> _textures;
     bool _loaded = false;
 };
 

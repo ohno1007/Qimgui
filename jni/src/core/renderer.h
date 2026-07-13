@@ -3,6 +3,10 @@
 #include <android/native_window.h>
 #include <memory>
 
+#ifdef AIMGUI_LIVE2D
+#include "live2d_vk_bridge.h"
+#endif
+
 namespace aimgui {
 
 class IRenderer {
@@ -33,6 +37,12 @@ public:
     // before the ImGui draw data — used to draw a background layer (Live2D)
     // that the UI then composites on top of. Default: no-op.
     virtual void SetScenePreDraw(void (*fn)()) { (void)fn; }
+
+#ifdef AIMGUI_LIVE2D
+    // Vulkan objects the Live2D Cubism renderer needs, or nullptr if this
+    // backend can't host Live2D (e.g. the GL renderer). Valid after Init().
+    virtual const Live2DVkContext* GetLive2DVkContext() { return nullptr; }
+#endif
 };
 
 enum class Backend { Auto, Vulkan, OpenGL };

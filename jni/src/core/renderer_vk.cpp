@@ -3,6 +3,10 @@
 #include "bloom_vk.h"
 #include "vulkan_wrapper.h"
 #include <vulkan/vulkan_android.h>
+#ifdef AIMGUI_LIVE2D
+#include "live2d_vk_bridge.h"
+#include <cstring>
+#endif
 
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
@@ -51,6 +55,13 @@ public:
         if (!CreateLogicalDevice()) return false;
         if (!CreateDescriptorPool()) return false;
         if (!CreateSurfaceAndSwapchain()) return false;
+#ifdef AIMGUI_LIVE2D
+        // Command pool + offscreen image the Cubism renderer draws the model
+        // into, plus the context struct handed to the Live2D layer.
+        if (!CreateLive2DResources()) {
+            LOGE("Live2D VK resources failed");
+        }
+#endif
 
         // Try to set up the bloom pipeline. If it fails for any reason the
         // renderer falls back to direct-to-swapchain ImGui rendering.
@@ -59,6 +70,11 @@ public:
             if (!m_Bloom.BindToSwapchainRenderPass(m_WD->RenderPass)) {
                 m_Bloom.Shutdown();
             }
+#ifdef AIMGUI_LIVE2D
+            else {
+                m_Bloom.SetModelBackground(m_ModelView);
+            }
+#endif
         }
 
         SetupImGuiBackend();
@@ -89,6 +105,9 @@ public:
     void Shutdown() override {
         if (m_Device == VK_NULL_HANDLE) return;
         vkDeviceWaitIdle(m_Device);
+#ifdef AIMGUI_LIVE2D
+        DestroyLive2DResources();
+#endif
         m_Bloom.Shutdown();
         ImGui_ImplVulkan_Shutdown();
         if (m_WD) {
@@ -113,13 +132,27 @@ public:
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
 
+    void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
+
+#ifdef AIMGUI_LIVE2D
+    const Live2DVkContext* GetLive2DVkContext() override {
+        return m_ModelImage != VK_NULL_HANDLE ? &m_L2DCtx : nullptr;
+    }
+#endif
+
 private:
     bool CreateInstance() {
         const char* exts[] = { "VK_KHR_surface", "VK_KHR_android_surface" };
         VkApplicationInfo ai{};
         ai.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         ai.pApplicationName = "AImGui";
+#ifdef AIMGUI_LIVE2D
+        // Cubism's Vulkan renderer uses dynamic rendering + synchronization2 +
+        // extended dynamic state, all core in Vulkan 1.3.
+        ai.apiVersion = VK_MAKE_VERSION(1, 3, 0);
+#else
         ai.apiVersion = VK_MAKE_VERSION(1, 1, 0);
+#endif
 
         VkInstanceCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -157,7 +190,6 @@ private:
         }
         if (m_QueueFamily == UINT32_MAX) return false;
 
-        const char* dext[] = { "VK_KHR_swapchain" };
         const float priority = 1.0f;
         VkDeviceQueueCreateInfo qci{};
         qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -169,8 +201,41 @@ private:
         dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         dci.queueCreateInfoCount = 1;
         dci.pQueueCreateInfos = &qci;
+
+#ifdef AIMGUI_LIVE2D
+        // Cubism's Vulkan renderer records vkCmdBeginRendering (dynamic
+        // rendering) and vkCmdSetCullModeEXT (extended dynamic state), and its
+        // texture sampler enables anisotropy. Enable the matching device
+        // extensions + features. All are core in 1.3 but the renderer resolves
+        // the *EXT alias, so the extension must be enabled too.
+        const char* dext[] = {
+            "VK_KHR_swapchain",
+            "VK_KHR_dynamic_rendering",
+            "VK_EXT_extended_dynamic_state",
+        };
+        dci.enabledExtensionCount = 3;
+        dci.ppEnabledExtensionNames = dext;
+
+        VkPhysicalDeviceExtendedDynamicStateFeaturesEXT eds{};
+        eds.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+        eds.extendedDynamicState = VK_TRUE;
+
+        VkPhysicalDeviceVulkan13Features v13{};
+        v13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        v13.synchronization2 = VK_TRUE;
+        v13.dynamicRendering = VK_TRUE;
+        v13.pNext = &eds;
+
+        VkPhysicalDeviceFeatures2 feats2{};
+        feats2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        feats2.features.samplerAnisotropy = VK_TRUE;
+        feats2.pNext = &v13;
+        dci.pNext = &feats2;
+#else
+        const char* dext[] = { "VK_KHR_swapchain" };
         dci.enabledExtensionCount = 1;
         dci.ppEnabledExtensionNames = dext;
+#endif
         if (vkCreateDevice(m_PhysicalDevice, &dci, nullptr, &m_Device) != VK_SUCCESS) return false;
         vkGetDeviceQueue(m_Device, m_QueueFamily, 0, &m_Queue);
         return true;
@@ -267,8 +332,12 @@ private:
                                  m_WD->SurfaceFormat.format, m_Width, m_Height)) {
                     if (!m_Bloom.BindToSwapchainRenderPass(m_WD->RenderPass))
                         m_Bloom.Shutdown();
-                    else
+                    else {
                         m_Bloom.RegisterImGuiSnapshot();
+#ifdef AIMGUI_LIVE2D
+                        m_Bloom.SetModelBackground(m_ModelView);
+#endif
+                    }
                 }
             }
         }
@@ -277,6 +346,15 @@ private:
 
     void Submit(ImDrawData* draw) {
         VkResult err;
+#ifdef AIMGUI_LIVE2D
+        // Render the Live2D model into its offscreen image first. The Cubism
+        // renderer self-submits to the graphics queue and waits idle, so this
+        // must run before we begin recording this frame's command buffer. When
+        // it returns the model image is in SHADER_READ_ONLY_OPTIMAL.
+        bool haveModel = (m_ScenePreDraw != nullptr) && m_Bloom.Ready();
+        if (m_ScenePreDraw) m_ScenePreDraw();
+        m_Bloom.SetCompositeOverDest(haveModel);
+#endif
         VkSemaphore acq = m_WD->FrameSemaphores[m_WD->SemaphoreIndex].ImageAcquiredSemaphore;
         VkSemaphore done = m_WD->FrameSemaphores[m_WD->SemaphoreIndex].RenderCompleteSemaphore;
         err = vkAcquireNextImageKHR(m_Device, m_WD->Swapchain, UINT64_MAX, acq, VK_NULL_HANDLE, &m_WD->FrameIndex);
@@ -309,6 +387,12 @@ private:
             rpi.clearValueCount = 1;
             rpi.pClearValues = &m_WD->ClearValue;
             vkCmdBeginRenderPass(fd->CommandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+#ifdef AIMGUI_LIVE2D
+            // Draw the (un-bloomed) model as the backdrop, then blend UI+bloom
+            // over it. RecordCompositeDraw picks the alpha-blended pipeline
+            // because SetCompositeOverDest(true) was set above.
+            if (haveModel) m_Bloom.RecordModelBackground(fd->CommandBuffer);
+#endif
             m_Bloom.RecordCompositeDraw(fd->CommandBuffer);
             vkCmdEndRenderPass(fd->CommandBuffer);
 
@@ -355,6 +439,162 @@ private:
         m_WD->SemaphoreIndex = (m_WD->SemaphoreIndex + 1) % m_WD->SemaphoreCount;
     }
 
+#ifdef AIMGUI_LIVE2D
+    VkFormat SelectDepthFormat() {
+        const VkFormat cands[] = {
+            VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM,
+        };
+        for (VkFormat f : cands) {
+            VkFormatProperties p;
+            vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, f, &p);
+            if (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+                return f;
+        }
+        return VK_FORMAT_D32_SFLOAT;
+    }
+
+    uint32_t FindMemType(uint32_t typeBits, VkMemoryPropertyFlags props) {
+        VkPhysicalDeviceMemoryProperties mp;
+        vkGetPhysicalDeviceMemoryProperties(m_PhysicalDevice, &mp);
+        for (uint32_t i = 0; i < mp.memoryTypeCount; ++i)
+            if ((typeBits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & props) == props)
+                return i;
+        return UINT32_MAX;
+    }
+
+    bool CreateLive2DResources() {
+        // Dedicated command pool for Cubism (RESET flag: it re-records its
+        // persistent update/draw command buffers every frame).
+        VkCommandPoolCreateInfo pci{};
+        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pci.queueFamilyIndex = m_QueueFamily;
+        if (vkCreateCommandPool(m_Device, &pci, nullptr, &m_L2DPool) != VK_SUCCESS) return false;
+
+        m_DepthFormat = SelectDepthFormat();
+
+        // Offscreen colour image the model is rendered into, then sampled as
+        // the UI backdrop. Same size as the (square) surface.
+        VkFormat fmt = m_WD->SurfaceFormat.format;
+        VkImageCreateInfo ic{};
+        ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ic.imageType = VK_IMAGE_TYPE_2D;
+        ic.format = fmt;
+        ic.extent = { (uint32_t)m_Width, (uint32_t)m_Height, 1 };
+        ic.mipLevels = 1;
+        ic.arrayLayers = 1;
+        ic.samples = VK_SAMPLE_COUNT_1_BIT;
+        ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(m_Device, &ic, nullptr, &m_ModelImage) != VK_SUCCESS) return false;
+
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(m_Device, m_ModelImage, &mr);
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (mai.memoryTypeIndex == UINT32_MAX ||
+            vkAllocateMemory(m_Device, &mai, nullptr, &m_ModelMem) != VK_SUCCESS) return false;
+        vkBindImageMemory(m_Device, m_ModelImage, m_ModelMem, 0);
+
+        VkImageViewCreateInfo vci{};
+        vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vci.image = m_ModelImage;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format = fmt;
+        vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        if (vkCreateImageView(m_Device, &vci, nullptr, &m_ModelView) != VK_SUCCESS) return false;
+
+        // Clear it to transparent and leave it SHADER_READ_ONLY so it is
+        // sampleable even before the first model draw (or if none loads).
+        ClearModelImageToTransparent();
+        FillLive2DContext();
+        return true;
+    }
+
+    void ClearModelImageToTransparent() {
+        VkCommandBufferAllocateInfo cai{};
+        cai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cai.commandPool = m_L2DPool;
+        cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cai.commandBufferCount = 1;
+        VkCommandBuffer cb;
+        if (vkAllocateCommandBuffers(m_Device, &cai, &cb) != VK_SUCCESS) return;
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cb, &bi);
+
+        auto barrier = [&](VkImageLayout oldL, VkImageLayout newL,
+                           VkAccessFlags src, VkAccessFlags dst,
+                           VkPipelineStageFlags srcS, VkPipelineStageFlags dstS) {
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = oldL; b.newLayout = newL;
+            b.srcAccessMask = src; b.dstAccessMask = dst;
+            b.image = m_ModelImage;
+            b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            vkCmdPipelineBarrier(cb, srcS, dstS, 0, 0, nullptr, 0, nullptr, 1, &b);
+        };
+        barrier(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkClearColorValue col{}; col.float32[0] = col.float32[1] = col.float32[2] = col.float32[3] = 0.0f;
+        VkImageSubresourceRange rng{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cb, m_ModelImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &col, 1, &rng);
+        barrier(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+        vkEndCommandBuffer(cb);
+        VkSubmitInfo si{};
+        si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cb;
+        vkQueueSubmit(m_Queue, 1, &si, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_Queue);
+        vkFreeCommandBuffers(m_Device, m_L2DPool, 1, &cb);
+    }
+
+    void FillLive2DContext() {
+        m_L2DCtx.instance       = m_Instance;
+        m_L2DCtx.physicalDevice = m_PhysicalDevice;
+        m_L2DCtx.device         = m_Device;
+        m_L2DCtx.queue          = m_Queue;
+        m_L2DCtx.queueFamily    = m_QueueFamily;
+        m_L2DCtx.commandPool    = m_L2DPool;
+        m_L2DCtx.imageCount     = (uint32_t)m_WD->ImageCount;
+        m_L2DCtx.extent         = { (uint32_t)m_Width, (uint32_t)m_Height };
+        m_L2DCtx.colorFormat    = m_WD->SurfaceFormat.format;
+        m_L2DCtx.depthFormat    = m_DepthFormat;
+        m_L2DCtx.modelImage     = m_ModelImage;
+        m_L2DCtx.modelView      = m_ModelView;
+    }
+
+    void DestroyLive2DResources() {
+        if (m_ModelView)  vkDestroyImageView(m_Device, m_ModelView, nullptr);
+        if (m_ModelImage) vkDestroyImage(m_Device, m_ModelImage, nullptr);
+        if (m_ModelMem)   vkFreeMemory(m_Device, m_ModelMem, nullptr);
+        if (m_L2DPool)    vkDestroyCommandPool(m_Device, m_L2DPool, nullptr);
+        m_ModelView = VK_NULL_HANDLE;
+        m_ModelImage = VK_NULL_HANDLE;
+        m_ModelMem = VK_NULL_HANDLE;
+        m_L2DPool = VK_NULL_HANDLE;
+    }
+
+    VkCommandPool  m_L2DPool    = VK_NULL_HANDLE;
+    VkImage        m_ModelImage = VK_NULL_HANDLE;
+    VkImageView    m_ModelView  = VK_NULL_HANDLE;
+    VkDeviceMemory m_ModelMem   = VK_NULL_HANDLE;
+    VkFormat       m_DepthFormat = VK_FORMAT_UNDEFINED;
+    Live2DVkContext m_L2DCtx;
+#endif
+
     ANativeWindow* m_Window = nullptr;
     VkInstance m_Instance = VK_NULL_HANDLE;
     VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
@@ -368,6 +608,7 @@ private:
     int m_MinImageCount = 2;
     bool m_SwapChainRebuild = false;
     BloomVK m_Bloom;
+    void (*m_ScenePreDraw)() = nullptr;
 };
 
 } // namespace

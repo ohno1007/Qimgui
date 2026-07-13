@@ -143,7 +143,8 @@ VkShaderModule CreateShaderModule(VkDevice device, const uint32_t* code, size_t 
 }
 
 bool CreateFullscreenPipeline(VkDevice device, VkRenderPass rp, VkPipelineLayout layout,
-                              VkShaderModule vs, VkShaderModule fs, VkPipeline* out) {
+                              VkShaderModule vs, VkShaderModule fs, VkPipeline* out,
+                              bool blend = false) {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -183,6 +184,18 @@ bool CreateFullscreenPipeline(VkDevice device, VkRenderPass rp, VkPipelineLayout
     VkPipelineColorBlendAttachmentState cba{};
     cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    if (blend) {
+        // Straight-alpha "over": RGB over dest, alpha = src + dst*(1-src).
+        // Mirrors the GL composite-over path so UI+bloom sits on top of the
+        // Live2D model already in the framebuffer.
+        cba.blendEnable = VK_TRUE;
+        cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.colorBlendOp = VK_BLEND_OP_ADD;
+        cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     VkPipelineColorBlendStateCreateInfo cb{};
     cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     cb.attachmentCount = 1;
@@ -357,7 +370,8 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("alloc DS"); Shutdown(); return false;
     }
     dai.pSetLayouts = &m_DSL2;
-    if (vkAllocateDescriptorSets(device, &dai, &m_DSComp) != VK_SUCCESS) {
+    if (vkAllocateDescriptorSets(device, &dai, &m_DSComp) != VK_SUCCESS ||
+        vkAllocateDescriptorSets(device, &dai, &m_DSModelBg) != VK_SUCCESS) {
         LOGE("alloc DS comp"); Shutdown(); return false;
     }
 
@@ -388,10 +402,40 @@ bool BloomVK::BindToSwapchainRenderPass(VkRenderPass swapchainRP) {
         vkDestroyPipeline(m_Device, m_PipeComp, nullptr);
         m_PipeComp = VK_NULL_HANDLE;
     }
+    if (m_PipeCompOver) {
+        vkDestroyPipeline(m_Device, m_PipeCompOver, nullptr);
+        m_PipeCompOver = VK_NULL_HANDLE;
+    }
     if (!CreateFullscreenPipeline(m_Device, swapchainRP, m_PLB, m_VS, m_FSComp, &m_PipeComp)) {
         LOGE("composite pipeline"); return false;
     }
+    // Alpha-blended variant used when a Live2D model backdrop is present.
+    if (!CreateFullscreenPipeline(m_Device, swapchainRP, m_PLB, m_VS, m_FSComp,
+                                  &m_PipeCompOver, /*blend=*/true)) {
+        LOGE("composite-over pipeline"); return false;
+    }
     return true;
+}
+
+void BloomVK::SetModelBackground(VkImageView modelView) {
+    if (!m_Ready || m_DSModelBg == VK_NULL_HANDLE) return;
+    if (modelView == VK_NULL_HANDLE) return;
+    // The composite shader samples two bindings (scene, bloom); for the plain
+    // backdrop we bind the model image to both and draw with intensity 0, so
+    // the output is just the model colour with its own alpha.
+    WriteSampledImage(m_Device, m_DSModelBg, 0, modelView, m_Sampler);
+    WriteSampledImage(m_Device, m_DSModelBg, 1, modelView, m_Sampler);
+}
+
+void BloomVK::RecordModelBackground(VkCommandBuffer cmd) {
+    if (!m_Ready || m_PipeComp == VK_NULL_HANDLE || m_DSModelBg == VK_NULL_HANDLE) return;
+    SetFullViewport(cmd, m_W, m_H);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipeComp); // opaque write
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PLB, 0, 1, &m_DSModelBg, 0, nullptr);
+    PushConsts pc{};
+    pc.intensity = 0.0f; // no bloom contribution — pure model colour
+    vkCmdPushConstants(cmd, m_PLB, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
 void BloomVK::BeginScene(VkCommandBuffer cmd) {
@@ -448,9 +492,10 @@ void BloomVK::EndSceneAndBlur(VkCommandBuffer cmd) {
 }
 
 void BloomVK::RecordCompositeDraw(VkCommandBuffer cmd) {
-    if (!m_Ready || m_PipeComp == VK_NULL_HANDLE) return;
+    VkPipeline pipe = m_OverDest ? m_PipeCompOver : m_PipeComp;
+    if (!m_Ready || pipe == VK_NULL_HANDLE) return;
     SetFullViewport(cmd, m_W, m_H);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipeComp);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PLB, 0, 1, &m_DSComp, 0, nullptr);
     PushConsts pc{};
     pc.intensity = m_Intensity;
@@ -524,15 +569,16 @@ void BloomVK::Shutdown() {
     // Return descriptor sets to the pool so RebuildSwapchain doesn't slowly
     // exhaust it. The pool was created with FREE_DESCRIPTOR_SET_BIT in
     // renderer_vk.cpp.
-    VkDescriptorSet sets[4]{ m_DSThresh, m_DSBlurH, m_DSBlurV, m_DSComp };
+    VkDescriptorSet sets[5]{ m_DSThresh, m_DSBlurH, m_DSBlurV, m_DSComp, m_DSModelBg };
     uint32_t n = 0;
     for (auto s : sets) if (s != VK_NULL_HANDLE) sets[n++] = s;
     if (n > 0 && m_Pool != VK_NULL_HANDLE)
         vkFreeDescriptorSets(m_Device, m_Pool, n, sets);
 
-    if (m_PipeThresh)  vkDestroyPipeline(m_Device, m_PipeThresh, nullptr);
-    if (m_PipeBlur)    vkDestroyPipeline(m_Device, m_PipeBlur,   nullptr);
-    if (m_PipeComp)    vkDestroyPipeline(m_Device, m_PipeComp,   nullptr);
+    if (m_PipeThresh)   vkDestroyPipeline(m_Device, m_PipeThresh, nullptr);
+    if (m_PipeBlur)     vkDestroyPipeline(m_Device, m_PipeBlur,   nullptr);
+    if (m_PipeComp)     vkDestroyPipeline(m_Device, m_PipeComp,   nullptr);
+    if (m_PipeCompOver) vkDestroyPipeline(m_Device, m_PipeCompOver, nullptr);
     if (m_VS)          vkDestroyShaderModule(m_Device, m_VS, nullptr);
     if (m_FSThresh)    vkDestroyShaderModule(m_Device, m_FSThresh, nullptr);
     if (m_FSBlur)      vkDestroyShaderModule(m_Device, m_FSBlur, nullptr);

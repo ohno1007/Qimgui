@@ -3,11 +3,13 @@
 # assets into the binary. Two sources:
 #   --shaders <dir>  : Cubism GL shader files, keyed by BASENAME (the renderer
 #                      requests them by name, sometimes with a dir prefix).
+#   --spv     <dir>  : compiled Vulkan SPIR-V (*.spv), keyed by BASENAME (the
+#                      renderer requests "FrameworkShaders/<name>.spv").
 #   --model   <dir>  : a model directory, keyed by path RELATIVE to it (exactly
 #                      the names model3.json references).
 # moc3 etc. are 64-byte aligned (Cubism Core requires it for csmReviveMocInPlace).
 #
-# Usage: embed_live2d_model.py <out.S> <out.cpp> --shaders <dir> [--model <dir>]
+# Usage: embed_live2d_model.py <out.S> <out.cpp> [--shaders <dir>] [--spv <dir>] [--model <dir>]
 import os, sys
 
 def collect(root, key_mode):
@@ -27,14 +29,16 @@ def collect(root, key_mode):
 
 def main():
     out_s, out_cpp = sys.argv[1], sys.argv[2]
-    shaders_dir = model_dir = None
+    shaders_dir = spv_dir = model_dir = None
     i = 3
     while i < len(sys.argv):
         if sys.argv[i] == "--shaders": shaders_dir = sys.argv[i+1]; i += 2
+        elif sys.argv[i] == "--spv": spv_dir = sys.argv[i+1]; i += 2
         elif sys.argv[i] == "--model": model_dir = sys.argv[i+1]; i += 2
         else: i += 1
 
-    files = collect(shaders_dir, "basename") + collect(model_dir, "relpath")
+    files = (collect(shaders_dir, "basename") + collect(spv_dir, "basename")
+             + collect(model_dir, "relpath"))
     # de-dup keys (first wins), keep order
     seen, uniq = set(), []
     for key, ab in files:

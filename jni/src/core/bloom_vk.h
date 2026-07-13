@@ -46,6 +46,17 @@ public:
     void SetIntensity(float i) { m_Intensity = i; }
     void SetSnapshotFrozen(bool frozen) { m_SnapshotFrozen = frozen; }
 
+    // Live2D compositing. When a model background is set, the composite pass
+    // blends the UI+bloom "over" it (straight alpha) instead of overwriting,
+    // and RecordModelBackground draws the model image first as the backdrop.
+    void SetCompositeOverDest(bool over) { m_OverDest = over; }
+    // Register the Live2D model's rendered image (SHADER_READ_ONLY) as the
+    // background layer. Pass VK_NULL_HANDLE to clear.
+    void SetModelBackground(VkImageView modelView);
+    // Draw the model image full-screen as an opaque backdrop. Call inside the
+    // swapchain render pass, before RecordCompositeDraw.
+    void RecordModelBackground(VkCommandBuffer cmd);
+
     VkRenderPass GetSceneRenderPass() const { return m_SceneRP; }
 
     // Records the bloom composite pipeline. Caller must have an active
@@ -79,6 +90,7 @@ private:
     uint32_t         m_BW = 0, m_BH = 0;
     float            m_Intensity      = 0.75f;
     bool             m_SnapshotFrozen = false;
+    bool             m_OverDest       = false;
 
     VkRenderPass     m_SceneRP = VK_NULL_HANDLE;
     VkRenderPass     m_BlurRP  = VK_NULL_HANDLE;
@@ -117,11 +129,13 @@ private:
     VkPipeline               m_PipeThresh       = VK_NULL_HANDLE;
     VkPipeline               m_PipeBlur         = VK_NULL_HANDLE;
     VkPipeline               m_PipeComp         = VK_NULL_HANDLE;
+    VkPipeline               m_PipeCompOver     = VK_NULL_HANDLE; // alpha-blended composite
 
     VkDescriptorSet          m_DSThresh         = VK_NULL_HANDLE;
     VkDescriptorSet          m_DSBlurH          = VK_NULL_HANDLE;
     VkDescriptorSet          m_DSBlurV          = VK_NULL_HANDLE;
     VkDescriptorSet          m_DSComp           = VK_NULL_HANDLE;
+    VkDescriptorSet          m_DSModelBg        = VK_NULL_HANDLE; // model image (DSL2)
 };
 
 } // namespace aimgui

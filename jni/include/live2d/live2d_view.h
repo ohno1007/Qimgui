@@ -4,11 +4,19 @@
 // behind #ifdef AIMGUI_LIVE2D.
 #pragma once
 
+#ifdef AIMGUI_LIVE2D
+#include "core/live2d_vk_bridge.h"
+#endif
+
 namespace aimgui {
 namespace live2d {
 
-// Boot the Cubism Framework (once). Returns false if startup fails.
-bool Init();
+#ifdef AIMGUI_LIVE2D
+// Boot the Cubism Framework and its Vulkan renderer against the objects owned
+// by the Vulkan backend (device, queue, offscreen model image, …). Call once
+// before loading a model. Returns false on failure.
+bool VkInit(const Live2DVkContext* ctx);
+#endif
 
 // Load a model from <dir>/<model3json> (e.g. "/data/local/tmp/live2d/Hiyori",
 // "Hiyori.model3.json"). Replaces any currently-loaded model.
@@ -32,8 +40,9 @@ void Resize(int width, int height);
 // Advance motion / physics / breathing by dt seconds.
 void Update(float dt);
 
-// Draw the model into the currently-bound GL framebuffer. Call between the
-// GL renderer's NewFrame() and ImGui's draw so the UI overlays on top.
+// Render the model into the Vulkan backend's offscreen model image (the
+// Cubism renderer self-submits). Invoked via the renderer's scene-predraw
+// hook, before the UI is composited over the result.
 void Draw();
 
 void Shutdown();

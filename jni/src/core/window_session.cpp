@@ -9,8 +9,9 @@ bool WindowSession::Build(int side, bool permeate_record) {
                                                      permeate_record);
     if (!m_Window) return false;
 #ifdef AIMGUI_LIVE2D
-    // Cubism ships an OpenGL ES renderer; force GL so Live2D shares the context.
-    m_Renderer = MakeRenderer(m_Window, side, side, Backend::OpenGL);
+    // Live2D is built on Cubism's Vulkan renderer; force the Vulkan backend so
+    // it shares this renderer's device, queue and swapchain.
+    m_Renderer = MakeRenderer(m_Window, side, side, Backend::Vulkan);
 #else
     m_Renderer = MakeRenderer(m_Window, side, side, Backend::Auto);
 #endif

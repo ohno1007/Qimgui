@@ -50,15 +50,17 @@ int main() {
     aimgui::kbd_input::Init();
 
 #ifdef AIMGUI_LIVE2D
-    // Optional Live2D layer. Model assets are pushed to the device under
-    // /data/local/tmp/live2d/<Model>/ (see docs/LIVE2D.md). Non-fatal if absent.
-    if (aimgui::live2d::Init()) {
-        aimgui::live2d::Resize(info.width, info.height);  // size masks before load
-        // Prefer the model baked into the binary; fall back to /data/local/tmp.
-        if (!aimgui::live2d::LoadEmbedded())
-            aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+    // Optional Live2D layer, built on Cubism's Vulkan renderer sharing this
+    // renderer's device/queue. Non-fatal if the backend or model is absent.
+    if (const aimgui::Live2DVkContext* l2dctx = ws.renderer()->GetLive2DVkContext()) {
+        if (aimgui::live2d::VkInit(l2dctx)) {
+            aimgui::live2d::Resize(info.width, info.height);  // size masks before load
+            // Prefer the model baked into the binary; fall back to /data/local/tmp.
+            if (!aimgui::live2d::LoadEmbedded())
+                aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+        }
+        ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
     }
-    ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
 #endif
 
     aimgui::FramePacer pacer;
@@ -102,11 +104,24 @@ int main() {
         if (st.request_permeate_toggle) {
             st.request_permeate_toggle = false;
             st.permeate_record = !st.permeate_record;
+#ifdef AIMGUI_LIVE2D
+            // The renderer (and its Vulkan device) is torn down and rebuilt, so
+            // the Cubism renderer bound to the old device must be released and
+            // re-initialised against the new one.
+            aimgui::live2d::Shutdown();
+#endif
             ws.Destroy();
             if (!ws.Build(W, st.permeate_record)) { running = false; break; }
             st.renderer_name = ws.renderer()->Name();
 #ifdef AIMGUI_LIVE2D
-            ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
+            if (const aimgui::Live2DVkContext* l2dctx = ws.renderer()->GetLive2DVkContext()) {
+                if (aimgui::live2d::VkInit(l2dctx)) {
+                    aimgui::live2d::Resize(info.width, info.height);
+                    if (!aimgui::live2d::LoadEmbedded())
+                        aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+                }
+                ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
+            }
 #endif
         }
     }

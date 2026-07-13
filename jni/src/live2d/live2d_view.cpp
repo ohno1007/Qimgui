@@ -4,10 +4,9 @@
 #include "live2d/live2d_embedded.h"
 
 #include <CubismFramework.hpp>
-#include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
+#include <Rendering/Vulkan/CubismRenderer_Vulkan.hpp>
 #include <Math/CubismMatrix44.hpp>
 
-#include <GLES3/gl3.h>
 #include <android/log.h>
 #include <dirent.h>
 #include <cstdarg>
@@ -38,71 +37,60 @@ Allocator      g_allocator;
 CubismFramework::Option g_option;
 Model*         g_model = nullptr;
 bool           g_started = false;
+Live2DVkContext g_ctx{};
 int            g_width = 1;
 int            g_height = 1;
-
-// Cubism SDK 5's GL renderer loads its shaders through this file loader. We
-// serve them from the embedded blob, matching by basename (the renderer may
-// request "FrameworkShaders/xxx.frag" or just "xxx.frag").
-bool EndsWith(const std::string& s, const char* suf) {
-    size_t n = std::strlen(suf);
-    return s.size() >= n && s.compare(s.size() - n, n, suf) == 0;
-}
-
-csmByte* FileLoader(const std::string filePath, csmSizeInt* outSize) {
-    std::string base = filePath;
-    size_t slash = base.find_last_of("/\\");
-    if (slash != std::string::npos) base = base.substr(slash + 1);
-    unsigned sz = 0;
-    const unsigned char* p = EmbeddedGet(base.c_str(), &sz);
-    if (!p) { L2DDiag("fileloader MISS: %s", filePath.c_str()); if (outSize) *outSize = 0; return nullptr; }
-
-    std::string data(reinterpret_cast<const char*>(p), sz);
-    // Cubism's Standard shaders declare desktop GLSL "#version 120"; the syntax
-    // (attribute/varying/texture2D/gl_FragColor) is identical to GLSL ES 1.00,
-    // so rewrite the version and add the fragment precision ES requires.
-    const bool isFrag = EndsWith(base, ".frag");
-    if (isFrag || EndsWith(base, ".vert")) {
-        size_t v = data.find("#version 120");
-        if (v != std::string::npos) {
-            std::string repl = isFrag ? "#version 100\nprecision mediump float;"
-                                      : "#version 100";
-            data.replace(v, 12, repl);
-        }
-    }
-
-    csmSizeInt n = static_cast<csmSizeInt>(data.size());
-    csmByte* buf = static_cast<csmByte*>(std::malloc(n));
-    if (buf) { std::memcpy(buf, data.data(), n); if (outSize) *outSize = n; }
-    return buf;
-}
-void BytesReleaser(csmByte* b) { std::free(b); }
 } // namespace
 
-bool Init() {
+// Serve embedded assets (the Cubism Vulkan renderer's compiled SPIR-V shaders)
+// by basename. The renderer requests paths like "FrameworkShaders/xxx.spv";
+// the SDK's CreateShaderModule is patched to call this instead of std::ifstream
+// (see the transient build patch). Returns nullptr if not embedded.
+extern "C" const unsigned char* aimgui_l2d_load_asset(const char* path, unsigned* outSize) {
+    const char* base = path;
+    if (const char* slash = std::strrchr(path, '/')) base = slash + 1;
+    unsigned sz = 0;
+    const unsigned char* p = EmbeddedGet(base, &sz);
+    if (!p) { L2DDiag("asset MISS: %s", path); if (outSize) *outSize = 0; return nullptr; }
+    if (outSize) *outSize = sz;
+    return p;
+}
+
+bool VkInit(const Live2DVkContext* ctx) {
+    if (!ctx || ctx->device == VK_NULL_HANDLE) return false;
     if (g_started) return true;
+    g_ctx = *ctx;
     { FILE* f = std::fopen("/data/local/tmp/aimgui_live2d.txt", "w"); if (f) std::fclose(f); }
     g_option.LogFunction = [](const char* msg) {
         __android_log_print(ANDROID_LOG_INFO, "AImGui_Cubism", "%s", msg);
         L2DDiag("cubism: %s", msg);
     };
     g_option.LoggingLevel = CubismFramework::Option::LogLevel_Verbose;
-    g_option.LoadFileFunction = &FileLoader;       // serve embedded GL shaders
-    g_option.ReleaseBytesFunction = &BytesReleaser;
 
     CubismFramework::StartUp(&g_allocator, &g_option);
     CubismFramework::Initialize();
+
+    // One-time renderer configuration, before any model is created.
+    Rendering::CubismRenderer_Vulkan::SetConstantSettings(
+        g_ctx.device, g_ctx.physicalDevice, g_ctx.commandPool, g_ctx.queue,
+        g_ctx.imageCount, g_ctx.extent, g_ctx.modelView, g_ctx.colorFormat,
+        g_ctx.depthFormat);
+    // We render the model into an offscreen image that the UI composites over.
+    Rendering::CubismRenderer_Vulkan::EnableChangeRenderTarget();
+
     g_started = true;
-    LOGI("cubism framework started");
-    L2DDiag("init: framework started");
+    LOGI("cubism framework started (vulkan)");
+    L2DDiag("init: framework started (vulkan) extent=%ux%u fmt=%d depth=%d imgs=%u",
+            g_ctx.extent.width, g_ctx.extent.height, (int)g_ctx.colorFormat,
+            (int)g_ctx.depthFormat, g_ctx.imageCount);
     return true;
 }
 
 bool LoadModel(const char* dir, const char* model3json) {
-    if (!g_started && !Init()) return false;
+    if (!g_started) return false;
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(dir, model3json, g_width, g_height, /*embedded=*/false)) {
+    if (!g_model->LoadAssets(g_ctx, dir, model3json, g_width, g_height, /*embedded=*/false)) {
         delete g_model;
         g_model = nullptr;
         return false;
@@ -111,13 +99,13 @@ bool LoadModel(const char* dir, const char* model3json) {
 }
 
 bool LoadEmbedded() {
-    if (!g_started && !Init()) return false;
+    if (!g_started) return false;
     const char* m3 = EmbeddedFindModel3();
     L2DDiag("embedded model3 = %s (surface %dx%d)", m3 ? m3 : "<none>", g_width, g_height);
     if (!m3) return false;  // no model compiled in — fall back to disk
     delete g_model;
     g_model = new Model();
-    bool ok = g_model->LoadAssets(nullptr, m3, g_width, g_height, /*embedded=*/true);
+    bool ok = g_model->LoadAssets(g_ctx, nullptr, m3, g_width, g_height, /*embedded=*/true);
     L2DDiag("embedded load %s (hasModel=%d textures=%d)", ok ? "OK" : "FAILED",
             g_model->HasModel(), g_model->TextureCount());
     if (!ok) {
@@ -178,45 +166,40 @@ void Update(float dt) {
 
 void Draw() {
     static int s_diagFrames = 0;
-    if (s_diagFrames < 3) {
-        GLint fbo = 0, vp[4] = {0,0,0,0};
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
-        glGetIntegerv(GL_VIEWPORT, vp);
-        L2DDiag("draw#%d loaded=%d fbo=%d vp=%dx%d glErr=0x%x",
-                s_diagFrames, (g_model && g_model->Loaded()) ? 1 : 0,
-                fbo, vp[2], vp[3], glGetError());
-        s_diagFrames++;
-    }
     if (!g_model || !g_model->Loaded()) return;
 
-    // The overlay surface is a square (side x side px), but only the central
-    // g_width x g_height of it is actually on screen — the square is wider than
-    // the display, which is why an un-scaled model looks huge. Fit the model to
-    // a fraction of the *visible* width and keep it centred (origin = centre).
-    GLint vp[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_VIEWPORT, vp);
-    float side = static_cast<float>(vp[2] > vp[3] ? vp[2] : vp[3]);
-    if (side <= 0.0f) side = static_cast<float>(g_width > g_height ? g_width : g_height);
+    // Point the (static) Cubism renderer at our offscreen model image. Done
+    // every frame because SetRenderTarget mutates shared global state.
+    Rendering::CubismRenderer_Vulkan::SetRenderTarget(
+        g_ctx.modelImage, g_ctx.modelView, g_ctx.colorFormat, g_ctx.extent);
+
+    // The model image is a square (side × side), but only the central
+    // g_width × g_height of it is on screen. Fit the model to a fraction of the
+    // shorter visible side and centre it in the visible region. Vulkan clip
+    // space has y pointing down, so the model is flipped vertically (Scale -s).
+    float side = static_cast<float>(g_ctx.extent.width > g_ctx.extent.height
+                                        ? g_ctx.extent.width : g_ctx.extent.height);
     if (side <= 0.0f) side = 1.0f;
 
-    // Fit against the *shorter* visible side so size stays consistent across
-    // portrait/landscape.
     const float kFill    = 0.85f;   // model fills ~85% of the shorter screen side
-    const float kOffsetY = 0.0f;    // extra + up / - down nudge; tune to taste
+    const float kOffsetY = 0.0f;    // + up / - down nudge; tune on device
     float visMin = static_cast<float>(g_width < g_height ? g_width : g_height);
     if (visMin <= 0.0f) visMin = side;
     float s = kFill * visMin / side;
 
-    // The overlay is a side×side square anchored at the screen's top-left, so
-    // its centre (NDC origin) falls off-screen. The centre of the *visible*
-    // g_width×g_height region is here in the square's NDC (GL y is flipped vs
-    // the screen, hence 1 - ...). Shift the model there so it's screen-centred.
+    // Centre of the visible region in the square image's Vulkan NDC (y down).
     float cx = static_cast<float>(g_width)  / side - 1.0f;
-    float cy = 1.0f - static_cast<float>(g_height) / side;
+    float cy = static_cast<float>(g_height) / side - 1.0f;
 
     CubismMatrix44 projection;
-    projection.Scale(s, s);
+    projection.Scale(s, -s);
     projection.Translate(cx, cy + kOffsetY);
+
+    if (s_diagFrames < 3) {
+        L2DDiag("draw#%d side=%.0f vis=%dx%d s=%.3f c=(%.3f,%.3f)",
+                s_diagFrames, side, g_width, g_height, s, cx, cy);
+        s_diagFrames++;
+    }
 
     g_model->Draw(projection);
 }

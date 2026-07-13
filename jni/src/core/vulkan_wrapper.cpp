@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // This file is generated.
+#ifndef AIMGUI_REAL_VULKAN  // real-Vulkan build links libvulkan; no dlsym globals
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "vulkan_wrapper.h"
-
-#ifndef AIMGUI_REAL_VULKAN  // real-Vulkan build links libvulkan; no dlsym globals
 
 #include <dlfcn.h>
 
