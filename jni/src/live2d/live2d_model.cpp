@@ -149,6 +149,11 @@ void Model::SetupModel(ICubismModelSetting* setting) {
         _eyeBlinkIds.PushBack(setting->GetEyeBlinkParameterId(i));
     }
 
+    // lip-sync target ids (from the model3.json LipSync group)
+    for (csmInt32 i = 0; i < setting->GetLipSyncParameterCount(); ++i) {
+        _lipSyncIds.PushBack(setting->GetLipSyncParameterId(i));
+    }
+
     _modelMatrix->SetWidth(2.0f);
     _updating = false;
     _initialized = true;
@@ -187,7 +192,7 @@ void Model::ReleaseTextures() {
     _textures.Clear();
 }
 
-void Model::Update(float dt, float dragX, float dragY, float reaction) {
+void Model::Update(float dt, float dragX, float dragY, float reaction, float lipRms) {
     if (!_loaded || _model == nullptr) return;
 
     _model->LoadParameters();     // restore last frame's saved state
@@ -212,6 +217,16 @@ void Model::Update(float dt, float dragX, float dragY, float reaction) {
         float wobble = std::sin(reaction * 3.14159265f * 3.0f) * reaction;
         _model->AddParameterValue(idm->GetId(ParamAngleZ),     wobble * 25.0f);
         _model->AddParameterValue(idm->GetId(ParamBodyAngleX), wobble * 8.0f);
+    }
+
+    // Lip-sync: open the mouth to the current voice amplitude.
+    if (lipRms > 0.0f) {
+        if (_lipSyncIds.GetSize() > 0) {
+            for (csmUint32 i = 0; i < _lipSyncIds.GetSize(); ++i)
+                _model->AddParameterValue(_lipSyncIds[i], lipRms, 0.8f);
+        } else {
+            _model->AddParameterValue(idm->GetId(ParamMouthOpenY), lipRms, 0.8f);
+        }
     }
 
     if (_physics)  _physics->Evaluate(_model, dt);

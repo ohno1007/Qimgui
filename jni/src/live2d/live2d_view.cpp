@@ -2,6 +2,7 @@
 #include "live2d/live2d_allocator.h"
 #include "live2d/live2d_model.h"
 #include "live2d/live2d_embedded.h"
+#include "live2d/live2d_audio.h"
 
 #include <CubismFramework.hpp>
 #include <Rendering/Vulkan/CubismRenderer_Vulkan.hpp>
@@ -15,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 // Diagnostics to a file (logcat filtering is unreliable on some ROMs).
 static void L2DDiag(const char* fmt, ...) {
@@ -193,7 +195,30 @@ void SetLookScreen(float x, float y, bool active) {
     g_lookX = x; g_lookY = y; g_lookActive = active;
 }
 
-void Poke() { g_reaction = kReactionDur; }
+// Play a voice line from /data/local/tmp/live2d_voice/*.wav (16-bit PCM),
+// rotating through the files. Push the character's voice clips there.
+void Speak() {
+    const char* dir = "/data/local/tmp/live2d_voice";
+    DIR* d = opendir(dir);
+    if (!d) return;
+    std::vector<std::string> wavs;
+    while (dirent* e = readdir(d)) {
+        const char* n = e->d_name;
+        size_t ln = std::strlen(n);
+        if (ln > 4 && (std::strcmp(n + ln - 4, ".wav") == 0 ||
+                       std::strcmp(n + ln - 4, ".WAV") == 0))
+            wavs.push_back(std::string(dir) + "/" + n);
+    }
+    closedir(d);
+    if (wavs.empty()) return;
+    static unsigned s_i = 0;
+    audio::PlayFile(wavs[s_i++ % wavs.size()].c_str());
+}
+
+void Poke() {
+    g_reaction = kReactionDur;
+    Speak();               // tap → react + talk
+}
 
 bool HitCollapsed(float x, float y) {
     float hw = kBallPx * g_ballScale * 0.40f, hh = kBallPx * g_ballScale * 0.55f;
@@ -217,7 +242,8 @@ void Update(float dt) {
     if (g_reaction > 0.0f) g_reaction = g_reaction - dt < 0.0f ? 0.0f : g_reaction - dt;
     float react01 = g_reaction / kReactionDur;
 
-    if (g_model) g_model->Update(dt, g_dragX, g_dragY, react01);
+    float lipRms = audio::Rms();   // lip-sync from the playing voice
+    if (g_model) g_model->Update(dt, g_dragX, g_dragY, react01, lipRms);
 }
 
 void Draw() {
@@ -266,6 +292,7 @@ void Draw() {
 }
 
 void Shutdown() {
+    audio::Stop();
     // The model owns Vulkan texture images; make sure the GPU is done with them
     // before their destructors free the handles.
     if (g_started && g_ctx.device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_ctx.device);

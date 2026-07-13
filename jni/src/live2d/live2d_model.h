@@ -30,8 +30,9 @@ public:
 
     // Advance motion / expression / physics / breath / blink by dt seconds.
     // dragX/dragY in [-1,1] steer the head + eyes toward the look target;
-    // reaction in [0,1] adds a decaying wobble when the character was tapped.
-    void Update(float dt, float dragX, float dragY, float reaction);
+    // reaction in [0,1] adds a decaying wobble when the character was tapped;
+    // lipRms in [0,1] opens the mouth for lip-sync while a voice plays.
+    void Update(float dt, float dragX, float dragY, float reaction, float lipRms);
 
     // Draw using the given projection*view matrix (already fit to the surface).
     void Draw(Csm::CubismMatrix44& matrix);

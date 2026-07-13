@@ -156,6 +156,7 @@ if(AIMGUI_LIVE2D)
         ${JNI}/src/live2d/live2d_view.cpp
         ${JNI}/src/live2d/live2d_model.cpp
         ${JNI}/src/live2d/live2d_texture.cpp
+        ${JNI}/src/live2d/live2d_audio.cpp
         ${JNI}/src/live2d/vk_dynamic_rendering_shim.cpp
         ${_l2d_embed_srcs})
     target_compile_options(aimgui_live2d PRIVATE -frtti) # GetRenderer<>() dynamic_cast
@@ -165,7 +166,7 @@ if(AIMGUI_LIVE2D)
         PRIVATE ${LIVE2D_CORE}/include ${LIVE2D_FRAMEWORK}/src)
     target_link_libraries(aimgui_live2d
         PUBLIC  Framework Live2DCubismCore
-        PRIVATE vulkan android log jnigraphics)
+        PRIVATE vulkan android log jnigraphics aaudio)
 
     target_compile_definitions(AImGui PRIVATE AIMGUI_LIVE2D)
     target_link_libraries(AImGui PRIVATE aimgui_live2d vulkan)
