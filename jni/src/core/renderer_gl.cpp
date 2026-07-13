@@ -74,16 +74,20 @@ public:
         ImGui::Render();
         if (m_Bloom.Ready()) {
             m_Bloom.BeginScene();
+            if (m_ScenePreDraw) m_ScenePreDraw();  // background layer (Live2D)
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             m_Bloom.EndSceneAndComposite();
         } else {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glViewport(0, 0, m_Width, m_Height);
             glClear(GL_COLOR_BUFFER_BIT);
+            if (m_ScenePreDraw) m_ScenePreDraw();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
         eglSwapBuffers(m_Display, m_Surface);
     }
+
+    void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
 
     void Shutdown() override {
         m_Bloom.Shutdown();
@@ -117,6 +121,7 @@ private:
     int m_Width = 0;
     int m_Height = 0;
     BloomGL m_Bloom;
+    void (*m_ScenePreDraw)() = nullptr;
 };
 
 } // namespace

@@ -13,6 +13,11 @@
 
 #include <chrono>
 
+#ifdef AIMGUI_LIVE2D
+// Drawn into the scene framebuffer (before ImGui) via the renderer hook.
+static void Live2DScenePreDraw() { aimgui::live2d::Draw(); }
+#endif
+
 int main() {
     using namespace android;
     using clock = std::chrono::steady_clock;
@@ -53,6 +58,7 @@ int main() {
         if (!aimgui::live2d::LoadEmbedded())
             aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
     }
+    ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
 #endif
 
     aimgui::FramePacer pacer;
@@ -73,11 +79,10 @@ int main() {
 
         ws.renderer()->NewFrame();
 #ifdef AIMGUI_LIVE2D
-        // Draw the model into the freshly-begun GL framebuffer; ImGui (rendered
-        // in EndFrame) then composites its UI on top.
+        // Advance the model here; the actual draw happens in the scene-predraw
+        // hook (into the bloom scene FBO) so ImGui composites on top of it.
         aimgui::live2d::Resize(info.width, info.height);
         aimgui::live2d::Update(io.DeltaTime);
-        aimgui::live2d::Draw();
 #endif
         st.scene_snapshot_id = ws.renderer()->GetSceneSnapshotID();
         ImGui::NewFrame();
@@ -93,6 +98,9 @@ int main() {
             ws.Destroy();
             if (!ws.Build(W, st.permeate_record)) { running = false; break; }
             st.renderer_name = ws.renderer()->Name();
+#ifdef AIMGUI_LIVE2D
+            ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
+#endif
         }
     }
 #ifdef AIMGUI_LIVE2D

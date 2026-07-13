@@ -7,10 +7,22 @@
 #include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
 #include <Math/CubismMatrix44.hpp>
 
+#include <GLES3/gl3.h>
 #include <android/log.h>
 #include <dirent.h>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <string>
+
+// Diagnostics to a file (logcat filtering is unreliable on some ROMs).
+static void L2DDiag(const char* fmt, ...) {
+    FILE* f = std::fopen("/data/local/tmp/aimgui_live2d.txt", "a");
+    if (!f) return;
+    va_list ap; va_start(ap, fmt); std::vfprintf(f, fmt, ap); va_end(ap);
+    std::fputc('\n', f);
+    std::fclose(f);
+}
 
 #define LOG_TAG "AImGui_Live2D"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -31,8 +43,10 @@ int            g_height = 1;
 
 bool Init() {
     if (g_started) return true;
+    { FILE* f = std::fopen("/data/local/tmp/aimgui_live2d.txt", "w"); if (f) std::fclose(f); }
     g_option.LogFunction = [](const char* msg) {
         __android_log_print(ANDROID_LOG_INFO, "AImGui_Cubism", "%s", msg);
+        L2DDiag("cubism: %s", msg);
     };
     g_option.LoggingLevel = CubismFramework::Option::LogLevel_Verbose;
 
@@ -40,6 +54,7 @@ bool Init() {
     CubismFramework::Initialize();
     g_started = true;
     LOGI("cubism framework started");
+    L2DDiag("init: framework started");
     return true;
 }
 
@@ -58,10 +73,14 @@ bool LoadModel(const char* dir, const char* model3json) {
 bool LoadEmbedded() {
     if (!g_started && !Init()) return false;
     const char* m3 = EmbeddedFindModel3();
+    L2DDiag("embedded model3 = %s (surface %dx%d)", m3 ? m3 : "<none>", g_width, g_height);
     if (!m3) return false;  // no model compiled in — fall back to disk
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(nullptr, m3, g_width, g_height, /*embedded=*/true)) {
+    bool ok = g_model->LoadAssets(nullptr, m3, g_width, g_height, /*embedded=*/true);
+    L2DDiag("embedded load %s (hasModel=%d textures=%d)", ok ? "OK" : "FAILED",
+            g_model->HasModel(), g_model->TextureCount());
+    if (!ok) {
         delete g_model;
         g_model = nullptr;
         return false;
@@ -116,6 +135,16 @@ void Update(float dt) {
 }
 
 void Draw() {
+    static int s_diagFrames = 0;
+    if (s_diagFrames < 3) {
+        GLint fbo = 0, vp[4] = {0,0,0,0};
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+        glGetIntegerv(GL_VIEWPORT, vp);
+        L2DDiag("draw#%d loaded=%d fbo=%d vp=%dx%d glErr=0x%x",
+                s_diagFrames, (g_model && g_model->Loaded()) ? 1 : 0,
+                fbo, vp[2], vp[3], glGetError());
+        s_diagFrames++;
+    }
     if (!g_model || !g_model->Loaded()) return;
 
     // Fit the model (normalised device coords, ~2 units tall) into the surface,

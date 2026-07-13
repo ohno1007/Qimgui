@@ -33,6 +33,8 @@ public:
     void Draw(Csm::CubismMatrix44& matrix);
 
     bool Loaded() const { return _loaded; }
+    bool HasModel() const { return _model != nullptr; }
+    int  TextureCount() const { return static_cast<int>(_textures.GetSize()); }
 
 private:
     void SetupModel(Csm::ICubismModelSetting* setting);

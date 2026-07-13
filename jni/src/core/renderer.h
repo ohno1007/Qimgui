@@ -28,6 +28,11 @@ public:
     // with this frame's output — used during the exit shatter animation
     // so all chips sample the clean pre-shatter UI.
     virtual void SetSnapshotFrozen(bool frozen) = 0;
+
+    // Register a callback invoked each frame into the scene framebuffer,
+    // before the ImGui draw data — used to draw a background layer (Live2D)
+    // that the UI then composites on top of. Default: no-op.
+    virtual void SetScenePreDraw(void (*fn)()) { (void)fn; }
 };
 
 enum class Backend { Auto, Vulkan, OpenGL };
