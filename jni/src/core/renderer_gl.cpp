@@ -73,8 +73,18 @@ public:
     void EndFrame() override {
         ImGui::Render();
         if (m_Bloom.Ready()) {
+            if (m_ScenePreDraw) {
+                // Draw the Live2D model as a background straight onto FB0 so it
+                // is NOT part of the bloomed scene; the UI+bloom composites over
+                // it. (BeginScene renders UI-only into the bloom scene FBO.)
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glViewport(0, 0, m_Width, m_Height);
+                glClearColor(0.f, 0.f, 0.f, 0.f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                m_ScenePreDraw();
+            }
+            m_Bloom.SetCompositeOverDest(m_ScenePreDraw != nullptr);
             m_Bloom.BeginScene();
-            if (m_ScenePreDraw) m_ScenePreDraw();  // background layer (Live2D)
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             m_Bloom.EndSceneAndComposite();
         } else {

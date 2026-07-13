@@ -189,16 +189,23 @@ void Draw() {
     }
     if (!g_model || !g_model->Loaded()) return;
 
-    // Fit to the actual render target (the scene FBO, which is square), not the
-    // display — otherwise the model is stretched. Preserve model aspect.
+    // The overlay surface is a square (side x side px), but only the central
+    // g_width x g_height of it is actually on screen — the square is wider than
+    // the display, which is why an un-scaled model looks huge. Fit the model to
+    // a fraction of the *visible* width and keep it centred (origin = centre).
     GLint vp[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, vp);
-    float w = vp[2] > 0 ? static_cast<float>(vp[2]) : static_cast<float>(g_width);
-    float h = vp[3] > 0 ? static_cast<float>(vp[3]) : static_cast<float>(g_height);
+    float side = static_cast<float>(vp[2] > vp[3] ? vp[2] : vp[3]);
+    if (side <= 0.0f) side = static_cast<float>(g_width > g_height ? g_width : g_height);
+    if (side <= 0.0f) side = 1.0f;
+
+    const float kFill    = 0.85f;   // model fills ~85% of the visible width
+    const float kOffsetY = 0.0f;    // + up / - down (square NDC); tune to taste
+    float s = kFill * static_cast<float>(g_width) / side;
 
     CubismMatrix44 projection;
-    if (w < h) projection.Scale(1.0f, w / h);
-    else       projection.Scale(h / w, 1.0f);
+    projection.Scale(s, s);
+    if (kOffsetY != 0.0f) projection.TranslateY(kOffsetY);
 
     g_model->Draw(projection);
 }

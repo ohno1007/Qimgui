@@ -28,6 +28,11 @@ public:
     void SetIntensity(float i) { m_Intensity = i; }
     void SetSnapshotFrozen(bool frozen) { m_SnapshotFrozen = frozen; }
 
+    // When true, the final composite is alpha-blended over whatever is already
+    // in the default framebuffer (instead of clearing it) — used to draw the
+    // Live2D model as an un-bloomed background that the UI+bloom overlays.
+    void SetCompositeOverDest(bool b) { m_OverDest = b; }
+
     // GL texture handle of last frame's scene image. Sampleable as a
     // regular texture (ImTextureID = (intptr_t)tex). Returns 0 if bloom
     // isn't initialised.
@@ -44,6 +49,7 @@ private:
     int  m_BlurH  = 0;
     float m_Intensity     = 0.75f;
     bool  m_SnapshotFrozen = false;
+    bool  m_OverDest       = false;
 
     GLuint m_SceneFBO     = 0;
     GLuint m_SceneTex     = 0;

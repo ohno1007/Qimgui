@@ -249,8 +249,17 @@ void BloomGL::EndSceneAndComposite() {
     // 4) Composite scene + bloom into the default framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, m_Width, m_Height);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    if (m_OverDest) {
+        // Blend UI+bloom "over" the background (Live2D model) already in FB0,
+        // keeping straight alpha (RGB over, alpha = src + dst*(1-src)).
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                            GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
     glUseProgram(m_ProgComposite);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_SceneTex);
@@ -264,6 +273,7 @@ void BloomGL::EndSceneAndComposite() {
     glBindVertexArray(0);
     glUseProgram(0);
     glActiveTexture(GL_TEXTURE0);
+    if (m_OverDest) glDisable(GL_BLEND);
 
     // Snapshot the just-rendered scene into m_PrevSceneTex so the next
     // frame's shatter chips can sample what the UI looked like before
