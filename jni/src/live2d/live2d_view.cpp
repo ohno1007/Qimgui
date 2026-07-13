@@ -195,24 +195,30 @@ void SetLookScreen(float x, float y, bool active) {
     g_lookX = x; g_lookY = y; g_lookActive = active;
 }
 
-// Play a voice line from /data/local/tmp/live2d_voice/*.wav (16-bit PCM),
-// rotating through the files. Push the character's voice clips there.
+// Play a voice line. Disk clips in /data/local/tmp/live2d_voice/*.wav override
+// (rotating through them); otherwise the voice embedded in the binary is used.
+// Clips must be 16-bit PCM WAV.
 void Speak() {
-    const char* dir = "/data/local/tmp/live2d_voice";
-    DIR* d = opendir(dir);
-    if (!d) return;
     std::vector<std::string> wavs;
-    while (dirent* e = readdir(d)) {
-        const char* n = e->d_name;
-        size_t ln = std::strlen(n);
-        if (ln > 4 && (std::strcmp(n + ln - 4, ".wav") == 0 ||
-                       std::strcmp(n + ln - 4, ".WAV") == 0))
-            wavs.push_back(std::string(dir) + "/" + n);
+    if (DIR* d = opendir("/data/local/tmp/live2d_voice")) {
+        while (dirent* e = readdir(d)) {
+            const char* n = e->d_name;
+            size_t ln = std::strlen(n);
+            if (ln > 4 && (std::strcmp(n + ln - 4, ".wav") == 0 ||
+                           std::strcmp(n + ln - 4, ".WAV") == 0))
+                wavs.push_back(std::string("/data/local/tmp/live2d_voice/") + n);
+        }
+        closedir(d);
     }
-    closedir(d);
-    if (wavs.empty()) return;
-    static unsigned s_i = 0;
-    audio::PlayFile(wavs[s_i++ % wavs.size()].c_str());
+    if (!wavs.empty()) {
+        static unsigned s_i = 0;
+        audio::PlayFile(wavs[s_i++ % wavs.size()].c_str());
+        return;
+    }
+    // Embedded voice (extracted from the bundled clip).
+    unsigned sz = 0;
+    const unsigned char* p = EmbeddedGet("voice.wav", &sz);
+    if (p) audio::PlayMemory(p, sz);
 }
 
 void Poke() {

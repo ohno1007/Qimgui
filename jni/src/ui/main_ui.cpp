@@ -12,6 +12,11 @@
 #include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
 #include "imgui.h"
 
+#ifdef AIMGUI_LIVE2D
+#include "live2d/live2d_view.h"
+#endif
+
+#include <cfloat>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -262,7 +267,13 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"Live2D 小人");
     SliderFloatGrabValue(u8"小人大小", &state->ball_scale, 0.4f, 3.0f, "%.2f");
-    ImGui::TextWrapped(u8"调整悬浮球（Live2D 小人）的显示大小。");
+    if (ImGui::Button(u8"让他说话", ImVec2(-FLT_MIN, 0))) {
+        live2d::Speak();
+    }
+    ripple::TouchLastItem();
+    ImGui::TextWrapped(
+        u8"点小人或按此按钮播放语音，嘴巴会跟着口型。默认用内置语音；"
+        u8"把 16-bit PCM WAV 放到 /data/local/tmp/live2d_voice/ 可替换。");
 #endif
 }
 

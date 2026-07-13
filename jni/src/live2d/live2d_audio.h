@@ -11,6 +11,9 @@ namespace audio {
 // Returns false if the file is missing or not a supported WAV.
 bool PlayFile(const char* path);
 
+// Play a 16-bit PCM WAV already resident in memory (embedded clip).
+bool PlayMemory(const void* wav, unsigned long size);
+
 // True while a clip is playing.
 bool Playing();
 

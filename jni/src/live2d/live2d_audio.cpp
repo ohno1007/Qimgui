@@ -120,7 +120,6 @@ void Stop() {
 }
 
 bool PlayFile(const char* path) {
-    // Read the whole file.
     std::FILE* fp = std::fopen(path, "rb");
     if (!fp) { LOGW("voice open failed: %s", path); return false; }
     std::fseek(fp, 0, SEEK_END);
@@ -131,9 +130,13 @@ bool PlayFile(const char* path) {
     size_t rd = std::fread(buf.data(), 1, (size_t)sz, fp);
     std::fclose(fp);
     if (rd != (size_t)sz) return false;
+    return PlayMemory(buf.data(), (unsigned long)buf.size());
+}
 
+bool PlayMemory(const void* wav, unsigned long size) {
     std::vector<int16_t> pcm; int ch = 0, rate = 0;
-    if (!ParseWav(buf.data(), buf.size(), pcm, ch, rate)) return false;
+    if (!ParseWav(static_cast<const uint8_t*>(wav), (size_t)size, pcm, ch, rate))
+        return false;
 
     Stop();  // stop any current clip
 
