@@ -17,6 +17,9 @@ extern "C" {
 #endif
 
 #include "vulkan_wrapper.h"
+
+#ifndef AIMGUI_REAL_VULKAN  // real-Vulkan build links libvulkan; no dlsym globals
+
 #include <dlfcn.h>
 
 int InitVulkan(void) {
@@ -410,3 +413,5 @@ PFN_vkDebugReportMessageEXT vkDebugReportMessageEXT;
 #ifdef __cplusplus
 }
 #endif
+
+#endif // !AIMGUI_REAL_VULKAN

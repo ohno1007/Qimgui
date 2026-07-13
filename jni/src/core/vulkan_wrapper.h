@@ -16,6 +16,22 @@
 #ifndef VULKAN_WRAPPER_H
 #define VULKAN_WRAPPER_H
 
+// AIMGUI_REAL_VULKAN: link against the real libvulkan (prototypes on) instead
+// of dlsym'ing every symbol into a global. Required by the Live2D VK build,
+// where the Cubism Vulkan renderer pulls in <vulkan/vulkan.h> with prototypes —
+// the dlsym'd globals would clash. In this mode the whole thing is just the
+// real Vulkan headers plus a no-op InitVulkan().
+#ifdef AIMGUI_REAL_VULKAN
+#include <vulkan/vulkan.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+static inline int InitVulkan(void) { return 1; }
+#ifdef __cplusplus
+}
+#endif
+#else // dlsym wrapper (default)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -243,5 +259,7 @@ extern PFN_vkDebugReportMessageEXT vkDebugReportMessageEXT;
 #ifdef __cplusplus
 }
 #endif
+
+#endif // AIMGUI_REAL_VULKAN
 
 #endif  // VULKAN_WRAPPER_H
