@@ -44,6 +44,11 @@ int            g_height = 1;
 // Cubism SDK 5's GL renderer loads its shaders through this file loader. We
 // serve them from the embedded blob, matching by basename (the renderer may
 // request "FrameworkShaders/xxx.frag" or just "xxx.frag").
+bool EndsWith(const std::string& s, const char* suf) {
+    size_t n = std::strlen(suf);
+    return s.size() >= n && s.compare(s.size() - n, n, suf) == 0;
+}
+
 csmByte* FileLoader(const std::string filePath, csmSizeInt* outSize) {
     std::string base = filePath;
     size_t slash = base.find_last_of("/\\");
@@ -51,8 +56,24 @@ csmByte* FileLoader(const std::string filePath, csmSizeInt* outSize) {
     unsigned sz = 0;
     const unsigned char* p = EmbeddedGet(base.c_str(), &sz);
     if (!p) { L2DDiag("fileloader MISS: %s", filePath.c_str()); if (outSize) *outSize = 0; return nullptr; }
-    csmByte* buf = static_cast<csmByte*>(std::malloc(sz));
-    if (buf) { std::memcpy(buf, p, sz); if (outSize) *outSize = static_cast<csmSizeInt>(sz); }
+
+    std::string data(reinterpret_cast<const char*>(p), sz);
+    // Cubism's Standard shaders declare desktop GLSL "#version 120"; the syntax
+    // (attribute/varying/texture2D/gl_FragColor) is identical to GLSL ES 1.00,
+    // so rewrite the version and add the fragment precision ES requires.
+    const bool isFrag = EndsWith(base, ".frag");
+    if (isFrag || EndsWith(base, ".vert")) {
+        size_t v = data.find("#version 120");
+        if (v != std::string::npos) {
+            std::string repl = isFrag ? "#version 100\nprecision mediump float;"
+                                      : "#version 100";
+            data.replace(v, 12, repl);
+        }
+    }
+
+    csmSizeInt n = static_cast<csmSizeInt>(data.size());
+    csmByte* buf = static_cast<csmByte*>(std::malloc(n));
+    if (buf) { std::memcpy(buf, data.data(), n); if (outSize) *outSize = n; }
     return buf;
 }
 void BytesReleaser(csmByte* b) { std::free(b); }
@@ -168,16 +189,16 @@ void Draw() {
     }
     if (!g_model || !g_model->Loaded()) return;
 
-    // Fit the model (normalised device coords, ~2 units tall) into the surface,
-    // preserving aspect. Portrait surfaces show the full body; wide surfaces are
-    // letterboxed horizontally.
+    // Fit to the actual render target (the scene FBO, which is square), not the
+    // display — otherwise the model is stretched. Preserve model aspect.
+    GLint vp[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, vp);
+    float w = vp[2] > 0 ? static_cast<float>(vp[2]) : static_cast<float>(g_width);
+    float h = vp[3] > 0 ? static_cast<float>(vp[3]) : static_cast<float>(g_height);
+
     CubismMatrix44 projection;
-    const float aspect = static_cast<float>(g_width) / static_cast<float>(g_height);
-    if (g_width < g_height) {
-        projection.Scale(1.0f, aspect);
-    } else {
-        projection.Scale(1.0f / aspect, 1.0f);
-    }
+    if (w < h) projection.Scale(1.0f, w / h);
+    else       projection.Scale(h / w, 1.0f);
 
     g_model->Draw(projection);
 }
