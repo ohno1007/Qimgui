@@ -4,8 +4,9 @@
 #include <CubismDefaultParameterId.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Id/CubismIdManager.hpp>
-#include <Motion/CubismEyeBlink.hpp>
-#include <Motion/CubismBreath.hpp>
+#include <Effect/CubismEyeBlink.hpp>
+#include <Effect/CubismBreath.hpp>
+#include <Effect/CubismPose.hpp>
 #include <Motion/CubismMotion.hpp>
 #include <Physics/CubismPhysics.hpp>
 #include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
@@ -55,7 +56,7 @@ Model::~Model() {
     if (_setting) { CSM_DELETE(_setting); _setting = nullptr; }
 }
 
-bool Model::LoadAssets(const char* dir, const char* model3json) {
+bool Model::LoadAssets(const char* dir, const char* model3json, int width, int height) {
     _dir = dir;
     _dir += "/";
     csmString jsonPath(_dir);
@@ -72,7 +73,8 @@ bool Model::LoadAssets(const char* dir, const char* model3json) {
     SetupModel(setting);
     if (_model == nullptr) { LOGW("moc load failed"); return false; }
 
-    CreateRenderer();
+    CreateRenderer(static_cast<Csm::csmUint32>(width > 0 ? width : 1),
+                   static_cast<Csm::csmUint32>(height > 0 ? height : 1));
     SetupTextures();
 
     _loaded = true;

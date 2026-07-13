@@ -46,7 +46,7 @@ bool LoadModel(const char* dir, const char* model3json) {
     if (!g_started && !Init()) return false;
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(dir, model3json)) {
+    if (!g_model->LoadAssets(dir, model3json, g_width, g_height)) {
         delete g_model;
         g_model = nullptr;
         return false;

@@ -48,8 +48,8 @@ int main() {
     // Optional Live2D layer. Model assets are pushed to the device under
     // /data/local/tmp/live2d/<Model>/ (see docs/LIVE2D.md). Non-fatal if absent.
     if (aimgui::live2d::Init()) {
+        aimgui::live2d::Resize(info.width, info.height);  // size masks before load
         aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
-        aimgui::live2d::Resize(info.width, info.height);
     }
 #endif
 

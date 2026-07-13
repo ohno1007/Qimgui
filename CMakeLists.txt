@@ -113,11 +113,15 @@ if(AIMGUI_LIVE2D)
     add_subdirectory(${LIVE2D_FRAMEWORK} CubismFramework)
     target_compile_definitions(Framework PUBLIC CSM_TARGET_ANDROID_ES2)
     target_include_directories(Framework PUBLIC ${LIVE2D_CORE}/include)
+    # CubismUserModel::GetRenderer() uses dynamic_cast, so RTTI is required for
+    # the Framework and our glue (the rest of the project builds -fno-rtti).
+    target_compile_options(Framework PRIVATE -frtti)
 
     add_library(aimgui_live2d STATIC
         ${JNI}/src/live2d/live2d_view.cpp
         ${JNI}/src/live2d/live2d_model.cpp
         ${JNI}/src/live2d/live2d_texture.cpp)
+    target_compile_options(aimgui_live2d PRIVATE -frtti) # GetRenderer<>() dynamic_cast
     target_include_directories(aimgui_live2d
         PUBLIC  ${JNI}/src ${JNI}/include
         PRIVATE ${LIVE2D_CORE}/include ${LIVE2D_FRAMEWORK}/src)

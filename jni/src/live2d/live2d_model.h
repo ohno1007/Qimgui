@@ -21,8 +21,9 @@ public:
     Model();
     ~Model() override;
 
-    // Load <dir>/<model3json> and all referenced assets. Returns false on error.
-    bool LoadAssets(const char* dir, const char* model3json);
+    // Load <dir>/<model3json> and all referenced assets. width/height size the
+    // clipping-mask render target (use the drawable surface size). False on error.
+    bool LoadAssets(const char* dir, const char* model3json, int width, int height);
 
     // Advance motion / expression / physics / breath / blink by dt seconds.
     void Update(float dt);
