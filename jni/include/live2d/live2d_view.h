@@ -40,6 +40,22 @@ void Resize(int width, int height);
 // Advance motion / physics / breathing by dt seconds.
 void Update(float dt);
 
+// Presentation: expandT in [0,1] — 0 renders the character tiny (a floating
+// "ball" at the Dynamic-Island spot), 1 renders the full-screen character.
+// Driven by the UI's collapse/expand spring so the model animates with it.
+void SetView(float expandT);
+
+// The character's eyes/head look toward this screen point (visible-region
+// pixels) while active; when inactive the gaze eases back to centre.
+void SetLookScreen(float x, float y, bool active);
+
+// Trigger a tap reaction (a little bounce + head wobble).
+void Poke();
+
+// True when the screen point lands on the collapsed (tiny) character — used
+// by the UI to detect a tap on it. Only meaningful while collapsed.
+bool HitCollapsed(float x, float y);
+
 // Render the model into the Vulkan backend's offscreen model image (the
 // Cubism renderer self-submits). Invoked via the renderer's scene-predraw
 // hook, before the UI is composited over the result.

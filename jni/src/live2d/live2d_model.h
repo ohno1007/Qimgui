@@ -29,7 +29,9 @@ public:
                     const char* model3json, int width, int height, bool embedded);
 
     // Advance motion / expression / physics / breath / blink by dt seconds.
-    void Update(float dt);
+    // dragX/dragY in [-1,1] steer the head + eyes toward the look target;
+    // reaction in [0,1] adds a decaying wobble when the character was tapped.
+    void Update(float dt, float dragX, float dragY, float reaction);
 
     // Draw using the given projection*view matrix (already fit to the surface).
     void Draw(Csm::CubismMatrix44& matrix);

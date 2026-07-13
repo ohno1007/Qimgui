@@ -9,6 +9,7 @@
 
 #include <android/log.h>
 #include <dirent.h>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +41,28 @@ bool           g_started = false;
 Live2DVkContext g_ctx{};
 int            g_width = 1;
 int            g_height = 1;
+
+// Presentation / interaction state.
+float          g_expandT   = 1.0f;   // 0 = tiny ball, 1 = full character
+float          g_lookX = 0, g_lookY = 0;   // gaze target (screen px)
+bool           g_lookActive = false;
+float          g_dragX = 0, g_dragY = 0;    // smoothed gaze in [-1,1]
+float          g_reaction = 0.0f;           // seconds of tap-reaction left
+
+constexpr float kReactionDur = 0.6f;
+constexpr float kBallPx      = 200.0f;  // on-screen model height when collapsed
+constexpr float kBallCenterY = 150.0f;  // screen-y of the collapsed character
+
+inline float ClampF(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// The character's on-screen centre (visible-region px) at expand factor t.
+void ModelCenterScreen(float t, float* scx, float* scy) {
+    *scx = g_width * 0.5f;   // horizontally centred in both states
+    float big = g_height * 0.5f;
+    *scy = kBallCenterY + (big - kBallCenterY) * t;
+}
 } // namespace
 
 // Serve embedded assets (the Cubism Vulkan renderer's compiled SPIR-V shaders)
@@ -160,8 +183,38 @@ void Resize(int width, int height) {
     g_height = height > 0 ? height : 1;
 }
 
+void SetView(float expandT) { g_expandT = ClampF(expandT, 0.0f, 1.0f); }
+
+void SetLookScreen(float x, float y, bool active) {
+    g_lookX = x; g_lookY = y; g_lookActive = active;
+}
+
+void Poke() { g_reaction = kReactionDur; }
+
+bool HitCollapsed(float x, float y) {
+    float cx = g_width * 0.5f, cy = kBallCenterY;
+    float hw = kBallPx * 0.40f, hh = kBallPx * 0.55f;
+    return x >= cx - hw && x <= cx + hw && y >= cy - hh && y <= cy + hh;
+}
+
 void Update(float dt) {
-    if (g_model) g_model->Update(dt);
+    // Ease the gaze toward the tap point (or back to centre when inactive).
+    float tx = 0.0f, ty = 0.0f;
+    if (g_lookActive) {
+        float scx, scy; ModelCenterScreen(g_expandT, &scx, &scy);
+        float range = 0.5f * (g_width < g_height ? g_width : g_height);
+        if (range < 1.0f) range = 1.0f;
+        tx = ClampF((g_lookX - scx) / range, -1.0f, 1.0f);
+        ty = ClampF((scy - g_lookY) / range, -1.0f, 1.0f);  // screen y is down
+    }
+    float k = ClampF(dt * 8.0f, 0.0f, 1.0f);
+    g_dragX += (tx - g_dragX) * k;
+    g_dragY += (ty - g_dragY) * k;
+
+    if (g_reaction > 0.0f) g_reaction = g_reaction - dt < 0.0f ? 0.0f : g_reaction - dt;
+    float react01 = g_reaction / kReactionDur;
+
+    if (g_model) g_model->Update(dt, g_dragX, g_dragY, react01);
 }
 
 void Draw() {
@@ -174,10 +227,10 @@ void Draw() {
         g_ctx.modelImage, g_ctx.modelView, g_ctx.colorFormat, g_ctx.extent);
 
     // The model image is a square (side × side), but only the central
-    // g_width × g_height of it is on screen. Fit the model to a fraction of the
-    // shorter visible side and centre it in the visible region. Cubism's VK
-    // vertex shader already flips Y for Vulkan (pos.y = -pos.y), so the GL-style
-    // projection below renders upright — no extra flip here.
+    // g_width × g_height of it is on screen. Cubism's VK vertex shader already
+    // flips Y for Vulkan (pos.y = -pos.y), so the GL-style projection below
+    // renders upright. The model lerps between a tiny "ball" at the top
+    // (collapsed) and the full-screen character (expanded) via g_expandT.
     float side = static_cast<float>(g_ctx.extent.width > g_ctx.extent.height
                                         ? g_ctx.extent.width : g_ctx.extent.height);
     if (side <= 0.0f) side = 1.0f;
@@ -186,12 +239,21 @@ void Draw() {
     const float kOffsetY = 0.0f;    // + up / - down nudge; tune on device
     float visMin = static_cast<float>(g_width < g_height ? g_width : g_height);
     if (visMin <= 0.0f) visMin = side;
-    float s = kFill * visMin / side;
 
-    // Centre of the visible region in the square image's NDC (GL-style; the
-    // shader's Y-flip maps it to the right place on screen).
-    float cx = static_cast<float>(g_width)  / side - 1.0f;
-    float cy = 1.0f - static_cast<float>(g_height) / side;
+    const float t = ClampF(g_expandT, 0.0f, 1.0f);
+    float sBig   = kFill * visMin / side;          // on-screen height ≈ s*side px
+    float sSmall = kBallPx / side;
+    float s = sSmall + (sBig - sSmall) * t;
+
+    // A little "pop" while reacting to a tap.
+    float react01 = g_reaction / kReactionDur;
+    float bounce = react01 > 0.0f ? 1.0f + 0.18f * std::sin((1.0f - react01) * 3.14159265f)
+                                  : 1.0f;
+    s *= bounce;
+
+    float scx, scy; ModelCenterScreen(t, &scx, &scy);
+    float cx = 2.0f * scx / side - 1.0f;
+    float cy = 1.0f - 2.0f * scy / side;
 
     CubismMatrix44 projection;
     projection.Scale(s, s);

@@ -14,6 +14,7 @@
 #include <Utils/CubismString.hpp>
 
 #include <android/log.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -186,7 +187,7 @@ void Model::ReleaseTextures() {
     _textures.Clear();
 }
 
-void Model::Update(float dt) {
+void Model::Update(float dt, float dragX, float dragY, float reaction) {
     if (!_loaded || _model == nullptr) return;
 
     _model->LoadParameters();     // restore last frame's saved state
@@ -194,6 +195,25 @@ void Model::Update(float dt) {
 
     if (_eyeBlink) _eyeBlink->UpdateParameters(_model, dt);
     if (_breath)   _breath->UpdateParameters(_model, dt);
+
+    // Look-at: steer the head + eyes toward the tap point (added on top of the
+    // breath idle so it still breathes). Applied before physics so the hair /
+    // accessories swing in response.
+    CubismIdManager* idm = CubismFramework::GetIdManager();
+    _model->AddParameterValue(idm->GetId(ParamAngleX),     dragX * 30.0f);
+    _model->AddParameterValue(idm->GetId(ParamAngleY),     dragY * 30.0f);
+    _model->AddParameterValue(idm->GetId(ParamAngleZ),     dragX * dragY * -30.0f);
+    _model->AddParameterValue(idm->GetId(ParamBodyAngleX), dragX * 10.0f);
+    _model->AddParameterValue(idm->GetId(ParamEyeBallX),   dragX);
+    _model->AddParameterValue(idm->GetId(ParamEyeBallY),   dragY);
+
+    // Tap reaction: a quick decaying head wobble + tiny body sway.
+    if (reaction > 0.0f) {
+        float wobble = std::sin(reaction * 3.14159265f * 3.0f) * reaction;
+        _model->AddParameterValue(idm->GetId(ParamAngleZ),     wobble * 25.0f);
+        _model->AddParameterValue(idm->GetId(ParamBodyAngleX), wobble * 8.0f);
+    }
+
     if (_physics)  _physics->Evaluate(_model, dt);
     if (_pose)     _pose->UpdateParameters(_model, dt);
 

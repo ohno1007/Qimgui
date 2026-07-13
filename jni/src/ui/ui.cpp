@@ -3,6 +3,10 @@
 
 #include "imgui.h"
 
+#ifdef AIMGUI_LIVE2D
+#include "live2d/live2d_view.h"
+#endif
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -485,6 +489,18 @@ void DrawUi(UiState* state, bool* keep_running) {
         return;
     }
 
+    // When the Live2D character is loaded it becomes the collapsed visual (a
+    // tiny "ball"): tapping it expands to the window and pokes the character.
+    bool l2d_active = false;
+#ifdef AIMGUI_LIVE2D
+    l2d_active = live2d::IsLoaded();
+    if (l2d_active && state->collapsed && ImGui::IsMouseClicked(0) &&
+        live2d::HitCollapsed(io.MousePos.x, io.MousePos.y)) {
+        state->collapsed = false;
+        live2d::Poke();
+    }
+#endif
+
     // Handle grip press/drag/release first so the NoMove flag below sees
     // an up-to-date state->resizing this frame.
     HandleResizeInput(state, io);
@@ -538,6 +554,13 @@ void DrawUi(UiState* state, bool* keep_running) {
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
 
+    // With the Live2D character as the collapsed visual, fade the window
+    // background + border in as it expands so only the character shows when
+    // collapsed (no stray pill box around the tiny character).
+    const bool l2d_hidden_chrome = l2d_active && lt < 0.999f;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, l2d_hidden_chrome ? 0.0f : 1.0f);
+    if (l2d_hidden_chrome) ImGui::SetNextWindowBgAlpha(lt);
+
     // Suppress ImGui's built-in resize handle: the custom DrawResizeGrip
     // (with preview-then-animate behaviour) owns resizing. NoMove is also
     // applied during a grip drag to stop ImGui from interpreting the same
@@ -561,8 +584,11 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->last_full_size = ImGui::GetWindowSize();
         }
 
+        // The FPS pill is only the collapsed visual when there's no character;
+        // with Live2D the tiny character replaces it (and its own tap handler,
+        // above, drives the expand).
         const float island_alpha = 1.0f - (lt < 0.30f ? lt / 0.30f : 1.0f);
-        if (island_alpha > 0.01f) {
+        if (!l2d_active && island_alpha > 0.01f) {
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, island_alpha);
             DrawIslandContent();
             ImGui::PopStyleVar();
@@ -586,7 +612,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     }
     ImGui::End();
 
-    ImGui::PopStyleVar();   // WindowRounding
+    ImGui::PopStyleVar(2);   // WindowRounding + WindowBorderSize
 
     // Foreground overlays: ripples on every clickable widget.
     ripple::DrawAll();

@@ -86,13 +86,19 @@ int main() {
         ws.renderer()->NewFrame();
 #ifdef AIMGUI_LIVE2D
         // Advance the model here; the actual draw happens in the scene-predraw
-        // hook (into the bloom scene FBO) so ImGui composites on top of it.
+        // hook so ImGui composites on top of it. The eyes follow the touch.
         aimgui::live2d::Resize(info.width, info.height);
+        aimgui::live2d::SetLookScreen(io.MousePos.x, io.MousePos.y, io.MouseDown[0]);
         aimgui::live2d::Update(io.DeltaTime);
 #endif
         st.scene_snapshot_id = ws.renderer()->GetSceneSnapshotID();
         ImGui::NewFrame();
         aimgui::DrawUi(&st, &running);
+#ifdef AIMGUI_LIVE2D
+        // Collapsed → tiny "ball" character; expanded → full character. The
+        // spring value drives the model's size/position transition.
+        aimgui::live2d::SetView(st.expand);
+#endif
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);
         ws.renderer()->SetSnapshotFrozen(st.exit_anim_active);
         ws.renderer()->EndFrame();
