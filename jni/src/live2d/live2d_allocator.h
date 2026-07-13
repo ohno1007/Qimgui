@@ -1,6 +1,7 @@
 // Minimal ICubismAllocator for the Cubism Framework.
 #pragma once
 
+#include <CubismFramework.hpp>   // defines the `Csm` namespace alias + basic types
 #include <ICubismAllocator.hpp>
 #include <cstdlib>
 
