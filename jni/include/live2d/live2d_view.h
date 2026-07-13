@@ -40,10 +40,14 @@ void Resize(int width, int height);
 // Advance motion / physics / breathing by dt seconds.
 void Update(float dt);
 
-// Presentation: expandT in [0,1] — 0 renders the character tiny (a floating
-// "ball" at the Dynamic-Island spot), 1 renders the full-screen character.
-// Driven by the UI's collapse/expand spring so the model animates with it.
+// Presentation: expandT in [0,1] — 0 shows the character as the floating
+// "ball", 1 is the open window (the model shrinks away / is hidden). Driven
+// by the UI's collapse/expand spring.
 void SetView(float expandT);
+
+// Screen position (visible-region px) of the draggable ball the character is
+// drawn at while collapsed.
+void SetBall(float x, float y);
 
 // The character's eyes/head look toward this screen point (visible-region
 // pixels) while active; when inactive the gaze eases back to centre.

@@ -489,15 +489,43 @@ void DrawUi(UiState* state, bool* keep_running) {
         return;
     }
 
-    // When the Live2D character is loaded it becomes the collapsed visual (a
-    // tiny "ball"): tapping it expands to the window and pokes the character.
+    // When the Live2D character is loaded it becomes the collapsed visual: a
+    // draggable floating "ball". A small press-release on it is a tap (expand
+    // the window + poke); a larger move drags the ball around. An open window
+    // shows no model.
     bool l2d_active = false;
 #ifdef AIMGUI_LIVE2D
     l2d_active = live2d::IsLoaded();
-    if (l2d_active && state->collapsed && ImGui::IsMouseClicked(0) &&
-        live2d::HitCollapsed(io.MousePos.x, io.MousePos.y)) {
-        state->collapsed = false;
-        live2d::Poke();
+    if (l2d_active) {
+        const float bdw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
+        const float bdh = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
+        constexpr float kBallHalf = 100.0f;               // keep-on-screen margin
+        if (state->ball_pos.x < 0.0f)                     // first-use placement
+            state->ball_pos = ImVec2(bdw * 0.18f, bdh * 0.28f);
+        auto clampf = [](float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); };
+        state->ball_pos.x = clampf(state->ball_pos.x, kBallHalf, bdw - kBallHalf);
+        state->ball_pos.y = clampf(state->ball_pos.y, kBallHalf, bdh - kBallHalf);
+
+        static bool   s_dragging = false, s_moved = false;
+        static ImVec2 s_press(0, 0), s_off(0, 0);
+        if (state->collapsed) {
+            if (ImGui::IsMouseClicked(0) && live2d::HitCollapsed(io.MousePos.x, io.MousePos.y)) {
+                s_dragging = true; s_moved = false; s_press = io.MousePos;
+                s_off = ImVec2(state->ball_pos.x - io.MousePos.x, state->ball_pos.y - io.MousePos.y);
+            }
+            if (s_dragging && ImGui::IsMouseDown(0)) {
+                float mdx = io.MousePos.x - s_press.x, mdy = io.MousePos.y - s_press.y;
+                if (mdx * mdx + mdy * mdy > 24.0f * 24.0f) s_moved = true;
+                if (s_moved) state->ball_pos = ImVec2(io.MousePos.x + s_off.x,
+                                                      io.MousePos.y + s_off.y);
+            }
+            if (s_dragging && ImGui::IsMouseReleased(0)) {
+                s_dragging = false;
+                if (!s_moved) { state->collapsed = false; live2d::Poke(); }
+            }
+        } else {
+            s_dragging = false;
+        }
     }
 #endif
 
@@ -528,7 +556,12 @@ void DrawUi(UiState* state, bool* keep_running) {
     constexpr float kIslandTop = 28.0f;
 
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
-    const ImVec2 island_pos (dw * 0.5f - kIslandW * 0.5f, kIslandTop);
+    // With the Live2D ball active the window springs from wherever the ball
+    // sits (so collapsing returns to the ball's dragged position); otherwise
+    // it uses the fixed top-centre island spot.
+    const ImVec2 island_pos = l2d_active
+        ? ImVec2(state->ball_pos.x - kIslandW * 0.5f, state->ball_pos.y - kIslandH * 0.5f)
+        : ImVec2(dw * 0.5f - kIslandW * 0.5f, kIslandTop);
     const ImVec2 island_size(kIslandW, kIslandH);
 
     auto lerp = [](ImVec2 a, ImVec2 b, float u) {

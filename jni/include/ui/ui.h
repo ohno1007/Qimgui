@@ -31,6 +31,11 @@ struct UiState {
     float expand      = 1.0f;
     float expand_vel  = 0.0f;
 
+    // Live2D floating "ball": when collapsed the character is the visual and
+    // can be dragged anywhere; this is its centre in screen px. Re-clamped to
+    // the display each frame. (-1,-1) = uninitialised → placed on first use.
+    ImVec2 ball_pos = ImVec2(-1.0f, -1.0f);
+
     // Remembered full-window pos / size so the window springs back to
     // wherever the user last dragged it.
     ImVec2 last_full_pos  = ImVec2(60, 100);
