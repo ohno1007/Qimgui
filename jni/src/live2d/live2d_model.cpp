@@ -1,5 +1,6 @@
 #include "live2d/live2d_model.h"
 #include "live2d/live2d_texture.h"
+#include "live2d/live2d_embedded.h"
 
 #include <CubismDefaultParameterId.hpp>
 #include <CubismModelSettingJson.hpp>
@@ -56,14 +57,26 @@ Model::~Model() {
     if (_setting) { CSM_DELETE(_setting); _setting = nullptr; }
 }
 
-bool Model::LoadAssets(const char* dir, const char* model3json, int width, int height) {
-    _dir = dir;
-    _dir += "/";
-    csmString jsonPath(_dir);
-    jsonPath += model3json;
+csmByte* Model::ReadModelFile(const csmString& relpath, csmSizeInt* outSize) {
+    if (_embedded) {
+        unsigned sz = 0;
+        const unsigned char* p = EmbeddedGet(relpath.GetRawString(), &sz);
+        if (!p) { LOGW("embedded missing: %s", relpath.GetRawString()); return nullptr; }
+        csmByte* buf = static_cast<csmByte*>(CSM_MALLOC(sz));
+        if (buf) { std::memcpy(buf, p, sz); *outSize = static_cast<csmSizeInt>(sz); }
+        return buf;
+    }
+    csmString full(_dir); full += relpath;
+    return ReadFile(full, outSize);
+}
+
+bool Model::LoadAssets(const char* dir, const char* model3json, int width, int height, bool embedded) {
+    _embedded = embedded;
+    _dir = "";
+    if (!embedded) { _dir = dir; _dir += "/"; }
 
     csmSizeInt size = 0;
-    csmByte* buf = ReadFile(jsonPath, &size);
+    csmByte* buf = ReadModelFile(csmString(model3json), &size);
     if (!buf) return false;
 
     ICubismModelSetting* setting = CSM_NEW CubismModelSettingJson(buf, size);
@@ -78,7 +91,7 @@ bool Model::LoadAssets(const char* dir, const char* model3json, int width, int h
     SetupTextures();
 
     _loaded = true;
-    LOGI("live2d model loaded: %s", jsonPath.GetRawString());
+    LOGI("live2d model loaded: %s (%s)", model3json, _embedded ? "embedded" : _dir.GetRawString());
     return true;
 }
 
@@ -92,22 +105,19 @@ void Model::SetupModel(ICubismModelSetting* setting) {
 
     // .moc3
     if (std::strlen(setting->GetModelFileName()) > 0) {
-        csmString path(_dir); path += setting->GetModelFileName();
-        buf = ReadFile(path, &size);
+        buf = ReadModelFile(csmString(setting->GetModelFileName()), &size);
         if (buf) { LoadModel(buf, size, /*shouldCheckMocConsistency=*/true); CSM_FREE(buf); }
     }
 
     // physics
     if (std::strlen(setting->GetPhysicsFileName()) > 0) {
-        csmString path(_dir); path += setting->GetPhysicsFileName();
-        buf = ReadFile(path, &size);
+        buf = ReadModelFile(csmString(setting->GetPhysicsFileName()), &size);
         if (buf) { LoadPhysics(buf, size); CSM_FREE(buf); }
     }
 
     // pose
     if (std::strlen(setting->GetPoseFileName()) > 0) {
-        csmString path(_dir); path += setting->GetPoseFileName();
-        buf = ReadFile(path, &size);
+        buf = ReadModelFile(csmString(setting->GetPoseFileName()), &size);
         if (buf) { LoadPose(buf, size); CSM_FREE(buf); }
     }
 
@@ -147,9 +157,17 @@ void Model::SetupTextures() {
     if (!renderer || !_setting) return;
 
     for (csmInt32 i = 0; i < _setting->GetTextureCount(); ++i) {
-        if (std::strlen(_setting->GetTextureFileName(i)) == 0) continue;
-        csmString path(_dir); path += _setting->GetTextureFileName(i);
-        GLuint tex = LoadTexture(path.GetRawString());
+        const csmChar* name = _setting->GetTextureFileName(i);
+        if (std::strlen(name) == 0) continue;
+        GLuint tex = 0;
+        if (_embedded) {
+            unsigned sz = 0;
+            const unsigned char* p = EmbeddedGet(name, &sz);
+            tex = p ? LoadTextureFromMemory(p, sz) : 0;
+        } else {
+            csmString path(_dir); path += name;
+            tex = LoadTexture(path.GetRawString());
+        }
         _textures.PushBack(tex);
         renderer->BindTexture(static_cast<csmUint32>(i), tex);
     }

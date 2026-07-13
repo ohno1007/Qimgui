@@ -49,7 +49,9 @@ int main() {
     // /data/local/tmp/live2d/<Model>/ (see docs/LIVE2D.md). Non-fatal if absent.
     if (aimgui::live2d::Init()) {
         aimgui::live2d::Resize(info.width, info.height);  // size masks before load
-        aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+        // Prefer the model baked into the binary; fall back to /data/local/tmp.
+        if (!aimgui::live2d::LoadEmbedded())
+            aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
     }
 #endif
 

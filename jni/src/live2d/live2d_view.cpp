@@ -1,6 +1,7 @@
 #include "live2d/live2d_view.h"
 #include "live2d/live2d_allocator.h"
 #include "live2d/live2d_model.h"
+#include "live2d/live2d_embedded.h"
 
 #include <CubismFramework.hpp>
 #include <Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp>
@@ -46,7 +47,21 @@ bool LoadModel(const char* dir, const char* model3json) {
     if (!g_started && !Init()) return false;
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(dir, model3json, g_width, g_height)) {
+    if (!g_model->LoadAssets(dir, model3json, g_width, g_height, /*embedded=*/false)) {
+        delete g_model;
+        g_model = nullptr;
+        return false;
+    }
+    return true;
+}
+
+bool LoadEmbedded() {
+    if (!g_started && !Init()) return false;
+    const char* m3 = EmbeddedFindModel3();
+    if (!m3) return false;  // no model compiled in — fall back to disk
+    delete g_model;
+    g_model = new Model();
+    if (!g_model->LoadAssets(nullptr, m3, g_width, g_height, /*embedded=*/true)) {
         delete g_model;
         g_model = nullptr;
         return false;

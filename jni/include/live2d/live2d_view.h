@@ -18,6 +18,9 @@ bool LoadModel(const char* dir, const char* model3json);
 // and load it. Returns false if none found / load failed.
 bool AutoLoad(const char* root);
 
+// Load the model embedded in the binary at build time, if any.
+bool LoadEmbedded();
+
 bool IsLoaded();
 
 // Notify the current drawable surface size (used to fit the model on screen).

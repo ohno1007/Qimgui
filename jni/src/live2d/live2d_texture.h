@@ -12,5 +12,8 @@ namespace live2d {
 // premultiplied textures for its default blend setup).
 GLuint LoadTexture(const char* path);
 
+// Same, decoding a PNG already resident in memory (embedded model assets).
+GLuint LoadTextureFromMemory(const void* data, unsigned long size);
+
 } // namespace live2d
 } // namespace aimgui

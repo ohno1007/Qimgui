@@ -21,9 +21,10 @@ public:
     Model();
     ~Model() override;
 
-    // Load <dir>/<model3json> and all referenced assets. width/height size the
-    // clipping-mask render target (use the drawable surface size). False on error.
-    bool LoadAssets(const char* dir, const char* model3json, int width, int height);
+    // Load a model and all referenced assets. When embedded==true, files are
+    // read from the binary (see live2d_embedded.h) and `dir` is ignored;
+    // otherwise from <dir>/<...>. width/height size the clipping-mask target.
+    bool LoadAssets(const char* dir, const char* model3json, int width, int height, bool embedded);
 
     // Advance motion / expression / physics / breath / blink by dt seconds.
     void Update(float dt);
@@ -37,9 +38,13 @@ private:
     void SetupModel(Csm::ICubismModelSetting* setting);
     void SetupTextures();
     void ReleaseTextures();
+    // Read a model file by path relative to the model dir, from the embedded
+    // blob or from disk. Caller frees with CSM_FREE.
+    Csm::csmByte* ReadModelFile(const Csm::csmString& relpath, Csm::csmSizeInt* outSize);
 
     Csm::ICubismModelSetting* _setting = nullptr;
     Csm::csmString _dir;
+    bool _embedded = false;
     Csm::csmVector<Csm::CubismIdHandle> _eyeBlinkIds;
     Csm::csmVector<Csm::CubismIdHandle> _lipSyncIds;
     Csm::csmVector<unsigned int> _textures; // GL texture ids
