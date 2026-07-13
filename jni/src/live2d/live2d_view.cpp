@@ -199,9 +199,14 @@ void Draw() {
     if (side <= 0.0f) side = static_cast<float>(g_width > g_height ? g_width : g_height);
     if (side <= 0.0f) side = 1.0f;
 
-    const float kFill    = 0.85f;   // model fills ~85% of the visible width
+    // Fit against the *shorter* visible side so size stays consistent across
+    // portrait/landscape (SurfaceFlinger rotates the square layer, so origin
+    // stays screen-centre in both orientations).
+    const float kFill    = 0.85f;   // model fills ~85% of the shorter screen side
     const float kOffsetY = 0.0f;    // + up / - down (square NDC); tune to taste
-    float s = kFill * static_cast<float>(g_width) / side;
+    float visMin = static_cast<float>(g_width < g_height ? g_width : g_height);
+    if (visMin <= 0.0f) visMin = side;
+    float s = kFill * visMin / side;
 
     CubismMatrix44 projection;
     projection.Scale(s, s);
