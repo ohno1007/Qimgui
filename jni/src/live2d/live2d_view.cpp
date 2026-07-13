@@ -175,8 +175,9 @@ void Draw() {
 
     // The model image is a square (side × side), but only the central
     // g_width × g_height of it is on screen. Fit the model to a fraction of the
-    // shorter visible side and centre it in the visible region. Vulkan clip
-    // space has y pointing down, so the model is flipped vertically (Scale -s).
+    // shorter visible side and centre it in the visible region. Cubism's VK
+    // vertex shader already flips Y for Vulkan (pos.y = -pos.y), so the GL-style
+    // projection below renders upright — no extra flip here.
     float side = static_cast<float>(g_ctx.extent.width > g_ctx.extent.height
                                         ? g_ctx.extent.width : g_ctx.extent.height);
     if (side <= 0.0f) side = 1.0f;
@@ -187,12 +188,13 @@ void Draw() {
     if (visMin <= 0.0f) visMin = side;
     float s = kFill * visMin / side;
 
-    // Centre of the visible region in the square image's Vulkan NDC (y down).
+    // Centre of the visible region in the square image's NDC (GL-style; the
+    // shader's Y-flip maps it to the right place on screen).
     float cx = static_cast<float>(g_width)  / side - 1.0f;
-    float cy = static_cast<float>(g_height) / side - 1.0f;
+    float cy = 1.0f - static_cast<float>(g_height) / side;
 
     CubismMatrix44 projection;
-    projection.Scale(s, -s);
+    projection.Scale(s, s);
     projection.Translate(cx, cy + kOffsetY);
 
     if (s_diagFrames < 3) {
