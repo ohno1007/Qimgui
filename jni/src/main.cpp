@@ -61,6 +61,9 @@ int main() {
         }
         ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
     }
+    // Boot as the floating ball (the character), not the open window.
+    st.collapsed = true;
+    st.expand = 0.0f;
 #endif
 
     aimgui::FramePacer pacer;
