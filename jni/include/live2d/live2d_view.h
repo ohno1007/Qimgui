@@ -56,8 +56,12 @@ void SetBallScale(float scale);
 // pixels) while active; when inactive the gaze eases back to centre.
 void SetLookScreen(float x, float y, bool active);
 
-// Trigger a tap reaction (a little bounce + head wobble).
+// Trigger a tap reaction (a little bounce + head wobble). Also plays a voice.
 void Poke();
+
+// Play a voice line (disk clip override, else the embedded voice) with
+// lip-sync. Bound to the UI "说话" button.
+void Speak();
 
 // True when the screen point lands on the collapsed (tiny) character — used
 // by the UI to detect a tap on it. Only meaningful while collapsed.
