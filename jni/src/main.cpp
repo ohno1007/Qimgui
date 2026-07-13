@@ -65,6 +65,10 @@ int main() {
     auto last = clock::now();
     uint32_t orient = info.orientation;
     bool running = true;
+#ifdef AIMGUI_LIVE2D
+    aimgui::live2d::Note("loop: entering render loop");
+    bool l2d_frame0 = false;
+#endif
     while (running) {
         auto now = clock::now();
         io.DeltaTime = std::max(1e-6f, std::chrono::duration<float>(now - last).count());
@@ -90,6 +94,9 @@ int main() {
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);
         ws.renderer()->SetSnapshotFrozen(st.exit_anim_active);
         ws.renderer()->EndFrame();
+#ifdef AIMGUI_LIVE2D
+        if (!l2d_frame0) { aimgui::live2d::Note("loop: first EndFrame returned"); l2d_frame0 = true; }
+#endif
         pacer.Wait();
 
         if (st.request_permeate_toggle) {

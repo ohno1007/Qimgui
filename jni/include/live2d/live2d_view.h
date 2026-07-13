@@ -21,6 +21,9 @@ bool AutoLoad(const char* root);
 // Load the model embedded in the binary at build time, if any.
 bool LoadEmbedded();
 
+// Append a line to the on-device diagnostics file (/data/local/tmp/aimgui_live2d.txt).
+void Note(const char* msg);
+
 bool IsLoaded();
 
 // Notify the current drawable surface size (used to fit the model on screen).

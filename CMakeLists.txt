@@ -117,30 +117,33 @@ if(AIMGUI_LIVE2D)
     # the Framework and our glue (the rest of the project builds -fno-rtti).
     target_compile_options(Framework PRIVATE -frtti)
 
-    # Embed the first bundled model (live2d/models/<Model>/) into the binary via
-    # a generated .incbin blob, so the app runs standalone. Falls back to a stub
-    # (disk-load only) when no model is present.
+    # Embed the Cubism GL shaders (required by the SDK 5 renderer, which loads
+    # them via a file loader) and, if present, the first bundled model — into
+    # the binary via a generated .incbin blob so the app runs standalone.
+    set(_l2d_shaders ${LIVE2D_FRAMEWORK}/src/Rendering/OpenGL/Shaders/Standard)
+    set(_l2d_gen_s ${CMAKE_BINARY_DIR}/live2d_embedded.S)
+    set(_l2d_gen_c ${CMAKE_BINARY_DIR}/live2d_embedded.cpp)
+    set(_l2d_gen_args ${_l2d_gen_s} ${_l2d_gen_c} --shaders ${_l2d_shaders})
+    file(GLOB_RECURSE _l2d_dep_files ${_l2d_shaders}/*)
     file(GLOB _l2d_model3 ${CMAKE_SOURCE_DIR}/live2d/models/*/*.model3.json)
     if(_l2d_model3)
         list(GET _l2d_model3 0 _l2d_m3first)
         get_filename_component(_l2d_model_dir ${_l2d_m3first} DIRECTORY)
-        set(_l2d_gen_s ${CMAKE_BINARY_DIR}/live2d_embedded.S)
-        set(_l2d_gen_c ${CMAKE_BINARY_DIR}/live2d_embedded.cpp)
+        list(APPEND _l2d_gen_args --model ${_l2d_model_dir})
         file(GLOB_RECURSE _l2d_model_files ${_l2d_model_dir}/*)
-        add_custom_command(
-            OUTPUT ${_l2d_gen_s} ${_l2d_gen_c}
-            COMMAND ${CMAKE_COMMAND} -E env python3
-                    ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py
-                    ${_l2d_model_dir} ${_l2d_gen_s} ${_l2d_gen_c}
-            DEPENDS ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py ${_l2d_model_files}
-            COMMENT "Embedding Live2D model ${_l2d_model_dir}")
-        enable_language(ASM)
-        set(_l2d_embed_srcs ${_l2d_gen_s} ${_l2d_gen_c})
-        message(STATUS "AImGui: embedding Live2D model ${_l2d_model_dir}")
+        list(APPEND _l2d_dep_files ${_l2d_model_files})
+        message(STATUS "AImGui: embedding Live2D shaders + model ${_l2d_model_dir}")
     else()
-        set(_l2d_embed_srcs ${JNI}/src/live2d/live2d_embedded_stub.cpp)
-        message(STATUS "AImGui: no bundled Live2D model — disk-load only")
+        message(STATUS "AImGui: embedding Live2D shaders (no bundled model)")
     endif()
+    add_custom_command(
+        OUTPUT ${_l2d_gen_s} ${_l2d_gen_c}
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py ${_l2d_gen_args}
+        DEPENDS ${CMAKE_SOURCE_DIR}/scripts/embed_live2d_model.py ${_l2d_dep_files}
+        COMMENT "Embedding Live2D shaders + model")
+    enable_language(ASM)
+    set(_l2d_embed_srcs ${_l2d_gen_s} ${_l2d_gen_c})
 
     add_library(aimgui_live2d STATIC
         ${JNI}/src/live2d/live2d_view.cpp

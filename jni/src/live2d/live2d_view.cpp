@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -39,6 +40,22 @@ Model*         g_model = nullptr;
 bool           g_started = false;
 int            g_width = 1;
 int            g_height = 1;
+
+// Cubism SDK 5's GL renderer loads its shaders through this file loader. We
+// serve them from the embedded blob, matching by basename (the renderer may
+// request "FrameworkShaders/xxx.frag" or just "xxx.frag").
+csmByte* FileLoader(const std::string filePath, csmSizeInt* outSize) {
+    std::string base = filePath;
+    size_t slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base = base.substr(slash + 1);
+    unsigned sz = 0;
+    const unsigned char* p = EmbeddedGet(base.c_str(), &sz);
+    if (!p) { L2DDiag("fileloader MISS: %s", filePath.c_str()); if (outSize) *outSize = 0; return nullptr; }
+    csmByte* buf = static_cast<csmByte*>(std::malloc(sz));
+    if (buf) { std::memcpy(buf, p, sz); if (outSize) *outSize = static_cast<csmSizeInt>(sz); }
+    return buf;
+}
+void BytesReleaser(csmByte* b) { std::free(b); }
 } // namespace
 
 bool Init() {
@@ -49,6 +66,8 @@ bool Init() {
         L2DDiag("cubism: %s", msg);
     };
     g_option.LoggingLevel = CubismFramework::Option::LogLevel_Verbose;
+    g_option.LoadFileFunction = &FileLoader;       // serve embedded GL shaders
+    g_option.ReleaseBytesFunction = &BytesReleaser;
 
     CubismFramework::StartUp(&g_allocator, &g_option);
     CubismFramework::Initialize();
@@ -89,6 +108,8 @@ bool LoadEmbedded() {
 }
 
 bool IsLoaded() { return g_model && g_model->Loaded(); }
+
+void Note(const char* msg) { L2DDiag("%s", msg); }
 
 namespace {
 // Find the first "*.model3.json" directly inside `dir`. Returns "" if none.
