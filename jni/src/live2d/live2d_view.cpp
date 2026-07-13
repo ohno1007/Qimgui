@@ -200,17 +200,23 @@ void Draw() {
     if (side <= 0.0f) side = 1.0f;
 
     // Fit against the *shorter* visible side so size stays consistent across
-    // portrait/landscape (SurfaceFlinger rotates the square layer, so origin
-    // stays screen-centre in both orientations).
+    // portrait/landscape.
     const float kFill    = 0.85f;   // model fills ~85% of the shorter screen side
-    const float kOffsetY = 0.0f;    // + up / - down (square NDC); tune to taste
+    const float kOffsetY = 0.0f;    // extra + up / - down nudge; tune to taste
     float visMin = static_cast<float>(g_width < g_height ? g_width : g_height);
     if (visMin <= 0.0f) visMin = side;
     float s = kFill * visMin / side;
 
+    // The overlay is a side×side square anchored at the screen's top-left, so
+    // its centre (NDC origin) falls off-screen. The centre of the *visible*
+    // g_width×g_height region is here in the square's NDC (GL y is flipped vs
+    // the screen, hence 1 - ...). Shift the model there so it's screen-centred.
+    float cx = static_cast<float>(g_width)  / side - 1.0f;
+    float cy = 1.0f - static_cast<float>(g_height) / side;
+
     CubismMatrix44 projection;
     projection.Scale(s, s);
-    if (kOffsetY != 0.0f) projection.TranslateY(kOffsetY);
+    projection.Translate(cx, cy + kOffsetY);
 
     g_model->Draw(projection);
 }
