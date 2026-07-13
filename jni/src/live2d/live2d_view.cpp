@@ -77,7 +77,9 @@ bool VkInit(const Live2DVkContext* ctx) {
 
     // One-time renderer configuration, before any model is created. The model
     // is rendered into an offscreen image that the UI composites over.
-    Rendering::CubismRenderer_Vulkan::SetConstantSettings(
+    // (Cubism 5 SDK r.2+ renamed SetConstantSettings → InitializeConstantSettings;
+    // the argument list is unchanged.)
+    Rendering::CubismRenderer_Vulkan::InitializeConstantSettings(
         g_ctx.device, g_ctx.physicalDevice, g_ctx.commandPool, g_ctx.queue,
         g_ctx.imageCount, g_ctx.extent, g_ctx.modelView, g_ctx.colorFormat,
         g_ctx.depthFormat);

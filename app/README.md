@@ -52,6 +52,29 @@ gradle :assembleRelease
 #   → build/outputs/apk/release/AImGui-release.apk   (~0.95 MB)
 ```
 
+## Live2D character (optional)
+
+The APK can also embed the **Live2D Cubism** floating character — the same layer
+the ELF build enables with `-DAIMGUI_LIVE2D=ON`, ported to the NativeActivity
+render loop. It's **off by default** (a fresh clone builds the lean APK with no
+proprietary deps). To build it in:
+
+1. Drop the Cubism SDK into `../third_party` (`Core/` + `CubismNativeFramework/`)
+   and a model into `../live2d/models/<Model>/` — see [docs/LIVE2D.md](../docs/LIVE2D.md).
+2. Put `glslc` (NDK `shader-tools/`) on `PATH` — it compiles Cubism's Vulkan shaders.
+3. Build with the flag:
+
+```bash
+export PATH="$ANDROID_HOME/ndk/26.3.11579264/shader-tools/linux-x86_64:$PATH"
+gradle :assembleRelease -Paimgui.live2d=true
+```
+
+The model + compiled SPIR-V are embedded into `libaimgui.so`, so the APK is
+self-contained (no `adb push` of model files). The Live2D build **forces the
+Vulkan backend** (Cubism's renderer is Vulkan) and raises `minSdk` to 30
+(textures are decoded with `AImageDecoder`). It boots as the draggable
+character; tap it / drag it, and it expands into the window.
+
 ## Install & run
 
 ```bash

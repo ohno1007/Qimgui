@@ -25,6 +25,9 @@
 #include "core/frame_pacer.h"
 #include "core/renderer.h"
 #include "ui/ui.h"
+#ifdef AIMGUI_LIVE2D
+#include "live2d/live2d_view.h"
+#endif
 
 #define LOG_TAG "AImGui"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -41,6 +44,12 @@ struct Engine {
     int                                height       = 0;
     std::chrono::steady_clock::time_point last;
 };
+
+#ifdef AIMGUI_LIVE2D
+// Drawn into the scene framebuffer (before ImGui) via the renderer hook, so the
+// UI composites on top of the character.
+void Live2DScenePreDraw() { aimgui::live2d::Draw(); }
+#endif
 
 // One-time ImGui context + font setup. Mirrors the head of the original
 // main() so behaviour (no ini/log files, recoverable font asserts, dark
@@ -59,6 +68,13 @@ void InitImGuiOnce(Engine* e) {
     io.ConfigErrorRecoveryEnableAssert = false;
     ImGui::StyleColorsDark();
     aimgui::LoadDefaultAndSystemCJKFont(25.0f);
+#ifdef AIMGUI_LIVE2D
+    // Boot as the floating character (collapsed pill), not the open window —
+    // matches the ELF Live2D build. Set once; renderer rebuilds (rotation)
+    // must not re-collapse the window.
+    e->st.collapsed = true;
+    e->st.expand    = 0.0f;
+#endif
     e->imgui_ready = true;
 }
 
@@ -67,19 +83,43 @@ void CreateRenderer(Engine* e) {
     e->width  = ANativeWindow_getWidth(e->app->window);
     e->height = ANativeWindow_getHeight(e->app->window);
     if (e->width <= 0 || e->height <= 0) return;
-    e->renderer = aimgui::MakeRenderer(e->app->window, e->width, e->height,
-                                       aimgui::Backend::Auto);
+#ifdef AIMGUI_LIVE2D
+    // Live2D is built on Cubism's Vulkan renderer; force Vulkan so it shares
+    // this renderer's device, queue and swapchain.
+    const aimgui::Backend backend = aimgui::Backend::Vulkan;
+#else
+    const aimgui::Backend backend = aimgui::Backend::Auto;
+#endif
+    e->renderer = aimgui::MakeRenderer(e->app->window, e->width, e->height, backend);
     if (e->renderer) {
         e->st.renderer_name = e->renderer->Name();
         e->st.display_w = e->width;
         e->st.display_h = e->height;
         LOGI("renderer up: %s (%dx%d)", e->st.renderer_name, e->width, e->height);
+#ifdef AIMGUI_LIVE2D
+        // Build the Cubism renderer against the (fresh) Vulkan device and load
+        // the model embedded in libaimgui.so. Falls back to a pushed model dir
+        // if someone adb-pushed one. Non-fatal if the backend can't host it.
+        if (const aimgui::Live2DVkContext* l2dctx = e->renderer->GetLive2DVkContext()) {
+            if (aimgui::live2d::VkInit(l2dctx)) {
+                aimgui::live2d::Resize(e->width, e->height);
+                if (!aimgui::live2d::LoadEmbedded())
+                    aimgui::live2d::AutoLoad("/data/local/tmp/live2d");
+            }
+            e->renderer->SetScenePreDraw(&Live2DScenePreDraw);
+        }
+#endif
     } else {
         LOGW("no renderer backend could initialise");
     }
 }
 
 void DestroyRenderer(Engine* e) {
+#ifdef AIMGUI_LIVE2D
+    // The Cubism renderer is bound to the renderer's Vulkan device; release it
+    // before the backend tears that device down.
+    aimgui::live2d::Shutdown();
+#endif
     if (e->renderer) {
         e->renderer->Shutdown();
         e->renderer.reset();
@@ -210,10 +250,24 @@ void android_main(struct android_app* app) {
         engine.st.display_h = engine.height;
 
         engine.renderer->NewFrame();
+#ifdef AIMGUI_LIVE2D
+        // Advance the model here; the actual draw happens in the scene-predraw
+        // hook so ImGui composites on top of it. The eyes follow the touch.
+        aimgui::live2d::Resize(engine.width, engine.height);
+        aimgui::live2d::SetLookScreen(io.MousePos.x, io.MousePos.y, io.MouseDown[0]);
+        aimgui::live2d::Update(io.DeltaTime);
+#endif
         engine.st.scene_snapshot_id = engine.renderer->GetSceneSnapshotID();
         ImGui::NewFrame();
         bool keep_running = true;
         aimgui::DrawUi(&engine.st, &keep_running);
+#ifdef AIMGUI_LIVE2D
+        // The character is the collapsed floating ball (drawn at ball_pos) and
+        // shrinks away as the window expands.
+        aimgui::live2d::SetBall(engine.st.ball_pos.x, engine.st.ball_pos.y);
+        aimgui::live2d::SetBallScale(engine.st.ball_scale);
+        aimgui::live2d::SetView(engine.st.expand);
+#endif
         engine.renderer->SetBloomIntensity(engine.st.bloom_intensity);
         engine.renderer->SetSnapshotFrozen(engine.st.exit_anim_active);
         engine.renderer->EndFrame();

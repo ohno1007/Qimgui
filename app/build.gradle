@@ -2,6 +2,14 @@ plugins {
     id 'com.android.application' version '8.5.2'
 }
 
+// Live2D Cubism character layer. OFF by default so a fresh clone builds the
+// lean, model-free APK with no proprietary dependencies (matches the ELF
+// build's AIMGUI_LIVE2D=OFF default). Enable the floating character with:
+//   gradle :assembleRelease -Paimgui.live2d=true
+// which requires the Cubism SDK under ../third_party, a model under
+// ../live2d/models (see docs/LIVE2D.md), and glslc (NDK shader-tools) on PATH.
+def live2d = (project.findProperty('aimgui.live2d') ?: 'false').toBoolean()
+
 android {
     namespace 'com.aimgui.app'
     compileSdk 34
@@ -9,7 +17,9 @@ android {
 
     defaultConfig {
         applicationId 'com.aimgui.app'
-        minSdk 24
+        // Live2D decodes textures with AImageDecoder (API 30+), so the model
+        // build needs minSdk 30; the lean build keeps the ELF's floor of 24.
+        minSdk live2d ? 30 : 24
         targetSdk 34
         versionCode 1
         versionName '1.0'
@@ -22,6 +32,9 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_STL=c++_static'
+                if (live2d) {
+                    arguments '-DANDROID_STL=c++_static', '-DAIMGUI_LIVE2D=ON'
+                }
             }
         }
     }

@@ -158,9 +158,9 @@ bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
 
     out.SetCurrentLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     out.CreateView(ctx.device, fmt, VK_IMAGE_ASPECT_COLOR_BIT, static_cast<int>(mip));
-    out.CreateSampler(ctx.device, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                      VK_FILTER_LINEAR, VK_FILTER_LINEAR,
-                      VK_SAMPLER_MIPMAP_MODE_LINEAR, 1.0f, static_cast<csmUint32>(mip));
+    // Cubism 5 SDK r.2+ simplified CreateSampler to (device, maxAnisotropy,
+    // mipLevel); address mode / filters are fixed internally (clamp + linear).
+    out.CreateSampler(ctx.device, 1.0f, static_cast<csmUint32>(mip));
     return true;
 }
 

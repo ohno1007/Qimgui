@@ -89,8 +89,12 @@ bool Model::LoadAssets(const Live2DVkContext& ctx, const char* dir, const char* 
     SetupModel(setting);
     if (_model == nullptr) { LOGW("moc load failed"); return false; }
 
-    CreateRenderer(static_cast<Csm::csmUint32>(width > 0 ? width : 1),
-                   static_cast<Csm::csmUint32>(height > 0 ? height : 1));
+    // CubismUserModel::CreateRenderer takes a mask-buffer count (default 1); the
+    // render-target size is supplied to the Vulkan renderer separately via
+    // InitializeConstantSettings / SetRenderTarget (see live2d_view.cpp), so the
+    // model's own width/height aren't passed here.
+    (void)width; (void)height;
+    CreateRenderer(1);
     SetupTextures();
 
     _loaded = true;
