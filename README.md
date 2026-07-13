@@ -98,6 +98,21 @@ adb shell su -c /data/local/tmp/AImGui
 
 A draggable, Chinese-capable ImGui window appears over the current display.
 
+## APK build (no root)
+
+Prefer a normal, installable app with **no root and no permissions**? The
+[`app/`](app/) folder is a full port of this project into an
+`android.app.NativeActivity` — same renderers, UI and CJK font, but the window
+and touch input come from the framework instead of SurfaceFlinger and
+`/dev/input`. See [app/README.md](app/README.md).
+
+```bash
+cd app
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+gradle :assembleRelease
+adb install -r build/outputs/apk/release/AImGui-release.apk
+```
+
 ## Customize
 
 UI content lives in `jni/src/ui/main_ui.cpp`. Add a new page:

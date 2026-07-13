@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AImGui, non-root APK. No permissions are requested: the UI runs entirely
+     inside this app's own NativeActivity window and reads no privileged
+     resources (system fonts under /system/fonts are world-readable). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <application
+        android:label="@string/app_name"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- Pure-native NativeActivity; the C++ lives in libaimgui.so. -->
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|density|keyboard|navigation|uiMode"
+            android:screenOrientation="unspecified"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+            <meta-data android:name="android.app.lib_name" android:value="aimgui" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
