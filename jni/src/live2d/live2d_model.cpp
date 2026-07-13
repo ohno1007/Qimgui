@@ -13,6 +13,7 @@
 
 #include <android/log.h>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #define LOG_TAG "AImGui_Live2D"
@@ -88,21 +89,21 @@ void Model::SetupModel(ICubismModelSetting* setting) {
     csmByte* buf = nullptr;
 
     // .moc3
-    if (csmStrlen(setting->GetModelFileName()) > 0) {
+    if (std::strlen(setting->GetModelFileName()) > 0) {
         csmString path(_dir); path += setting->GetModelFileName();
         buf = ReadFile(path, &size);
         if (buf) { LoadModel(buf, size, /*shouldCheckMocConsistency=*/true); CSM_FREE(buf); }
     }
 
     // physics
-    if (csmStrlen(setting->GetPhysicsFileName()) > 0) {
+    if (std::strlen(setting->GetPhysicsFileName()) > 0) {
         csmString path(_dir); path += setting->GetPhysicsFileName();
         buf = ReadFile(path, &size);
         if (buf) { LoadPhysics(buf, size); CSM_FREE(buf); }
     }
 
     // pose
-    if (csmStrlen(setting->GetPoseFileName()) > 0) {
+    if (std::strlen(setting->GetPoseFileName()) > 0) {
         csmString path(_dir); path += setting->GetPoseFileName();
         buf = ReadFile(path, &size);
         if (buf) { LoadPose(buf, size); CSM_FREE(buf); }
@@ -144,7 +145,7 @@ void Model::SetupTextures() {
     if (!renderer || !_setting) return;
 
     for (csmInt32 i = 0; i < _setting->GetTextureCount(); ++i) {
-        if (csmStrlen(_setting->GetTextureFileName(i)) == 0) continue;
+        if (std::strlen(_setting->GetTextureFileName(i)) == 0) continue;
         csmString path(_dir); path += _setting->GetTextureFileName(i);
         GLuint tex = LoadTexture(path.GetRawString());
         _textures.PushBack(tex);
