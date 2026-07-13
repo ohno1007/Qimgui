@@ -156,6 +156,7 @@ if(AIMGUI_LIVE2D)
         ${JNI}/src/live2d/live2d_view.cpp
         ${JNI}/src/live2d/live2d_model.cpp
         ${JNI}/src/live2d/live2d_texture.cpp
+        ${JNI}/src/live2d/vk_dynamic_rendering_shim.cpp
         ${_l2d_embed_srcs})
     target_compile_options(aimgui_live2d PRIVATE -frtti) # GetRenderer<>() dynamic_cast
     target_compile_definitions(aimgui_live2d PRIVATE AIMGUI_LIVE2D AIMGUI_REAL_VULKAN)

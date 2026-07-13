@@ -6,6 +6,9 @@
 #ifdef AIMGUI_LIVE2D
 #include "live2d_vk_bridge.h"
 #include <cstring>
+// Registers the device with the dynamic-rendering shim (see
+// vk_dynamic_rendering_shim.cpp) so vkCmdBeginRendering/EndRendering resolve.
+extern "C" void aimgui_vk_set_device(VkDevice);
 #endif
 
 #include "imgui.h"
@@ -238,6 +241,9 @@ private:
 #endif
         if (vkCreateDevice(m_PhysicalDevice, &dci, nullptr, &m_Device) != VK_SUCCESS) return false;
         vkGetDeviceQueue(m_Device, m_QueueFamily, 0, &m_Queue);
+#ifdef AIMGUI_LIVE2D
+        aimgui_vk_set_device(m_Device);
+#endif
         return true;
     }
 

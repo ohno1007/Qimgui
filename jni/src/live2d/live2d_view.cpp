@@ -205,6 +205,9 @@ void Draw() {
 }
 
 void Shutdown() {
+    // The model owns Vulkan texture images; make sure the GPU is done with them
+    // before their destructors free the handles.
+    if (g_started && g_ctx.device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_ctx.device);
     delete g_model;
     g_model = nullptr;
     if (g_started) {
