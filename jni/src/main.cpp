@@ -101,6 +101,7 @@ int main() {
         // The character is the collapsed floating ball (drawn at ball_pos) and
         // shrinks away as the window expands.
         aimgui::live2d::SetBall(st.ball_pos.x, st.ball_pos.y);
+        aimgui::live2d::SetBallScale(st.ball_scale);
         aimgui::live2d::SetView(st.expand);
 #endif
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);

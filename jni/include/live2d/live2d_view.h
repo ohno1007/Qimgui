@@ -49,6 +49,9 @@ void SetView(float expandT);
 // drawn at while collapsed.
 void SetBall(float x, float y);
 
+// Size multiplier for the ball character (1 = default).
+void SetBallScale(float scale);
+
 // The character's eyes/head look toward this screen point (visible-region
 // pixels) while active; when inactive the gaze eases back to centre.
 void SetLookScreen(float x, float y, bool active);

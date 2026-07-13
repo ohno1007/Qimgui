@@ -47,6 +47,7 @@ int            g_height = 1;
 // fades out as the window expands (an open window shows no model).
 float          g_expandT   = 0.0f;   // 0 = ball shown, 1 = window (no model)
 float          g_ballX = 140.0f, g_ballY = 260.0f;  // ball centre (screen px)
+float          g_ballScale = 1.0f;                  // UI size multiplier
 float          g_lookX = 0, g_lookY = 0;   // gaze target (screen px)
 bool           g_lookActive = false;
 float          g_dragX = 0, g_dragY = 0;    // smoothed gaze in [-1,1]
@@ -186,6 +187,8 @@ void SetView(float expandT) { g_expandT = ClampF(expandT, 0.0f, 1.0f); }
 
 void SetBall(float x, float y) { g_ballX = x; g_ballY = y; }
 
+void SetBallScale(float scale) { g_ballScale = ClampF(scale, 0.1f, 5.0f); }
+
 void SetLookScreen(float x, float y, bool active) {
     g_lookX = x; g_lookY = y; g_lookActive = active;
 }
@@ -193,7 +196,7 @@ void SetLookScreen(float x, float y, bool active) {
 void Poke() { g_reaction = kReactionDur; }
 
 bool HitCollapsed(float x, float y) {
-    float hw = kBallPx * 0.40f, hh = kBallPx * 0.55f;
+    float hw = kBallPx * g_ballScale * 0.40f, hh = kBallPx * g_ballScale * 0.55f;
     return x >= g_ballX - hw && x <= g_ballX + hw &&
            y >= g_ballY - hh && y <= g_ballY + hh;
 }
@@ -238,7 +241,7 @@ void Draw() {
 
     const float kOffsetY = 0.0f;    // + up / - down nudge; tune on device
     float fade = 1.0f - SmoothStep(0.0f, 0.6f, g_expandT);  // 1 collapsed → 0 open
-    float s = (kBallPx * (fade > 0.001f ? fade : 0.001f)) / side;
+    float s = (kBallPx * g_ballScale * (fade > 0.001f ? fade : 0.001f)) / side;
 
     // A little "pop" while reacting to a tap.
     float react01 = g_reaction / kReactionDur;

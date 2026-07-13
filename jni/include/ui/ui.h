@@ -35,6 +35,8 @@ struct UiState {
     // can be dragged anywhere; this is its centre in screen px. Re-clamped to
     // the display each frame. (-1,-1) = uninitialised → placed on first use.
     ImVec2 ball_pos = ImVec2(-1.0f, -1.0f);
+    // Model-size multiplier for the ball, adjustable from the UI.
+    float  ball_scale = 1.0f;
 
     // Remembered full-window pos / size so the window springs back to
     // wherever the user last dragged it.

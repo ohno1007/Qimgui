@@ -257,6 +257,13 @@ void DrawWindow(UiState* state) {
         }
     }
     ripple::TouchLastItem();
+
+#ifdef AIMGUI_LIVE2D
+    ImGui::Spacing();
+    ImGui::SeparatorText(u8"Live2D 小人");
+    SliderFloatGrabValue(u8"小人大小", &state->ball_scale, 0.4f, 3.0f, "%.2f");
+    ImGui::TextWrapped(u8"调整悬浮球（Live2D 小人）的显示大小。");
+#endif
 }
 
 void DrawPerformance(UiState* state) {
