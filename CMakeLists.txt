@@ -160,5 +160,8 @@ if(AIMGUI_LIVE2D)
 
     target_compile_definitions(AImGui PRIVATE AIMGUI_LIVE2D)
     target_link_libraries(AImGui PRIVATE aimgui_live2d)
+    # aimgui_core holds window_session.cpp, which must force the GL backend
+    # (Cubism needs a live GL context) — so it needs the define too.
+    target_compile_definitions(aimgui_core PUBLIC AIMGUI_LIVE2D)
     message(STATUS "AImGui: Live2D Cubism support ENABLED")
 endif()
