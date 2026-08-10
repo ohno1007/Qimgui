@@ -68,6 +68,7 @@ int main() {
 
     aimgui::FramePacer pacer;
     auto last = clock::now();
+    auto last_display_poll = last;
     uint32_t orient = info.orientation;
     bool running = true;
     while (running) {
@@ -75,9 +76,17 @@ int main() {
         io.DeltaTime = std::max(1e-6f, std::chrono::duration<float>(now - last).count());
         last = now;
         pacer.SetTargetFps(st.target_fps);
-        info = ANativeWindowCreator::GetDisplayInfo();
-        st.display_w = info.width; st.display_h = info.height;
-        if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
+        // GetDisplayInfo() is a binder round-trip to SurfaceFlinger. Polling
+        // it per frame costs one IPC every frame (120/s on a 120 Hz panel)
+        // to watch for a rotation that happens maybe once a minute. Poll at
+        // 5 Hz instead — 200 ms of latency is invisible next to the ~300 ms
+        // system rotation animation.
+        if (now - last_display_poll >= std::chrono::milliseconds(200)) {
+            last_display_poll = now;
+            info = ANativeWindowCreator::GetDisplayInfo();
+            st.display_w = info.width; st.display_h = info.height;
+            if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
+        }
         if (aimgui::kbd_input::ConsumeVolumePresses() > 0) st.collapsed = !st.collapsed;
         if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();
         aimgui::kbd_input::Flush();
