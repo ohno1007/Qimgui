@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <linux/input.h>
 #include <mutex>
+#include <poll.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -118,12 +119,24 @@ void ReaderLoop(int fd) {
     bool shift = false;
     input_event ev[16];
     while (g_running.load(std::memory_order_relaxed)) {
+        // Sleep in poll() until the device actually has something to give.
+        // The fd is O_NONBLOCK, so without this the loop spun on EAGAIN and
+        // a 5 ms usleep — 200 wakeups/second, per matching input device,
+        // forever, with nothing happening. LooksLikeKeyboard() accepts every
+        // device exposing a volume key, so that was several threads' worth.
+        // The timeout only bounds how long Shutdown() takes to be noticed.
+        struct pollfd pfd{};
+        pfd.fd     = fd;
+        pfd.events = POLLIN;
+        const int pr = ::poll(&pfd, 1, 200);
+        if (pr <= 0) {
+            if (pr < 0 && errno != EINTR) break;
+            continue;
+        }
+
         ssize_t n = ::read(fd, ev, sizeof(ev));
         if (n <= 0) {
-            if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
-                usleep(5'000);
-                continue;
-            }
+            if (n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
             break;
         }
         size_t count = (size_t)n / sizeof(input_event);
