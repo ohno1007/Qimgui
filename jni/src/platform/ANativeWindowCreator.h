@@ -348,6 +348,14 @@ namespace android {
             void *(*SurfaceComposerClient__Transaction__SetLayer)(void *thiz, StrongPointer<void> &surfaceControl, int32_t z) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetTrustedOverlay)(void *thiz, StrongPointer<void> &surfaceControl, bool isTrustedOverlay) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetLayerStack)(void *thiz, StrongPointer<void> &surfaceControl, uint32_t layerStack) = nullptr;
+            // Android 12+. Tells SurfaceFlinger to blur whatever is composited
+            // *behind* this layer, within its bounds — the same path the
+            // system uses for notification-shade frosted glass. The blur runs
+            // in the compositor, so it costs this process nothing per frame.
+            void *(*SurfaceComposerClient__Transaction__SetBackgroundBlurRadius)(void *thiz, StrongPointer<void> &surfaceControl, int32_t radius) = nullptr;
+            // Restricts a layer to a sub-rectangle, so a full-surface blur
+            // layer can be confined to just the UI window's bounds.
+            void *(*SurfaceComposerClient__Transaction__SetCrop)(void *thiz, StrongPointer<void> &surfaceControl, const ui::Rect *crop) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Show)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Hide)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
@@ -517,6 +525,10 @@ namespace android {
                 if (12 <= systemVersion) {
                     ResolveMethod(SurfaceComposerClient__Transaction, SetTrustedOverlay, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setTrustedOverlayERKNS_2spINS_14SurfaceControlEEEb");
                     ResolveMethod(SurfaceComposerClient__Transaction, Reparent, libgui, "_ZN7android21SurfaceComposerClient11Transaction8reparentERKNS_2spINS_14SurfaceControlEEES6_");
+                    // Background blur (Android 12+). Absent on ROMs built
+                    // without it; callers must null-check before use.
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetBackgroundBlurRadius, libgui, "_ZN7android21SurfaceComposerClient11Transaction23setBackgroundBlurRadiusERKNS_2spINS_14SurfaceControlEEEi");
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetCrop, libgui, "_ZN7android21SurfaceComposerClient11Transaction7setCropERKNS_2spINS_14SurfaceControlEEERKNS_4RectE");
                 }
                 if (9 <= systemVersion) {
                     ResolveMethod(SurfaceComposerClient__Transaction, SetMatrix, libgui, "_ZN7android21SurfaceComposerClient11Transaction9setMatrixERKNS_2spINS_14SurfaceControlEEEffff");
@@ -690,6 +702,29 @@ namespace android {
 
             void *SetLayerStack(StrongPointer<void> &surfaceControl, uint32_t layerStack) {
                 return Functionals::GetInstance().SurfaceComposerClient__Transaction__SetLayerStack(data, surfaceControl, layerStack);
+            }
+
+            // Both of these are Android 12+ and can be missing entirely on
+            // ROMs whose libgui was built without them, so they return false
+            // rather than jumping through a null pointer — the mistake that
+            // made mirrorSurface segfault the process.
+            bool SetBackgroundBlurRadius(StrongPointer<void> &surfaceControl, int32_t radius) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetBackgroundBlurRadius;
+                if (nullptr == fn) return false;
+                fn(data, surfaceControl, radius);
+                return true;
+            }
+
+            bool SetCrop(StrongPointer<void> &surfaceControl, const ui::Rect &crop) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetCrop;
+                if (nullptr == fn) return false;
+                fn(data, surfaceControl, &crop);
+                return true;
+            }
+
+            static bool BackgroundBlurSupported() {
+                return nullptr != Functionals::GetInstance().SurfaceComposerClient__Transaction__SetBackgroundBlurRadius
+                    && nullptr != Functionals::GetInstance().SurfaceComposerClient__Transaction__SetCrop;
             }
 
             void Show(StrongPointer<void> &surfaceControl) {
