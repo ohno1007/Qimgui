@@ -2,6 +2,8 @@
 
 #include <GLES3/gl3.h>
 
+#include <chrono>
+
 namespace aimgui {
 
 // Tiny post-process bloom for the OpenGL ES 3 backend.
@@ -42,6 +44,10 @@ public:
     void EndSceneAndComposite();
 
 private:
+    // True at most once per snapshot interval; rate-limits the full-surface
+    // copy that feeds the shatter animation. See EndSceneAndComposite().
+    bool SnapshotDue();
+
     bool m_Ready  = false;
     int  m_Width  = 0;
     int  m_Height = 0;
@@ -50,6 +56,7 @@ private:
     float m_Intensity     = 0.75f;
     bool  m_SnapshotFrozen = false;
     bool  m_OverDest       = false;
+    std::chrono::steady_clock::time_point m_LastSnapshot{};
 
     GLuint m_SceneFBO     = 0;
     GLuint m_SceneTex     = 0;

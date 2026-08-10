@@ -1214,7 +1214,12 @@ namespace android {
             if (13 > detail::Functionals::GetInstance().systemVersion)
                 return;
 
-            if (std::chrono::steady_clock::now() - lastTime < std::chrono::seconds(1))
+            // Each pass below fork+execs `dumpsys display`, which binder-calls
+            // DisplayManagerService and formats a large text dump — a costly
+            // thing to do on a timer. It only exists to notice a newly-added
+            // display (screen recorder, cast) so a mirror layer can be made
+            // for it, so a few seconds of latency there is harmless.
+            if (std::chrono::steady_clock::now() - lastTime < std::chrono::seconds(3))
                 return;
 
             // Run "dumpsys display" and get result

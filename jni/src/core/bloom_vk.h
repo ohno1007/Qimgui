@@ -2,6 +2,8 @@
 
 #include "vulkan_wrapper.h"
 
+#include <chrono>
+
 namespace aimgui {
 
 // Post-process bloom for the Vulkan backend. Layout:
@@ -81,6 +83,8 @@ public:
     void RecordSnapshotCopy(VkCommandBuffer cmd);
 
 private:
+    bool SnapshotDue();
+
     bool             m_Ready  = false;
     VkDevice         m_Device = VK_NULL_HANDLE;
     VkPhysicalDevice m_Phys   = VK_NULL_HANDLE;
@@ -90,6 +94,8 @@ private:
     uint32_t         m_BW = 0, m_BH = 0;
     float            m_Intensity      = 0.75f;
     bool             m_SnapshotFrozen = false;
+    bool             m_BlurInitialized = false;
+    std::chrono::steady_clock::time_point m_LastSnapshot{};
     bool             m_OverDest       = false;
 
     VkRenderPass     m_SceneRP = VK_NULL_HANDLE;

@@ -201,6 +201,13 @@ bool BloomGL::Init(int width, int height) {
     return true;
 }
 
+bool BloomGL::SnapshotDue() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_LastSnapshot < std::chrono::milliseconds(200)) return false;
+    m_LastSnapshot = now;
+    return true;
+}
+
 void BloomGL::BeginScene() {
     if (!m_Ready) return;
     glBindFramebuffer(GL_FRAMEBUFFER, m_SceneFBO);
@@ -219,31 +226,40 @@ void BloomGL::EndSceneAndComposite() {
     glDisable(GL_SCISSOR_TEST);
     glBindVertexArray(m_QuadVAO);
 
-    // 1) Threshold: scene (full res) -> blur[0] (half res)
-    glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[0]);
-    glViewport(0, 0, m_BlurW, m_BlurH);
-    glUseProgram(m_ProgThreshold);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_SceneTex);
-    glUniform1i(m_LocThreshScene, 0);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    // The threshold + blur chain only feeds the bloom term, which the
+    // composite scales by uIntensity. At zero intensity its result is
+    // multiplied away, so skip all five passes and composite the scene
+    // alone — this is what makes the UI's bloom slider an actual
+    // performance switch rather than just a visual one.
+    const bool bloom_on = m_Intensity > 0.001f;
 
-    // 2) Two iterations of H + V Gaussian for a wider, softer bloom.
-    for (int iter = 0; iter < 2; ++iter) {
-        // Horizontal: blur[0] -> blur[1]
-        glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[1]);
-        glUseProgram(m_ProgBlur);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_BlurTex[0]);
-        glUniform1i(m_LocBlurImage, 0);
-        glUniform2f(m_LocBlurDir, 1.0f / (float)m_BlurW, 0.0f);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        // Vertical: blur[1] -> blur[0]
+    if (bloom_on) {
+        // 1) Threshold: scene (full res) -> blur[0] (half res)
         glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[0]);
-        glBindTexture(GL_TEXTURE_2D, m_BlurTex[1]);
-        glUniform2f(m_LocBlurDir, 0.0f, 1.0f / (float)m_BlurH);
+        glViewport(0, 0, m_BlurW, m_BlurH);
+        glUseProgram(m_ProgThreshold);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_SceneTex);
+        glUniform1i(m_LocThreshScene, 0);
         glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // 2) Two iterations of H + V Gaussian for a wider, softer bloom.
+        for (int iter = 0; iter < 2; ++iter) {
+            // Horizontal: blur[0] -> blur[1]
+            glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[1]);
+            glUseProgram(m_ProgBlur);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, m_BlurTex[0]);
+            glUniform1i(m_LocBlurImage, 0);
+            glUniform2f(m_LocBlurDir, 1.0f / (float)m_BlurW, 0.0f);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+
+            // Vertical: blur[1] -> blur[0]
+            glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[0]);
+            glBindTexture(GL_TEXTURE_2D, m_BlurTex[1]);
+            glUniform2f(m_LocBlurDir, 0.0f, 1.0f / (float)m_BlurH);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
     }
 
     // 4) Composite scene + bloom into the default framebuffer.
@@ -275,11 +291,17 @@ void BloomGL::EndSceneAndComposite() {
     glActiveTexture(GL_TEXTURE0);
     if (m_OverDest) glDisable(GL_BLEND);
 
-    // Snapshot the just-rendered scene into m_PrevSceneTex so the next
-    // frame's shatter chips can sample what the UI looked like before
-    // they peeled off. Skipped while frozen so chips keep sampling the
-    // pre-shatter UI throughout the exit animation.
-    if (!m_SnapshotFrozen) {
+    // Snapshot the just-rendered scene into m_PrevSceneTex so the shatter
+    // chips can sample what the UI looked like before they peeled off.
+    // Skipped while frozen so chips keep sampling the pre-shatter UI
+    // throughout the exit animation.
+    //
+    // This is a full-surface copy (on a 1080x2400 phone the square surface
+    // makes that 2400*2400*4 = 23 MB). Doing it every frame burned ~2.7 GB/s
+    // of memory bandwidth continuously to serve a 1.2 s animation that plays
+    // once, at exit. Refresh it at ~5 Hz instead: the chips then sample a UI
+    // image up to 200 ms old, which is invisible mid-shatter.
+    if (!m_SnapshotFrozen && SnapshotDue()) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, m_SceneFBO);
         glBindTexture(GL_TEXTURE_2D, m_PrevSceneTex);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_Width, m_Height);

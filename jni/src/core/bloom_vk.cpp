@@ -474,6 +474,18 @@ void BloomVK::EndSceneAndBlur(VkCommandBuffer cmd) {
         vkCmdEndRenderPass(cmd);
     };
 
+    // These five passes only produce the bloom term, which the composite
+    // scales by m_Intensity. At zero intensity the result is multiplied away,
+    // so skip them entirely — this makes the UI's bloom slider an actual
+    // performance switch rather than just a visual one.
+    //
+    // Only safe once the blur images have been written at least once: the
+    // composite samples blur[0] unconditionally, and the blur render pass is
+    // what moves those images out of UNDEFINED into SHADER_READ_ONLY_OPTIMAL.
+    // Sampling an UNDEFINED image is invalid usage, so the first pass through
+    // always runs even at zero intensity.
+    if (m_Intensity <= 0.001f && m_BlurInitialized) return;
+
     PushConsts pc{};
 
     // 1) threshold: scene -> blur[0]
@@ -489,6 +501,7 @@ void BloomVK::EndSceneAndBlur(VkCommandBuffer cmd) {
         pc.dir_y = 1.0f / (float)m_BH;
         blur_pass(m_BlurFB[0], m_PipeBlur, m_DSBlurV, pc);
     }
+    m_BlurInitialized = true;
 }
 
 void BloomVK::RecordCompositeDraw(VkCommandBuffer cmd) {
@@ -503,9 +516,25 @@ void BloomVK::RecordCompositeDraw(VkCommandBuffer cmd) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
+// True at most once per snapshot interval; rate-limits the full-surface copy
+// below.
+bool BloomVK::SnapshotDue() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_LastSnapshot < std::chrono::milliseconds(200)) return false;
+    m_LastSnapshot = now;
+    return true;
+}
+
 void BloomVK::RecordSnapshotCopy(VkCommandBuffer cmd) {
     if (!m_Ready || m_PrevSceneImage == VK_NULL_HANDLE) return;
     if (m_SnapshotFrozen) return; // keep serving the pre-shatter snapshot
+
+    // Full-surface vkCmdCopyImage — on a 1080x2400 phone the square surface
+    // makes that 2400*2400*4 = 23 MB. Recording it every frame burned ~2.7 GB/s
+    // of memory bandwidth continuously to serve a 1.2 s animation that plays
+    // once, at exit. Refresh at ~5 Hz instead; a snapshot up to 200 ms old is
+    // invisible mid-shatter.
+    if (!SnapshotDue()) return;
 
     // scene image: SHADER_READ_ONLY (after RP) -> TRANSFER_SRC
     // prev image:  SHADER_READ_ONLY (or UNDEFINED first time) -> TRANSFER_DST
