@@ -11,6 +11,7 @@ layout(push_constant) uniform Push {
     vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;
     vec4 tint;
+    vec4 params2;
 } pc;
 
 void main() {

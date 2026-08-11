@@ -66,7 +66,7 @@ public:
     bool BindToSwapchainRenderPass(VkRenderPass swapchainRP);
 
     // Registers a sampleable snapshot of the scene image with ImGui's
-    // descriptor pool so shatter chips can read prev-frame UI as a
+    // descriptor pool so dissolve particles read prev-frame UI as a
     // texture. Must be called after ImGui_ImplVulkan_Init.
     void RegisterImGuiSnapshot();
 

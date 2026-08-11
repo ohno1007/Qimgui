@@ -79,20 +79,32 @@ namespace {
 // On 退出 click we synthesize ~90 small rotating, gravity-affected chips
 // covering the current main window rect, fade the rest of the UI to zero,
 // then signal the main loop to quit after the animation has played out.
-namespace shatter {
+// ─── Exit dissolve ───────────────────────────────────────────────────────
+// The window comes apart into a cloud of small particles that drift up and
+// outward while fading, in the manner of the delete animation on Huawei's
+// launcher — the surface turns to dust and is carried off, rather than
+// breaking into slabs and dropping.
+//
+// The distinction that matters is where the energy comes from. Falling shards
+// read as gravity acting on something solid; dust reads as the thing ceasing
+// to be solid at all, which is the right feeling for deleting something. So
+// gravity is weak and mostly sideways drift, particles are small and many,
+// each shrinks as it goes, and they leave in a wave from one corner rather
+// than all at once.
+namespace dissolve {
 
-struct Chip {
-    ImVec2 pos;       // current screen-space center
+struct Particle {
+    ImVec2 pos;
     ImVec2 vel;
+    float  size;
+    float  delay;     // staggered so the cloud peels away rather than bursting
+    float  spin;
     float  rot;
-    float  rot_vel;
-    ImVec2 size;
-    ImU32  color;     // fallback solid color if no snapshot texture
-    ImVec2 uv0;       // top-left UV on the scene snapshot (set at spawn)
-    ImVec2 uv1;       // bottom-right UV (set at spawn)
+    ImVec2 uv0, uv1;  // patch of the snapshot this particle carries
+    ImU32  color;     // fallback if there is no snapshot to sample
 };
 
-std::vector<Chip> g_chips;
+std::vector<Particle> g_parts;
 
 uint32_t g_seed = 0x9e3779b9;
 uint32_t Rand() {
@@ -105,130 +117,133 @@ float Frand(float lo, float hi) {
     return lo + ((Rand() & 0xFFFF) / 65535.0f) * (hi - lo);
 }
 
-// Recursive longest-axis split with jittered midpoint and a random early
-// termination chance — produces tile-covered-but-irregular chips that
-// don't look like a regular grid.
-void SubdivideChip(const ImVec2& mn, const ImVec2& mx, int depth,
-                   float dw, float dh, const ImU32* palette) {
-    const float w = mx.x - mn.x;
-    const float h = mx.y - mn.y;
-    constexpr float kMinSize  = 18.0f;
-    constexpr int   kMaxDepth = 7;
-
-    const bool stop = depth >= kMaxDepth
-                   || w < kMinSize * 2.0f
-                   || h < kMinSize * 2.0f
-                   || (depth > 2 && Frand(0.0f, 1.0f) < 0.30f);
-
-    if (stop) {
-        Chip c;
-        c.pos     = ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f);
-        c.size    = ImVec2(w, h);
-        c.uv0     = ImVec2(mn.x / dw, mn.y / dh);
-        c.uv1     = ImVec2(mx.x / dw, mx.y / dh);
-
-        // Mass proxy: bigger area => heavier piece => falls harder + faster,
-        // less initial kick, slower spin. Smaller pieces fling further up,
-        // spin more, and drift down softly.
-        const float area  = w * h;
-        const float kRef  = 60.0f * 60.0f;
-        float mass        = std::sqrt(area / kRef);
-        if (mass < 0.5f) mass = 0.5f;
-        if (mass > 1.8f) mass = 1.8f;
-        const float inv   = 1.0f / mass;
-
-        c.vel     = ImVec2(Frand(-280.0f, 280.0f) * inv,
-                           Frand(-540.0f, -90.0f) * inv);
-        c.rot     = 0.0f;
-        c.rot_vel = Frand(-5.5f, 5.5f) * inv;
-        c.color   = palette[(uint32_t)(c.pos.x + c.pos.y) & 3u];
-        g_chips.push_back(c);
-        return;
-    }
-
-    if (w > h) {
-        const float t  = 0.5f + Frand(-0.18f, 0.18f);
-        const float sx = mn.x + w * t;
-        SubdivideChip(mn, ImVec2(sx, mx.y), depth + 1, dw, dh, palette);
-        SubdivideChip(ImVec2(sx, mn.y), mx, depth + 1, dw, dh, palette);
-    } else {
-        const float t  = 0.5f + Frand(-0.18f, 0.18f);
-        const float sy = mn.y + h * t;
-        SubdivideChip(mn, ImVec2(mx.x, sy), depth + 1, dw, dh, palette);
-        SubdivideChip(ImVec2(mn.x, sy), mx, depth + 1, dw, dh, palette);
-    }
-}
-
 void Begin(const ImVec2& origin, const ImVec2& size,
            float display_w, float display_h) {
-    g_chips.clear();
-    g_chips.reserve(200);
+    g_parts.clear();
 
-    const ImU32 palette[4] = {
+    // Particle size is fixed rather than scaled to the window: dust should look
+    // the same regardless of how big the thing that turned into it was.
+    constexpr float kCell = 13.0f;
+    const int nx = (int)(size.x / kCell) + 1;
+    const int ny = (int)(size.y / kCell) + 1;
+    g_parts.reserve((size_t)nx * ny);
+
+    const ImU32 palette[3] = {
         ImGui::GetColorU32(ImGuiCol_TitleBgActive),
-        ImGui::GetColorU32(ImVec4(0.22f, 0.40f, 0.78f, 1.0f)),
-        ImGui::GetColorU32(ImGuiCol_FrameBg),
         ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 1.0f)),
+        ImGui::GetColorU32(ImGuiCol_FrameBg),
     };
 
-    SubdivideChip(origin,
-                  ImVec2(origin.x + size.x, origin.y + size.y),
-                  0, display_w, display_h, palette);
-}
+    for (int j = 0; j < ny; ++j) {
+        for (int i = 0; i < nx; ++i) {
+            const float x = origin.x + (float)i * kCell;
+            const float y = origin.y + (float)j * kCell;
 
-// Advance + draw chips. If `snapshot_tex` is non-zero each chip is drawn as a
-// textured quad sampling the prev-frame scene snapshot at its pinned UVs
-// (real UI fragments). Otherwise each chip falls back to its solid colour.
-void Step(float dt, float t01, ImTextureID snapshot_tex) {
-    constexpr float kGravity = 1800.0f; // px / s^2
+            Particle p;
+            p.pos  = ImVec2(x + kCell * 0.5f, y + kCell * 0.5f);
+            p.size = kCell * Frand(0.55f, 1.0f);
+            p.uv0  = ImVec2(x / display_w, y / display_h);
+            p.uv1  = ImVec2((x + kCell) / display_w, (y + kCell) / display_h);
 
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    for (auto& c : g_chips) {
-        // Bigger chips fall faster (heavier => higher effective gravity);
-        // small fragments stay aloft longer.
-        const float area = c.size.x * c.size.y;
-        float mass = std::sqrt(area / (60.0f * 60.0f));
-        if (mass < 0.5f) mass = 0.5f;
-        if (mass > 1.8f) mass = 1.8f;
+            // The wave runs from the bottom-left to the top-right, so the
+            // window visibly comes apart in a direction instead of everywhere
+            // at once.
+            const float u = (float)i / (float)nx;
+            const float v = (float)j / (float)ny;
+            p.delay = (u * 0.55f + (1.0f - v) * 0.45f) * 0.34f + Frand(0.0f, 0.05f);
 
-        c.vel.y += kGravity * mass * dt;
-        c.pos.x += c.vel.x * dt;
-        c.pos.y += c.vel.y * dt;
-        c.rot   += c.rot_vel * dt;
-
-        const float cs = std::cos(c.rot);
-        const float sn = std::sin(c.rot);
-        const float hx = c.size.x * 0.5f;
-        const float hy = c.size.y * 0.5f;
-        const ImVec2 corners[4] = {
-            ImVec2(c.pos.x + (-hx * cs - -hy * sn), c.pos.y + (-hx * sn + -hy * cs)),
-            ImVec2(c.pos.x + ( hx * cs - -hy * sn), c.pos.y + ( hx * sn + -hy * cs)),
-            ImVec2(c.pos.x + ( hx * cs -  hy * sn), c.pos.y + ( hx * sn +  hy * cs)),
-            ImVec2(c.pos.x + (-hx * cs -  hy * sn), c.pos.y + (-hx * sn +  hy * cs)),
-        };
-
-        const float fade = 1.0f - t01;
-        const uint32_t a = (uint32_t)(255.0f * fade);
-
-        if (snapshot_tex) {
-            // UVs are corners 0,1,2,3 in screen-pinned order → top-left,
-            // top-right, bottom-right, bottom-left of the chip's tile.
-            const ImU32 tint = 0x00FFFFFFu | (a << 24);
-            dl->AddImageQuad(snapshot_tex,
-                             corners[0], corners[1], corners[2], corners[3],
-                             ImVec2(c.uv0.x, c.uv0.y),
-                             ImVec2(c.uv1.x, c.uv0.y),
-                             ImVec2(c.uv1.x, c.uv1.y),
-                             ImVec2(c.uv0.x, c.uv1.y),
-                             tint);
-        } else {
-            const ImU32 col = (c.color & 0x00FFFFFFu) | (a << 24);
-            dl->AddQuadFilled(corners[0], corners[1], corners[2], corners[3], col);
+            // Mostly upward and outward from the centre, with enough spread
+            // that the cloud never looks like it is following one path.
+            const float cx = (x - (origin.x + size.x * 0.5f)) / (size.x * 0.5f);
+            p.vel  = ImVec2(cx * Frand(18.0f, 62.0f) + Frand(-26.0f, 26.0f),
+                            Frand(-150.0f, -52.0f));
+            p.spin = Frand(-3.4f, 3.4f);
+            p.rot  = 0.0f;
+            p.color = palette[(uint32_t)(x + y) % 3u];
+            g_parts.push_back(p);
         }
     }
 }
 
-} // namespace shatter
+// Advance and draw. `t01` runs 0..1 over the animation; `snapshot_tex`, when
+// present, lets each particle carry the piece of UI it was cut from.
+void Step(float dt, float t01, ImTextureID snapshot_tex) {
+    // Light and mostly lateral: enough to curve the paths, not enough to make
+    // this read as falling debris.
+    constexpr float kGravity = 210.0f;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    if (snapshot_tex) dl->PushTexture(ImTextureRef(snapshot_tex));
+
+    for (auto& p : g_parts) {
+        const float local = t01 - p.delay;
+        if (local <= 0.0f) {
+            // Not yet gone: still part of the intact surface.
+            if (snapshot_tex) {
+                const ImVec2 a(p.pos.x - p.size * 0.5f, p.pos.y - p.size * 0.5f);
+                const ImVec2 b(p.pos.x + p.size * 0.5f, p.pos.y + p.size * 0.5f);
+                dl->PrimReserve(6, 4);
+                const unsigned int i0 = dl->_VtxCurrentIdx;
+                dl->PrimWriteVtx(a,                  p.uv0,                    IM_COL32_WHITE);
+                dl->PrimWriteVtx(ImVec2(b.x, a.y),   ImVec2(p.uv1.x, p.uv0.y), IM_COL32_WHITE);
+                dl->PrimWriteVtx(b,                  p.uv1,                    IM_COL32_WHITE);
+                dl->PrimWriteVtx(ImVec2(a.x, b.y),   ImVec2(p.uv0.x, p.uv1.y), IM_COL32_WHITE);
+                dl->PrimWriteIdx((ImDrawIdx)i0);     dl->PrimWriteIdx((ImDrawIdx)(i0 + 1));
+                dl->PrimWriteIdx((ImDrawIdx)(i0+2)); dl->PrimWriteIdx((ImDrawIdx)i0);
+                dl->PrimWriteIdx((ImDrawIdx)(i0+2)); dl->PrimWriteIdx((ImDrawIdx)(i0 + 3));
+            }
+            continue;
+        }
+
+        p.vel.y += kGravity * dt;
+        // Air drag, so particles ease into a drift instead of accelerating
+        // away — dust slows down, debris does not.
+        const float drag = std::exp(-1.6f * dt);
+        p.vel.x *= drag;
+        p.vel.y *= drag;
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+        p.rot   += p.spin * dt;
+
+        // Shrink and fade together over the particle's own lifetime, so it
+        // thins out to nothing rather than blinking off at full size.
+        const float life = local / 0.72f;
+        if (life >= 1.0f) continue;
+        const float fade = 1.0f - life;
+        const float sz   = p.size * (0.35f + 0.65f * fade);
+        const uint32_t a = (uint32_t)(255.0f * fade * fade);
+        if (a == 0) continue;
+
+        const float cs = std::cos(p.rot) * sz * 0.5f;
+        const float sn = std::sin(p.rot) * sz * 0.5f;
+        const ImVec2 q[4] = {
+            ImVec2(p.pos.x - cs + sn, p.pos.y - sn - cs),
+            ImVec2(p.pos.x + cs + sn, p.pos.y + sn - cs),
+            ImVec2(p.pos.x + cs - sn, p.pos.y + sn + cs),
+            ImVec2(p.pos.x - cs - sn, p.pos.y - sn + cs),
+        };
+
+        if (snapshot_tex) {
+            const ImU32 col = IM_COL32(255, 255, 255, a);
+            dl->PrimReserve(6, 4);
+            const unsigned int i0 = dl->_VtxCurrentIdx;
+            dl->PrimWriteVtx(q[0], p.uv0,                    col);
+            dl->PrimWriteVtx(q[1], ImVec2(p.uv1.x, p.uv0.y), col);
+            dl->PrimWriteVtx(q[2], p.uv1,                    col);
+            dl->PrimWriteVtx(q[3], ImVec2(p.uv0.x, p.uv1.y), col);
+            dl->PrimWriteIdx((ImDrawIdx)i0);     dl->PrimWriteIdx((ImDrawIdx)(i0 + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(i0+2)); dl->PrimWriteIdx((ImDrawIdx)i0);
+            dl->PrimWriteIdx((ImDrawIdx)(i0+2)); dl->PrimWriteIdx((ImDrawIdx)(i0 + 3));
+        } else {
+            dl->AddQuadFilled(q[0], q[1], q[2], q[3],
+                              (p.color & ~IM_COL32_A_MASK) | (a << IM_COL32_A_SHIFT));
+        }
+    }
+
+    if (snapshot_tex) dl->PopTexture();
+}
+
+} // namespace dissolve
 
 
 void ApplyStyleOnce() {
@@ -328,7 +343,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             // scene image to that. state->display_w/h are the physical
             // screen dimensions and would mis-map most chips off-frame.
             const ImGuiIO& io2 = ImGui::GetIO();
-            shatter::Begin(state->last_full_pos, state->last_full_size,
+            dissolve::Begin(state->last_full_pos, state->last_full_size,
                            io2.DisplaySize.x, io2.DisplaySize.y);
             state->exit_anim_active      = true;
             state->exit_anim_first_frame = true;
@@ -549,16 +564,16 @@ void DrawUi(UiState* state, bool* keep_running) {
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
 
     // Past the click frame the entire main window stops rendering — the
-    // shatter chips, which sample the frozen pre-click scene snapshot,
+    // dissolve particles, which sample the frozen pre-click scene snapshot,
     // visually replace the UI. Where a chip has flown off, the rest of
     // the system surface shows through (no mask, no leftover frame).
     if (state->exit_anim_active && !state->exit_anim_first_frame) {
         const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - state->exit_anim_start) / 1.2f;
+        const float t01     = (now - state->exit_anim_start) / 1.35f;
         const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
 
         ripple::DrawAll();
-        shatter::Step(dt, clamped,
+        dissolve::Step(dt, clamped,
                       (ImTextureID)(uintptr_t)state->scene_snapshot_id);
 
         if (t01 >= 1.0f) {
@@ -721,13 +736,24 @@ void DrawUi(UiState* state, bool* keep_running) {
     // sheet and read as seams between separate pieces of glass. They are
     // regions of one sheet, not three sheets, so they are differentiated by
     // density instead (the fills pushed below) and the glass stays continuous.
+    // win_pos/win_size already interpolate all the way down to the collapsed
+    // pill, and `rounding` follows them, so the island is the same pane at a
+    // different size — it only ever looked bare because this was gated on the
+    // window being expanded, and faded out with it.
     state->glass_count = 0;
-    if (state->screen_texture_id && lt > 0.01f) {
+    if (state->screen_texture_id) {
         GlassRect r{};
         r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
         r.rounding = rounding;
-        r.alpha = lt;
+        r.alpha = 1.0f;
         r.tintA = 0.06f;
+        // The pill is small, so its rim would otherwise reach most of the way
+        // across it; scale the lensing down with the shorter side.
+        const float minSide = win_size.x < win_size.y ? win_size.x : win_size.y;
+        if (minSide < 200.0f) {
+            r.edgeWidth = minSide * 0.30f;
+            r.blur      = 5.0f;
+        }
         state->glass_rects[state->glass_count++] = r;
     }
 
@@ -825,12 +851,12 @@ void DrawUi(UiState* state, bool* keep_running) {
     // On the click frame the chips still need to be advanced/drawn so the
     // visual is continuous with the next frame, but the UI under them is
     // still the real one (so the user perceives the surface itself
-    // shattering). After this frame the early-return path takes over.
+    // coming apart). After this frame the early-return path takes over.
     if (state->exit_anim_active && state->exit_anim_first_frame) {
         const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - state->exit_anim_start) / 1.2f;
+        const float t01     = (now - state->exit_anim_start) / 1.35f;
         const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
-        shatter::Step(dt, clamped,
+        dissolve::Step(dt, clamped,
                       (ImTextureID)(uintptr_t)state->scene_snapshot_id);
         state->exit_anim_first_frame = false;
     }

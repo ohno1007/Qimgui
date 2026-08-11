@@ -18,6 +18,10 @@ struct GlassRect {
     float alpha     = 1.0f;
     float tintR = 0.0f, tintG = 0.0f, tintB = 0.0f;
     float tintA = 0.0f;                 // wash strength; keep low or it reads as a panel
+    // Softens the transmitted image, in screen px. Glass this thick does not
+    // transmit sharply, and UI text over a busy photo is unreadable however the
+    // contrast is tuned — this is what buys the legibility back.
+    float blur  = 7.0f;
 };
 
 constexpr int kMaxGlassRects = 8;

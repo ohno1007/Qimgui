@@ -33,6 +33,7 @@ private:
     GLint  m_LocSurface   = -1;
     GLint  m_LocParams    = -1;
     GLint  m_LocTint      = -1;
+    GLint  m_LocParams2   = -1;
 };
 
 } // namespace aimgui

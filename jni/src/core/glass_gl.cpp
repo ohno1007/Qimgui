@@ -34,10 +34,36 @@ uniform vec4 uRect;
 uniform vec2 uScreen;
 uniform vec4 uParams;  // x = rounding, y = edge width, z = bend, w = alpha
 uniform vec4 uTint;    // rgb = wash colour, a = wash strength
+uniform vec4 uParams2; // x = blur radius px
 
 float sdRoundedBox(vec2 p, vec2 halfSz, float r) {
     vec2 q = abs(p) - halfSz + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+
+// Refracted content, softened. Glass this thick does not transmit a sharp
+// image, and more practically: UI text sits on whatever happens to be behind
+// the window, and a busy photo underneath makes it unreadable no matter how
+// the contrast is tuned. Blurring the transmitted image is what buys back the
+// legibility, and it is the one place a blur belongs in this material — the
+// rim still bends and concentrates light rather than scattering it.
+//
+// Twelve taps on two rings, offset from each other so the pattern does not
+// show up as spokes. The mirror is already half resolution and the sampler is
+// linear, so each tap is doing more work than its count suggests.
+vec3 sampleBlurred(vec2 px, vec2 screen, float radius) {
+    vec3 acc = texture(uScreenTex, px / screen).rgb;
+    float wsum = 1.0;
+    for (int i = 0; i < 6; ++i) {
+        float a = float(i) * 1.0471975;             // 60 degrees
+        vec2  d1 = vec2(cos(a), sin(a)) * radius;
+        vec2  d2 = vec2(cos(a + 0.5236), sin(a + 0.5236)) * radius * 0.55;
+        acc += texture(uScreenTex, (px + d1) / screen).rgb * 0.55;
+        acc += texture(uScreenTex, (px + d2) / screen).rgb * 0.85;
+        wsum += 1.40;
+    }
+    return acc / wsum;
 }
 
 void main() {
@@ -64,11 +90,14 @@ void main() {
 
     vec2 base = posPx + n * bend;
 
+    // Dispersion rides on top of the blur: each channel is blurred about its
+    // own bent position, so the colour split survives the softening.
     float disp = bevel * bend * 0.16;
+    float blurPx = uParams2.x;
     vec3 col = vec3(
-        texture(uScreenTex, (base - n * disp) / uScreen).r,
-        texture(uScreenTex,  base            / uScreen).g,
-        texture(uScreenTex, (base + n * disp) / uScreen).b);
+        sampleBlurred(base - n * disp, uScreen, blurPx).r,
+        sampleBlurred(base,            uScreen, blurPx).g,
+        sampleBlurred(base + n * disp, uScreen, blurPx).b);
 
     // Legibility, per pixel — applied to the refracted background only, before
     // any of the glass's own light is added. Doing it afterwards crushed the
@@ -147,6 +176,7 @@ bool GlassGL::Init() {
     m_LocSurface   = glGetUniformLocation(m_Prog, "uSurface");
     m_LocParams    = glGetUniformLocation(m_Prog, "uParams");
     m_LocTint      = glGetUniformLocation(m_Prog, "uTint");
+    m_LocParams2   = glGetUniformLocation(m_Prog, "uParams2");
 
     glGenVertexArrays(1, &m_VAO);   // ES 3 still wants one bound to draw
     m_Ready = true;
@@ -185,6 +215,7 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
         glUniform4f(m_LocRect, r.x, r.y, r.w, r.h);
         glUniform4f(m_LocParams, r.rounding, r.edgeWidth, r.bend, r.alpha);
         glUniform4f(m_LocTint, r.tintR, r.tintG, r.tintB, r.tintA);
+        glUniform4f(m_LocParams2, r.blur, 0.0f, 0.0f, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 

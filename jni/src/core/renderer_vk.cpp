@@ -89,7 +89,7 @@ public:
         SetupImGuiBackend();
 
         // Now that ImGui's Vulkan impl has its descriptor pool wired up,
-        // hand it the prev-scene image so shatter chips can sample real UI.
+        // hand it the prev-scene image so dissolve particles sample real UI.
         if (m_Bloom.Ready()) m_Bloom.RegisterImGuiSnapshot();
 
         return true;
@@ -556,7 +556,7 @@ private:
             vkCmdEndRenderPass(fd->CommandBuffer);
 
             // Stash a copy of the just-rendered scene for next frame's
-            // shatter chips to sample.
+            // dissolve particles to sample.
             m_Bloom.RecordSnapshotCopy(fd->CommandBuffer);
         } else {
             VkRenderPassBeginInfo rpi{};

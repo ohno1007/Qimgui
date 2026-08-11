@@ -24,12 +24,38 @@ layout(push_constant) uniform Push {
     vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;    // x = rounding px, y = edge width px, z = bend, w = alpha
     vec4 tint;      // rgb = wash colour, a = wash strength
+    vec4 params2;   // x = blur radius px
 } pc;
 
 // Signed distance to a rounded box centred on the origin. Negative inside.
 float sdRoundedBox(vec2 p, vec2 half_, float r) {
     vec2 q = abs(p) - half_ + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+
+// Refracted content, softened. Glass this thick does not transmit a sharp
+// image, and more practically: UI text sits on whatever happens to be behind
+// the window, and a busy photo underneath makes it unreadable no matter how
+// the contrast is tuned. Blurring the transmitted image is what buys back the
+// legibility, and it is the one place a blur belongs in this material — the
+// rim still bends and concentrates light rather than scattering it.
+//
+// Twelve taps on two rings, offset from each other so the pattern does not
+// show up as spokes. The mirror is already half resolution and the sampler is
+// linear, so each tap is doing more work than its count suggests.
+vec3 sampleBlurred(vec2 px, vec2 screen, float radius) {
+    vec3 acc = texture(uScreen, px / screen).rgb;
+    float wsum = 1.0;
+    for (int i = 0; i < 6; ++i) {
+        float a = float(i) * 1.0471975;             // 60 degrees
+        vec2  d1 = vec2(cos(a), sin(a)) * radius;
+        vec2  d2 = vec2(cos(a + 0.5236), sin(a + 0.5236)) * radius * 0.55;
+        acc += texture(uScreen, (px + d1) / screen).rgb * 0.55;
+        acc += texture(uScreen, (px + d2) / screen).rgb * 0.85;
+        wsum += 1.40;
+    }
+    return acc / wsum;
 }
 
 void main() {
@@ -67,15 +93,14 @@ void main() {
     // Dispersion: glass bends short wavelengths more than long ones, so each
     // channel is sampled at its own bend. The split is only perceptible at the
     // rim, which is precisely where it does the work of identifying glass.
+    // Dispersion rides on top of the blur: each channel is blurred about its
+    // own bent position, so the colour split survives the softening.
     float disp = bevel * bend * 0.16;
-    vec2 uvR = (base - n * disp)       / pc.screen.xy;
-    vec2 uvG = base                    / pc.screen.xy;
-    vec2 uvB = (base + n * disp)       / pc.screen.xy;
-
+    float blurPx = pc.params2.x;
     vec3 col = vec3(
-        texture(uScreen, uvR).r,
-        texture(uScreen, uvG).g,
-        texture(uScreen, uvB).b);
+        sampleBlurred(base - n * disp, pc.screen.xy, blurPx).r,
+        sampleBlurred(base,            pc.screen.xy, blurPx).g,
+        sampleBlurred(base + n * disp, pc.screen.xy, blurPx).b);
 
     // Legibility, per pixel — applied to the refracted background only, before
     // any of the glass's own light is added. Doing it afterwards crushed the

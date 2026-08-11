@@ -15,6 +15,7 @@ struct Push {
     float screen[4];  // xy = display size px (UV), zw = surface size px (NDC)
     float params[4];  // rounding, edge width, bend, alpha
     float tint[4];    // rgb = wash colour, a = wash strength
+    float params2[4]; // x = blur radius px
 };
 
 VkShaderModule MakeModule(VkDevice d, const uint32_t* code, size_t bytes) {
@@ -190,6 +191,7 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
         p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
         p.params[2] = r.bend;     p.params[3] = r.alpha;
         p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
+        p.params2[0] = r.blur;
         vkCmdPushConstants(cmd, m_Layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(p), &p);
