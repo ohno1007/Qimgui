@@ -139,4 +139,32 @@ namespace ripple {
 void TouchLastItem();
 } // namespace ripple
 
+// ─── Control chrome ──────────────────────────────────────────────────────
+// The sheet announces a shape by its edge and by what it does to the light
+// passing through, never by filling itself in. Controls drawn as flat coloured
+// slabs speak the opposite grammar and read as stickers on the glass, so they
+// are drawn here instead: a contact shadow to lift them, a wash barely strong
+// enough to separate them, and a rim that is bright along the top where the
+// key light falls and dim along the bottom — the same up-and-left key the
+// pane's own shader uses.
+//
+// Everything is drawn *after* the widget, which works only because there is no
+// heavy fill to cover its label. That is what keeps this from needing draw-list
+// channel splitting at every call site.
+namespace chrome {
+// rounding < 0 means a capsule (half the height).
+void Rect(const ImVec2& a, const ImVec2& b, float rounding,
+          bool hovered, bool active);
+// For widgets whose whole item rect is the frame — Button, ProgressBar.
+void LastItem(float rounding = -1.0f);
+// For widgets that put their label to the right and report an item rect
+// covering both — Checkbox, Combo, SliderFloat. The step belongs to the frame.
+void LastItemFrame(const char* label, float rounding = -1.0f);
+} // namespace chrome
+
+// Re-applies the glass palette over whatever base theme is loaded. Called at
+// startup and again after anything that calls StyleColorsDark/Light/Classic,
+// which would otherwise put ImGui's own slab colours back.
+void ApplyGlassPalette();
+
 } // namespace aimgui

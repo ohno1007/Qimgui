@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace aimgui {
@@ -253,6 +254,122 @@ void Step(float dt, float t01, ImTextureID snapshot_tex) {
 
 } // namespace dissolve
 
+} // namespace  (anonymous)
+
+namespace chrome {
+namespace {
+// A draw list cannot blur, so the contact shadow is a few offset copies. Three
+// is enough for the falloff to read as soft at control sizes.
+constexpr int   kShadowLayers = 3;
+constexpr float kShadowStep   = 2.0f;
+constexpr float kRimThickness = 1.5f;
+} // namespace
+
+void Rect(const ImVec2& a, const ImVec2& b, float rounding,
+          bool hovered, bool active) {
+    const float h = b.y - a.y;
+    const float w = b.x - a.x;
+    if (h < 2.0f || w < 2.0f) return;
+    float r = rounding < 0.0f ? h * 0.5f : rounding;
+    const float rmax = (h < w ? h : w) * 0.5f;
+    if (r > rmax) r = rmax;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Lift it off the sheet. Spread sideways much less than downwards, so it
+    // reads as a shallow step rather than a floating card.
+    for (int i = kShadowLayers; i >= 1; --i) {
+        const float o = (float)i * kShadowStep;
+        dl->AddRectFilled(ImVec2(a.x - o * 0.3f, a.y + o * 0.4f),
+                          ImVec2(b.x + o * 0.3f, b.y + o),
+                          IM_COL32(0, 0, 0, 11), r + o * 0.3f);
+    }
+
+    const float fill = active ? 0.13f : (hovered ? 0.09f : 0.05f);
+    dl->AddRectFilled(a, b, ImGui::GetColorU32(ImVec4(1, 1, 1, fill)), r);
+
+    // The rim is one path stroked twice under complementary clips, so the two
+    // halves join without a seam where they meet.
+    const float mid = (a.y + b.y) * 0.5f;
+    const float top = active ? 0.34f : (hovered ? 0.28f : 0.20f);
+    const ImVec2 pad(2.0f, 2.0f);
+    dl->PushClipRect(ImVec2(a.x - pad.x, a.y - pad.y), ImVec2(b.x + pad.x, mid), true);
+    dl->AddRect(a, b, ImGui::GetColorU32(ImVec4(1, 1, 1, top)), r, kRimThickness);
+    dl->PopClipRect();
+    dl->PushClipRect(ImVec2(a.x - pad.x, mid), ImVec2(b.x + pad.x, b.y + pad.y), true);
+    dl->AddRect(a, b, ImGui::GetColorU32(ImVec4(1, 1, 1, top * 0.35f)), r, kRimThickness);
+    dl->PopClipRect();
+}
+
+void LastItem(float rounding) {
+    Rect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), rounding,
+         ImGui::IsItemHovered(), ImGui::IsItemActive());
+}
+
+void LastItemFrame(const char* label, float rounding) {
+    ImVec2 a = ImGui::GetItemRectMin();
+    ImVec2 b = ImGui::GetItemRectMax();
+    if (label) {
+        const char* hash = std::strstr(label, "##");
+        const char* end  = hash ? hash : label + std::strlen(label);
+        const ImVec2 ls  = ImGui::CalcTextSize(label, end);
+        if (ls.x > 0.0f) b.x -= ls.x + ImGui::GetStyle().ItemInnerSpacing.x;
+    }
+    Rect(a, b, rounding, ImGui::IsItemHovered(), ImGui::IsItemActive());
+}
+
+} // namespace chrome
+
+void ApplyGlassPalette() {
+    auto& s = ImGui::GetStyle();
+    const ImVec4 clear(0, 0, 0, 0);
+    auto white = [](float alpha) { return ImVec4(1, 1, 1, alpha); };
+
+    // Every control background is drawn by chrome::, which puts the shape on
+    // its edge instead of in a fill. ImGui's own fills would sit underneath as
+    // flat slabs, so they are cleared outright rather than tuned down.
+    s.Colors[ImGuiCol_FrameBg]        = clear;
+    s.Colors[ImGuiCol_FrameBgHovered] = clear;
+    s.Colors[ImGuiCol_FrameBgActive]  = clear;
+    s.Colors[ImGuiCol_Button]         = clear;
+    s.Colors[ImGuiCol_ButtonHovered]  = clear;
+    s.Colors[ImGuiCol_ButtonActive]   = clear;
+
+    // What is left is only ever white at some strength. A saturated fill reads
+    // as a sticker laid on the sheet; this material's own accents are the light
+    // it concentrates at an edge, and that light has no hue of its own. Colour
+    // is kept for state — the selected nav entry — and nothing else.
+    // Header is not cleared: inside a popup it is the only cue for which entry
+    // is current, and there is no glass behind a popup to carry the state. The
+    // two lists that draw their own capsule push a transparent Header locally.
+    s.Colors[ImGuiCol_Header]           = white(0.14f);
+    s.Colors[ImGuiCol_HeaderHovered]    = white(0.20f);
+    s.Colors[ImGuiCol_HeaderActive]     = white(0.26f);
+
+    s.Colors[ImGuiCol_CheckMark]        = white(0.92f);
+    s.Colors[ImGuiCol_SliderGrab]       = white(0.92f);
+    s.Colors[ImGuiCol_SliderGrabActive] = white(1.00f);
+    s.Colors[ImGuiCol_Border]           = white(0.14f);
+    s.Colors[ImGuiCol_BorderShadow]     = clear;
+    s.Colors[ImGuiCol_Separator]        = white(0.10f);
+    s.Colors[ImGuiCol_SeparatorHovered] = white(0.20f);
+    s.Colors[ImGuiCol_SeparatorActive]  = white(0.30f);
+    s.Colors[ImGuiCol_PlotHistogram]    = white(0.55f);
+    s.Colors[ImGuiCol_PlotLines]        = white(0.70f);
+    s.Colors[ImGuiCol_ResizeGrip]        = white(0.10f);
+    s.Colors[ImGuiCol_ResizeGripHovered] = white(0.22f);
+    s.Colors[ImGuiCol_ResizeGripActive]  = white(0.34f);
+
+    // Grey text goes muddy against a background the shader is already pulling
+    // down per pixel; white at low alpha holds its contrast wherever it lands.
+    s.Colors[ImGuiCol_TextDisabled] = white(0.45f);
+
+    // Popups float clear of the sheet with nothing refracted behind them, so
+    // they are the one thing that still needs a ground of its own.
+    s.Colors[ImGuiCol_PopupBg] = ImVec4(0.07f, 0.08f, 0.10f, 0.96f);
+}
+
+namespace {
 
 void ApplyStyleOnce() {
     static bool done = false;
@@ -261,8 +378,11 @@ void ApplyStyleOnce() {
     auto& s = ImGui::GetStyle();
     s.WindowRounding          = 12.0f;
     s.ChildRounding           = 10.0f;
-    s.FrameRounding           = 6.0f;
-    s.GrabRounding            = 6.0f;
+    // Capsules. ImDrawList clamps the radius to half the shorter side, so a
+    // large number here just means "as round as it goes" and every control
+    // ends up with the fully-rounded ends this material uses.
+    s.FrameRounding           = 999.0f;
+    s.GrabRounding            = 999.0f;
     s.PopupRounding           = 6.0f;
     s.ScrollbarRounding       = 10.0f;
     s.WindowBorderSize        = 1.0f;
@@ -280,6 +400,8 @@ void ApplyStyleOnce() {
     // window loses focus (we only have one window).
     s.Colors[ImGuiCol_TitleBg]          = s.Colors[ImGuiCol_TitleBgActive];
     s.Colors[ImGuiCol_TitleBgCollapsed] = s.Colors[ImGuiCol_TitleBgActive];
+
+    ApplyGlassPalette();
 }
 
 // ─── Page contents live in main_ui.cpp ──────────────────────────────────
@@ -337,15 +459,13 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // The lag needs no allowance here: the labels move with the pane.
     constexpr float kInnerPadY     = 30.0f;
     constexpr float kSelectableH   = 44.0f;
-    constexpr float kAccentInset   = 10.0f;
-    constexpr float kAccentW       = 4.0f;
     constexpr float kFooterH       = 110.0f;
     constexpr float kBottomMargin  = 16.0f;
 
-    // Click on a sidebar entry should land directly on the selected color —
-    // no intermediate hover-gray or transient pressed-blue. Push the same
-    // color into all three slots.
-    const ImVec4 sel_bg(0.22f, 0.40f, 0.78f, 0.55f);
+    // The selected entry is drawn below as a capsule, so ImGui's own Header
+    // fills stay out of it entirely — a slab of flat blue was the single most
+    // out-of-place thing on the sheet.
+    const ImVec4 sel_bg(0, 0, 0, 0);
     // This child's own fill is opaque, and it is pushed after the glass code
     // has cleared ChildBg — so it was painting the nav column solid black over
     // the pane behind it. The pane is the background whenever there is one.
@@ -385,13 +505,19 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             current = p.id;
         }
         ripple::TouchLastItem();
+        // A capsule rather than a filled bar, and the accent lives *in* it
+        // instead of as a stripe alongside — a separate bar would collide with
+        // the capsule's rounded end, and the colour reads better as the pill
+        // being lit than as a marker stuck to its edge.
+        const ImVec2 a = ImGui::GetItemRectMin();
+        const ImVec2 b = ImGui::GetItemRectMax();
         if (selected) {
-            ImVec2 a = ImGui::GetItemRectMin();
-            ImVec2 b = ImGui::GetItemRectMax();
             ImGui::GetWindowDrawList()->AddRectFilled(
-                ImVec2(a.x - kAccentInset,            a.y + 8),
-                ImVec2(a.x - kAccentInset + kAccentW, b.y - 8),
-                accent, kAccentW * 0.5f);
+                a, b, (accent & ~IM_COL32_A_MASK) | (46u << IM_COL32_A_SHIFT),
+                (b.y - a.y) * 0.5f);
+            chrome::Rect(a, b, -1.0f, false, true);
+        } else if (ImGui::IsItemHovered()) {
+            chrome::Rect(a, b, -1.0f, true, false);
         }
     }
 
@@ -404,7 +530,9 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::Spacing();
 
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 12));
-    if (ImGui::Button(u8"退出", ImVec2(-1, 0))) {
+    const bool exit_pressed = ImGui::Button(u8"退出", ImVec2(-1, 0));
+    chrome::LastItem();
+    if (exit_pressed) {
         if (!state->exit_anim_active) {
             // UV normalisation must use the *snapshot texture* dimensions —
             // which equal io.DisplaySize because the renderer sizes its

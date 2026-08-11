@@ -90,10 +90,17 @@ bool SliderFloatGrabValue(const char* label, float* v, float v_min, float v_max,
     const ImVec2 gMin(cx - grab_w * 0.5f, cy - grab_h * 0.5f);
     const ImVec2 gMax(cx + grab_w * 0.5f, cy + grab_h * 0.5f);
 
+    // The track is the step; the grab is the one solid thing on it, which is
+    // where this material puts its highlights.
+    chrome::Rect(barMin, barMax, -1.0f,
+                 ImGui::IsItemHovered(), ImGui::IsItemActive());
+
     const ImU32 col = ImGui::GetColorU32(ImGuiCol_SliderGrab);
     ImDrawList* dl  = ImGui::GetWindowDrawList();
     dl->AddRectFilled(gMin, gMax, col, grab_h * 0.5f);
-    dl->AddText(ImVec2(cx - ts.x * 0.5f, cy - ts.y * 0.5f), IM_COL32_WHITE, buf);
+    // The pill is near-white now, so its own text has to be the dark one.
+    dl->AddText(ImVec2(cx - ts.x * 0.5f, cy - ts.y * 0.5f),
+                IM_COL32(14, 16, 20, 255), buf);
 
     return changed;
 }
@@ -131,14 +138,24 @@ void DrawWidgets() {
     static bool   toggle  = false;
     static ImVec4 tint(0.40f, 0.70f, 1.00f, 1.0f);
 
-    if (ImGui::Button(u8"点我"))  counter++;
+    const bool hit = ImGui::Button(u8"点我");
+    chrome::LastItem();
+    if (hit) counter++;
     ripple::TouchLastItem();
     ImGui::SameLine();
     ImGui::Text(u8"计数 = %d", counter);
 
     SliderFloatGrabValue(u8"滑块", &slider, 0.0f, 1.0f, "%.3f");
-    ImGui::Checkbox  (u8"开关",   &toggle); ripple::TouchLastItem();
+    ImGui::Checkbox  (u8"开关",   &toggle);
+    chrome::LastItemFrame(u8"开关"); ripple::TouchLastItem();
+    // ColorEdit's four drag fields are the one place a cleared FrameBg does not
+    // work: they sit shoulder to shoulder, and with no fill at all they merge
+    // into a single strip. Give them back the faintest of grounds locally.
+    ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4(1, 1, 1, 0.07f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1, 1, 1, 0.11f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4(1, 1, 1, 0.15f));
     ImGui::ColorEdit4(u8"取色器", (float*)&tint);
+    ImGui::PopStyleColor(3);
 
     ImGui::Spacing();
 
@@ -158,7 +175,12 @@ void DrawWidgets() {
         static bool   anim_initialized = false;
 
         ImGui::SetNextItemOpen(list_open, ImGuiCond_FirstUseEver);
+        ImGui::PushStyleColor(ImGuiCol_Header,        IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive,  IM_COL32(0, 0, 0, 0));
         list_open = ImGui::CollapsingHeader(u8"列表");
+        ImGui::PopStyleColor(3);
+        chrome::LastItem();
         ripple::TouchLastItem();
 
         const float dt    = ImGui::GetIO().DeltaTime;
@@ -209,8 +231,13 @@ void DrawWidgets() {
                     anim_max.x += (sel_max.x - anim_max.x) * a2;
                     anim_max.y += (sel_max.y - anim_max.y) * a2;
                 }
-                const ImU32 col = ImGui::GetColorU32(ImVec4(0.22f, 0.40f, 0.78f, 0.55f));
-                dl->AddRectFilled(anim_min, anim_max, col, 6.0f);
+                // Same capsule the nav column uses: the accent lives inside the
+                // step rather than being the step. Channel 0 already puts this
+                // under the labels, so the wash cannot touch them.
+                const float rr = (anim_max.y - anim_min.y) * 0.5f;
+                dl->AddRectFilled(anim_min, anim_max,
+                                  ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.18f)), rr);
+                chrome::Rect(anim_min, anim_max, -1.0f, false, true);
             }
             dl->ChannelsMerge();
 
@@ -230,13 +257,16 @@ void DrawWidgets() {
     progress += ImGui::GetIO().DeltaTime * 0.15f;
     if (progress > 1.0f) progress -= 1.0f;
     ImGui::ProgressBar(progress, ImVec2(-1, 0));
+    chrome::LastItem();
 }
 
 void DrawWindow(UiState* state) {
     ImGui::SeparatorText(u8"窗口表面");
 
     bool perm = state->permeate_record;
-    if (ImGui::Checkbox(u8"防录屏(对屏幕录制 / 投屏隐藏)", &perm)) {
+    const bool perm_hit = ImGui::Checkbox(u8"防录屏(对屏幕录制 / 投屏隐藏)", &perm);
+    chrome::LastItemFrame(u8"防录屏(对屏幕录制 / 投屏隐藏)");
+    if (perm_hit) {
         state->request_permeate_toggle = true;
     }
     ripple::TouchLastItem();
@@ -262,7 +292,8 @@ void DrawWindow(UiState* state) {
             }
         }
         if (ok) {
-            if (ImGui::Checkbox(u8"液体玻璃背景", &state->screen_mirror)) {}
+            ImGui::Checkbox(u8"液体玻璃背景", &state->screen_mirror);
+            chrome::LastItemFrame(u8"液体玻璃背景");
             ripple::TouchLastItem();
             if (state->screen_mirror) {
                 SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
@@ -283,12 +314,17 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"主题");
     static int theme = 0;
-    if (ImGui::Combo(u8"##theme", &theme, u8"深色\0浅色\0经典\0")) {
+    const bool theme_hit = ImGui::Combo(u8"##theme", &theme, u8"深色\0浅色\0经典\0");
+    chrome::LastItemFrame(u8"##theme");
+    if (theme_hit) {
         switch (theme) {
             case 0: ImGui::StyleColorsDark();    break;
             case 1: ImGui::StyleColorsLight();   break;
             case 2: ImGui::StyleColorsClassic(); break;
         }
+        // StyleColorsX puts ImGui's own slab colours back, which would leave
+        // flat fills sitting under every control's step.
+        ApplyGlassPalette();
     }
     ripple::TouchLastItem();
 
@@ -296,7 +332,9 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"Live2D 小人");
     SliderFloatGrabValue(u8"小人大小", &state->ball_scale, 0.4f, 3.0f, "%.2f");
-    if (ImGui::Button(u8"让他说话", ImVec2(-FLT_MIN, 0))) {
+    const bool speak = ImGui::Button(u8"让他说话", ImVec2(-FLT_MIN, 0));
+    chrome::LastItem();
+    if (speak) {
         live2d::Speak();
     }
     ripple::TouchLastItem();
@@ -307,7 +345,9 @@ void DrawPerformance(UiState* state) {
     ImGui::SeparatorText(u8"帧率限制");
 
     int fps_idx = FpsToIndex(state->target_fps);
-    if (ImGui::Combo(u8"目标帧率", &fps_idx, kFpsLabels)) {
+    const bool fps_hit = ImGui::Combo(u8"目标帧率", &fps_idx, kFpsLabels);
+    chrome::LastItemFrame(u8"目标帧率");
+    if (fps_hit) {
         state->target_fps = kFpsPresets[fps_idx];
     }
     ripple::TouchLastItem();
@@ -329,6 +369,7 @@ void DrawPerformance(UiState* state) {
     std::snprintf(overlay, sizeof(overlay), "%.1f", ImGui::GetIO().Framerate);
     ImGui::PlotLines("##fps_plot", history, N, offset, overlay,
                      0.0f, 165.0f, ImVec2(-1, 90));
+    chrome::LastItem(14.0f);   // a plot is a panel, not a capsule
 }
 
 void DrawAbout() {
