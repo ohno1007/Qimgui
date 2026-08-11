@@ -193,6 +193,8 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     m_Token   = token.get();
     m_Width   = width;
     m_Height  = height;
+    m_SrcW    = srcWidth;
+    m_SrcH    = srcHeight;
     m_Frames  = 0;
     m_Running = true;
     return true;
@@ -205,6 +207,18 @@ void ScreenMirror::Stop() {
     if (m_Image && media.ok) { media.ImageDelete(m_Image); }
     m_Image = nullptr;
 
+    // The mirror layer has to go with the display it fed. Leaving it behind
+    // would strand one on our layer stack per restart, and rotation restarts
+    // the mirror every time.
+    if (m_MirrorLayer) {
+        android::detail::SurfaceComposerClientTransaction t;
+        android::detail::StrongPointer<void> mp{};
+        mp.pointer = m_MirrorLayer;
+        t.Hide(mp);
+        t.Apply(false, false);
+        m_MirrorLayer = nullptr;
+    }
+
     if (m_Token) {
         android::detail::StrongPointer<void> token{};
         token.pointer = m_Token;
@@ -212,8 +226,10 @@ void ScreenMirror::Stop() {
         m_Token = nullptr;
     }
     if (m_Reader && media.ok) { media.ReaderDelete(m_Reader); }
-    m_Reader  = nullptr;
-    m_Running = false;
+    m_Reader     = nullptr;
+    m_SrcW       = 0;
+    m_SrcH       = 0;
+    m_Running    = false;
 }
 
 AHardwareBuffer* ScreenMirror::AcquireLatest() {

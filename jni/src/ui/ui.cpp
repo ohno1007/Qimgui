@@ -646,6 +646,26 @@ void DrawUi(UiState* state, bool* keep_running) {
     auto lerp = [](ImVec2 a, ImVec2 b, float u) {
         return ImVec2(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u);
     };
+    // Rotation swaps the display's dimensions, and a window that was fine in
+    // portrait can end up entirely off-screen in landscape with no way to drag
+    // it back. Keep a usable margin of it reachable whenever the display size
+    // changes under it.
+    if (state->display_w > 0 && state->display_h > 0) {
+        const float keep = 120.0f;   // enough of the title bar to grab
+        const float max_x = (float)state->display_w - keep;
+        const float max_y = (float)state->display_h - keep;
+        if (state->last_full_pos.x > max_x) state->last_full_pos.x = max_x;
+        if (state->last_full_pos.y > max_y) state->last_full_pos.y = max_y;
+        if (state->last_full_pos.x < 0.0f)  state->last_full_pos.x = 0.0f;
+        if (state->last_full_pos.y < 0.0f)  state->last_full_pos.y = 0.0f;
+        // A window wider or taller than the screen cannot be dragged back into
+        // view either, so bring the size in as well.
+        if (state->last_full_size.x > (float)state->display_w)
+            state->last_full_size.x = (float)state->display_w;
+        if (state->last_full_size.y > (float)state->display_h)
+            state->last_full_size.y = (float)state->display_h;
+    }
+
     const ImVec2 win_pos  = lerp(island_pos,  state->last_full_pos,  lt);
     const ImVec2 win_size = lerp(island_size, state->last_full_size, lt);
 

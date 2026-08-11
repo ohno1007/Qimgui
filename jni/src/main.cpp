@@ -99,6 +99,12 @@ int main() {
 
         // Live screen mirror. Half the display's resolution is plenty for a
         // blurred/refracted backdrop and halves the compositor's scaling work.
+        // A rotation invalidates the mirror: its reader is sized for one
+        // orientation and the virtual display's projection is fixed to the
+        // dimensions it was created with. Neither resizes in place, so rebuild.
+        if (mirror.NeedsRestart(info.width, info.height)) {
+            mirror.Stop();
+        }
         if (st.screen_mirror && !mirror.running()) {
             if (mirror.Start(info.width / 2, info.height / 2, info.width, info.height)) {
                 // Keep our own output out of the frames we sample, or drawing

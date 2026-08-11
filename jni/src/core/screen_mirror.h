@@ -39,6 +39,15 @@ public:
     // The returned buffer stays valid until the following AcquireLatest().
     AHardwareBuffer* AcquireLatest();
 
+    // True when the display has rotated out from under a running mirror. The
+    // reader is allocated for one orientation and the virtual display's
+    // projection is fixed to the dimensions it was started with, so a mirror
+    // built in portrait shows a squashed, cropped image once the screen turns.
+    // Neither can be resized in place, so the mirror has to be restarted.
+    bool NeedsRestart(int srcWidth, int srcHeight) const {
+        return m_Running && (srcWidth != m_SrcW || srcHeight != m_SrcH);
+    }
+
     int  width()  const { return m_Width; }
     int  height() const { return m_Height; }
     // Frames taken delivery of so far — a cheap liveness signal for the UI.
@@ -53,6 +62,8 @@ private:
     bool     m_Running  = false;
     int      m_Width    = 0;
     int      m_Height   = 0;
+    int      m_SrcW     = 0;   // display size the projection was built for
+    int      m_SrcH     = 0;
     uint64_t m_Frames   = 0;
 };
 
