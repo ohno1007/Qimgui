@@ -57,7 +57,7 @@ struct UiState {
     ImVec2 resize_drag_start_size  = ImVec2(900, 620);
 
     // Post-process bloom intensity, applied at composite. 0 = bloom off.
-    float bloom_intensity = 0.75f;
+    float bloom_intensity = 0.0f;
 
     // Live screen mirror: SurfaceFlinger composites the screen into buffers
     // we own, giving sampleable pixels for a refracting backdrop. The frame
@@ -76,15 +76,6 @@ struct UiState {
     // loop is what talks to the renderer.
     GlassRect glass_rects[kMaxGlassRects];
     int       glass_count = 0;
-
-    // Frosted-glass backdrop. SurfaceFlinger blurs what it composites behind
-    // the window, so this costs nothing per frame — but it needs Android 12+
-    // and a compositor built with blur support. `supported` is refreshed by
-    // DrawUi each frame; when false the toggle has no effect and the UI says
-    // so, because there is no cheap way to fake it below Android 12.
-    bool  backdrop_blur           = false;
-    float backdrop_blur_radius    = 40.0f;
-    bool  backdrop_blur_supported = false;
 
     // Exit fragmentation animation: when the 退出 button is pressed, the
     // UI dissolves into drifting particles and the process keeps running until

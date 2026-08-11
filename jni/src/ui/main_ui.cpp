@@ -120,7 +120,7 @@ void DrawDashboard(const UiState* state) {
 
     ImGui::Spacing();
     ImGui::SeparatorText(u8"提示");
-    ImGui::TextWrapped(u8"按音量键可以把窗口折叠成屏幕顶部的灵动岛，再按一次或点击灵动岛展开回来。");
+    ImGui::TextWrapped(u8"按音量键折叠成灵动岛，再按一次展开。");
 }
 
 void DrawWidgets() {
@@ -243,44 +243,13 @@ void DrawWindow(UiState* state) {
     ImGui::SameLine();
     ImGui::TextDisabled("[%s]", state->permeate_record ? u8"已开启" : u8"已关闭");
 
-    ImGui::TextWrapped(
-        u8"开启后，SurfaceFlinger 图层使用 skipScreenshot 标志创建，"
-        u8"屏幕录制和投屏不会捕获到本窗口。");
-
     ImGui::Spacing();
     ImGui::SeparatorText(u8"辉光");
     SliderFloatGrabValue(u8"辉光强度", &state->bloom_intensity, 0.0f, 2.5f, "%.2f");
-    ImGui::TextWrapped(
-        u8"调到 0 关闭后处理；默认 0.75。亮元素（白字、蓝高亮）会按"
-        u8"luma > 0.6 阈值参与抽亮、双 pass 高斯模糊后回叠到画面上。");
 
     ImGui::Spacing();
-    ImGui::SeparatorText(u8"毛玻璃背景");
-    if (state->backdrop_blur_supported) {
-        if (ImGui::Checkbox(u8"背景高斯模糊", &state->backdrop_blur)) {}
-        ripple::TouchLastItem();
-        if (state->backdrop_blur) {
-            SliderFloatGrabValue(u8"模糊半径", &state->backdrop_blur_radius,
-                                 4.0f, 120.0f, "%.0f");
-        }
-        ImGui::TextWrapped(
-            u8"由 SurfaceFlinger 在合成阶段模糊窗口背后的画面，"
-            u8"本进程每帧零开销，实时跟随屏幕刷新率。");
-    } else {
-        ImGui::TextDisabled(u8"本机不支持");
-        ImGui::TextWrapped(
-            u8"需要 Android 12+ 且 SurfaceFlinger 编译时开启了背景模糊"
-            u8"（ro.surface_flinger.supports_background_blur）。"
-            u8"低版本系统的合成器没有这个能力，只能靠自己截屏再模糊，"
-            u8"那样一次要上百毫秒，做不了实时背景。");
-    }
-
-    ImGui::Spacing();
-    ImGui::SeparatorText(u8"实时取屏能力检测");
+    ImGui::SeparatorText(u8"背景");
     {
-        // Probe for the virtual-display capture path — the only way to get
-        // live screen pixels we can sample (needed for refraction / liquid
-        // glass, and it works on Android versions the blur API doesn't).
         static std::string missing;
         static bool        probed = false;
         static bool        ok     = false;
@@ -293,26 +262,17 @@ void DrawWindow(UiState* state) {
             }
         }
         if (ok) {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
-            if (ImGui::Checkbox(u8"启动实时取屏", &state->screen_mirror)) {}
+            if (ImGui::Checkbox(u8"液体玻璃背景", &state->screen_mirror)) {}
             ripple::TouchLastItem();
-            ImGui::TextWrapped(
-                u8"系统的 screenrecord 走的是同一条 native 路径且能正常录制，"
-                u8"所以本机的 SurfaceFlinger 确实会驱动自建的虚拟显示。");
             if (state->screen_mirror_running) {
-                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
-                                   u8"运行中 — 已收到 %llu 帧  (%dx%d)",
-                                   (unsigned long long)state->screen_mirror_frames,
-                                   state->screen_mirror_w, state->screen_mirror_h);
-                ImGui::TextWrapped(
-                    u8"帧数在涨说明 SurfaceFlinger 正把屏幕合成进我们的 buffer，"
-                    u8"接下来就可以把它导入成纹理做折射了。");
+                ImGui::TextDisabled(u8"%dx%d  ·  %llu 帧",
+                                    state->screen_mirror_w, state->screen_mirror_h,
+                                    (unsigned long long)state->screen_mirror_frames);
             } else if (state->screen_mirror) {
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), u8"启动失败");
             }
         } else {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), u8"不可用");
-            ImGui::TextWrapped(u8"缺失符号：%s", missing.c_str());
+            ImGui::TextDisabled(u8"本机不可用：缺少 %s", missing.c_str());
         }
     }
 
@@ -336,9 +296,6 @@ void DrawWindow(UiState* state) {
         live2d::Speak();
     }
     ripple::TouchLastItem();
-    ImGui::TextWrapped(
-        u8"点小人或按此按钮播放语音，嘴巴会跟着口型。默认用内置语音；"
-        u8"把 16-bit PCM WAV 放到 /data/local/tmp/live2d_voice/ 可替换。");
 #endif
 }
 
