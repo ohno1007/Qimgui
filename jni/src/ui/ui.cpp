@@ -669,10 +669,10 @@ void DrawUi(UiState* state, bool* keep_running) {
     // background now.
     int pushed_glass_text = 0;
     if (state->screen_texture_id) {
-        ImGui::PushStyleColor(ImGuiCol_TitleBg,        ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,  ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,        ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_TitleBg,          ImVec4(1, 1, 1, 0.07f));
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    ImVec4(1, 1, 1, 0.10f));
+        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(1, 1, 1, 0.07f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,          ImVec4(0, 0, 0, 0.10f));
         pushed_glass_text = 4;
     }
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
@@ -685,33 +685,20 @@ void DrawUi(UiState* state, bool* keep_running) {
     // to the renderer, which refracts them before ImGui's widgets are drawn on
     // top. The title bar and sidebar get a tighter edge and a gentler bend so
     // they read as thinner pieces set into the same pane.
+    // A single pane for the whole window. The title bar and sidebar used to get
+    // panes of their own, but every pane carries its own lensed rim, caustic
+    // and specular — so their borders ran straight through the middle of the
+    // sheet and read as seams between separate pieces of glass. They are
+    // regions of one sheet, not three sheets, so they are differentiated by
+    // density instead (the fills pushed below) and the glass stays continuous.
     state->glass_count = 0;
     if (state->screen_texture_id && lt > 0.01f) {
-        const float title_h = ImGui::GetFrameHeight();
         GlassRect r{};
         r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
         r.rounding = rounding;
         r.alpha = lt;
         r.tintA = 0.06f;
         state->glass_rects[state->glass_count++] = r;
-
-        GlassRect t = r;
-        t.h = title_h;
-        t.edgeWidth = 18.0f;
-        t.bend = 0.75f;
-        t.tintA = 0.14f;
-        state->glass_rects[state->glass_count++] = t;
-
-        if (show_chrome) {
-            GlassRect sb = r;
-            sb.y += title_h;
-            sb.w = kSidebarW;
-            sb.h = win_size.y - title_h;
-            sb.edgeWidth = 22.0f;
-            sb.bend = 0.7f;
-            sb.tintA = 0.12f;
-            state->glass_rects[state->glass_count++] = sb;
-        }
     }
 
     // Frosted-glass backdrop: hand SurfaceFlinger the window's current rect

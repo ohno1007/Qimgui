@@ -34,6 +34,10 @@ int main() {
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr; io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    // ImGui moves a window when dragged from anywhere in it by default, which
+    // collides head-on with dragging the content to scroll. Restrict moving to
+    // the title bar, which is also what a finger expects.
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
     // ImGui 1.92's stb font loader raises a *recoverable* IM_ASSERT_USER_ERROR
     // when a system font fails to parse. By default that aborts the process
     // (SIGABRT) on first text render. Disable the assert so a bad/unsupported
