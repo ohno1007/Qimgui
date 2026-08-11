@@ -96,9 +96,15 @@ int main() {
         // Live screen mirror. Half the display's resolution is plenty for a
         // blurred/refracted backdrop and halves the compositor's scaling work.
         if (st.screen_mirror && !mirror.running()) {
-            mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
+            if (mirror.Start(info.width / 2, info.height / 2, info.width, info.height)) {
+                // Keep our own output out of the frames we sample, or drawing
+                // the mirror inside the window feeds the window back into the
+                // next mirrored frame and the loop saturates to white.
+                ANativeWindowCreator::SetSkipScreenshot(ws.window(), true);
+            }
         } else if (!st.screen_mirror && mirror.running()) {
             mirror.Stop();
+            ANativeWindowCreator::SetSkipScreenshot(ws.window(), false);
         }
         if (mirror.running()) {
             // Import straight to a texture — no copy, the image aliases the

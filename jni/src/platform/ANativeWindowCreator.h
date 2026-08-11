@@ -383,6 +383,8 @@ namespace android {
             // A display that is configured but powered off composites nothing,
             // which looks exactly like a layer-stack mismatch from outside.
             void (*SurfaceComposerClient__SetDisplayPowerMode)(StrongPointer<void> &display, int32_t mode) = nullptr;
+            // Sets layer_state_t flags on a layer without recreating it.
+            void *(*SurfaceComposerClient__Transaction__SetFlags)(void *thiz, StrongPointer<void> &surfaceControl, uint32_t flags, uint32_t mask) = nullptr;
             // Android 13+. Returns a SurfaceControl that mirrors a display's
             // contents, to be parented onto whichever layer stack should show
             // it. This is how modern SurfaceFlinger mirrors, having moved away
@@ -602,6 +604,9 @@ namespace android {
                     SurfaceComposerClient__SetDisplayPowerMode =
                         reinterpret_cast<decltype(SurfaceComposerClient__SetDisplayPowerMode)>(
                             bind("21SurfaceComposerClient19setDisplayPowerMode", nullptr));
+                    SurfaceComposerClient__Transaction__SetFlags =
+                        reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetFlags)>(
+                            bind("11Transaction8setFlags", nullptr));
                     SurfaceComposerClient__MirrorDisplay =
                         reinterpret_cast<decltype(SurfaceComposerClient__MirrorDisplay)>(
                             bind("21SurfaceComposerClient13mirrorDisplay", nullptr));
@@ -847,6 +852,13 @@ namespace android {
                 auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetCrop;
                 if (nullptr == fn) return false;
                 fn(data, surfaceControl, &crop);
+                return true;
+            }
+
+            bool SetFlags(StrongPointer<void> &surfaceControl, uint32_t flags, uint32_t mask) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetFlags;
+                if (nullptr == fn) return false;
+                fn(data, surfaceControl, flags, mask);
                 return true;
             }
 
@@ -1703,6 +1715,29 @@ namespace android {
         static bool HasMirrorForLayerStack(const std::string& layerStack) {
             auto& cachedMirrors = GetLayerStackMirrorSurfaces();
             return cachedMirrors.find(layerStack) != cachedMirrors.end();
+        }
+
+        // Hides a layer from screen captures — including our own mirror.
+        //
+        // Sampling the mirror to draw the window's glass puts the window's own
+        // output back into the next mirrored frame, and since each pass adds
+        // the UI on top of what it already showed, the loop saturates to white
+        // within a few frames. Excluding ourselves is what breaks it.
+        //
+        // Set through a transaction rather than at creation so it can follow
+        // the mirror being switched on and off without rebuilding the surface.
+        static bool SetSkipScreenshot(ANativeWindow *nativeWindow, bool skip) {
+            auto it = m_cachedSurfaceControl.find(nativeWindow);
+            if (it == m_cachedSurfaceControl.end()) return false;
+
+            constexpr uint32_t kLayerSkipScreenshot = 0x40; // layer_state_t
+            detail::SurfaceComposerClientTransaction t;
+            detail::StrongPointer<void> sc{};
+            sc.pointer = it->second.data;
+            if (!t.SetFlags(sc, skip ? kLayerSkipScreenshot : 0u, kLayerSkipScreenshot))
+                return false;
+            t.Apply(false, false);
+            return true;
         }
 
         // ── Virtual-display capture probe ───────────────────────────────
