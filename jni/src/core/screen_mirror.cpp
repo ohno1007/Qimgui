@@ -82,11 +82,11 @@ void DumpSurfaceFlingerDisplays() {
     // The full state of *our* display, not just its id. screenrecord drives
     // this same path successfully, so the answer is in whatever SurfaceFlinger
     // records differently for ours — power mode, attached surface, layer stack.
-    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -A6 'AImGuiMirror'", "r");
+    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -B10 -A6 'AImGuiMirror'", "r");
     if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
     char line[512];
     int printed = 0;
-    while (std::fgets(line, sizeof(line), pipe) && printed < 10) {
+    while (std::fgets(line, sizeof(line), pipe) && printed < 24) {
         std::fprintf(stderr, "[sf] %s", line);
         ++printed;
     }
@@ -164,10 +164,18 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // Read the primary display's actual layer stack rather than assuming 0.
     // Mirroring the wrong stack yields a display that composites nothing, and
     // reports success at every step while doing it.
+    // Distinguish "the display really is on stack 0" from "the query failed
+    // and we defaulted to 0" — both look identical in the log otherwise, and
+    // SurfaceFlinger listing no layers for our display means whatever we sent
+    // matched nothing.
     uint32_t layerStack = 0;
     {
         android::detail::ui::DisplayState ds{};
-        if (composer.GetDisplayInfo(&ds)) layerStack = ds.layerStack.id;
+        const bool got = composer.GetDisplayInfo(&ds);
+        MIRROR_STEP("displayState: query=%d layerStack=%u orientation=%d rect=%dx%d",
+                    got, ds.layerStack.id, (int)ds.orientation,
+                    ds.layerStackSpaceRect.width, ds.layerStackSpaceRect.height);
+        if (got) layerStack = ds.layerStack.id;
     }
 
     android::detail::SurfaceComposerClientTransaction t;
