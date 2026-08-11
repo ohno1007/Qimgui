@@ -12,11 +12,13 @@ const char* kVS = R"(#version 300 es
 precision highp float;
 out vec2 vUV;
 uniform vec4 uRect;    // xy = pane min px, zw = pane size px
-uniform vec2 uScreen;  // screen size px
+uniform vec2 uSurface; // render target size px
 void main() {
     vUV = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
     vec2 px  = uRect.xy + vUV * uRect.zw;
-    vec2 ndc = px / uScreen * 2.0 - 1.0;
+    // NDC is relative to the render target — the square surface — not the
+    // visible display, which is what the fragment stage samples against.
+    vec2 ndc = px / uSurface * 2.0 - 1.0;
     gl_Position = vec4(ndc, 0.0, 1.0);
 }
 )";
@@ -135,6 +137,7 @@ bool GlassGL::Init() {
     m_LocScreenTex = glGetUniformLocation(m_Prog, "uScreenTex");
     m_LocRect      = glGetUniformLocation(m_Prog, "uRect");
     m_LocScreen    = glGetUniformLocation(m_Prog, "uScreen");
+    m_LocSurface   = glGetUniformLocation(m_Prog, "uSurface");
     m_LocParams    = glGetUniformLocation(m_Prog, "uParams");
     m_LocTint      = glGetUniformLocation(m_Prog, "uTint");
 
@@ -151,8 +154,10 @@ void GlassGL::Shutdown() {
 }
 
 void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
+                   int surfaceW, int surfaceH,
                    const GlassRect* rects, int count) {
     if (!m_Ready || !screenTex || count <= 0 || screenW <= 0 || screenH <= 0) return;
+    if (surfaceW <= 0 || surfaceH <= 0) return;
 
     glUseProgram(m_Prog);
     glBindVertexArray(m_VAO);
@@ -165,6 +170,7 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
     glBindTexture(GL_TEXTURE_2D, screenTex);
     glUniform1i(m_LocScreenTex, 0);
     glUniform2f(m_LocScreen, (float)screenW, (float)screenH);
+    glUniform2f(m_LocSurface, (float)surfaceW, (float)surfaceH);
 
     for (int i = 0; i < count; ++i) {
         const GlassRect& r = rects[i];

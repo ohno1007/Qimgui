@@ -112,7 +112,8 @@ public:
 
     void DrawGlass() {
         if (m_GlassCount > 0 && m_BackdropTex)
-            m_Glass.Draw(m_BackdropTex, m_GlassW, m_GlassH, m_GlassRects, m_GlassCount);
+            m_Glass.Draw(m_BackdropTex, m_GlassW, m_GlassH, m_Width, m_Height,
+                         m_GlassRects, m_GlassCount);
     }
 
     void Shutdown() override {

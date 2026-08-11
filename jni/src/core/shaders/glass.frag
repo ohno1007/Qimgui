@@ -21,7 +21,7 @@ layout(set = 0, binding = 0) uniform sampler2D uScreen;
 
 layout(push_constant) uniform Push {
     vec4 rect;      // pane in screen px: xy = min, zw = size
-    vec4 screen;    // xy = screen size px, zw = unused
+    vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;    // x = rounding px, y = edge width px, z = bend, w = alpha
     vec4 tint;      // rgb = wash colour, a = wash strength
 } pc;

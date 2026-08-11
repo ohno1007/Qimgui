@@ -499,7 +499,7 @@ private:
         VkRect2D   sc{ {0, 0}, { (uint32_t)m_Width, (uint32_t)m_Height } };
         vkCmdSetViewport(cmd, 0, 1, &vp);
         vkCmdSetScissor(cmd, 0, 1, &sc);
-        m_Glass.Record(cmd, m_GlassW, m_GlassH, m_GlassRects, m_GlassCount);
+        m_Glass.Record(cmd, m_GlassW, m_GlassH, m_Width, m_Height, m_GlassRects, m_GlassCount);
     }
 
     void Submit(ImDrawData* draw) {

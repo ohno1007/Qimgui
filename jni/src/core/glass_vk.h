@@ -20,7 +20,10 @@ public:
     // with an unchanged view; the descriptor is only rewritten when it moves.
     void SetScreenImage(VkImageView view);
 
+    // `screenW/H` is the visible display, which the panes sample against;
+    // `surfaceW/H` is the render target, which is the square surface.
     void Record(VkCommandBuffer cmd, int screenW, int screenH,
+                int surfaceW, int surfaceH,
                 const GlassRect* rects, int count);
 
 private:

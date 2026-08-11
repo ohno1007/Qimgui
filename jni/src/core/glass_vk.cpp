@@ -12,7 +12,7 @@ namespace {
 // Mirrors the push-constant block in shaders/glass.{vert,frag}.
 struct Push {
     float rect[4];    // xy = pane min px, zw = pane size px
-    float screen[4];  // xy = screen size px
+    float screen[4];  // xy = display size px (UV), zw = surface size px (NDC)
     float params[4];  // rounding, edge width, bend, alpha
     float tint[4];    // rgb = wash colour, a = wash strength
 };
@@ -171,9 +171,11 @@ void GlassVK::SetScreenImage(VkImageView view) {
 }
 
 void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
+                     int surfaceW, int surfaceH,
                      const GlassRect* rects, int count) {
     if (!m_Ready || m_ScreenView == VK_NULL_HANDLE) return;
     if (count <= 0 || screenW <= 0 || screenH <= 0) return;
+    if (surfaceW <= 0 || surfaceH <= 0) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, 1, &m_DS, 0, nullptr);
@@ -183,7 +185,8 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
         if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
         Push p{};
         p.rect[0] = r.x; p.rect[1] = r.y; p.rect[2] = r.w; p.rect[3] = r.h;
-        p.screen[0] = (float)screenW; p.screen[1] = (float)screenH;
+        p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
+        p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
         p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
         p.params[2] = r.bend;     p.params[3] = r.alpha;
         p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
