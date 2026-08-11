@@ -305,7 +305,11 @@ constexpr float kGlassStrandAt = 0.46f;   // down the window, 0..1
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────
 void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
-    constexpr float kInnerPadX     = 18.0f;
+    // Wide enough that the labels clear the lensed band on both sides. The
+    // right edge is the tighter of the two now that the slot eats half its
+    // width out of this column, so the padding is set by that side and the
+    // left simply inherits it.
+    constexpr float kInnerPadX     = 30.0f;
     constexpr float kInnerPadY     = 14.0f;
     constexpr float kSelectableH   = 44.0f;
     constexpr float kAccentInset   = 10.0f;
@@ -317,7 +321,12 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // no intermediate hover-gray or transient pressed-blue. Push the same
     // color into all three slots.
     const ImVec4 sel_bg(0.22f, 0.40f, 0.78f, 0.55f);
-    ImGui::PushStyleColor(ImGuiCol_ChildBg,       ImVec4(0.07f, 0.08f, 0.10f, 1.0f));
+    // This child's own fill is opaque, and it is pushed after the glass code
+    // has cleared ChildBg — so it was painting the nav column solid black over
+    // the pane behind it. The pane is the background whenever there is one.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,
+                          state->screen_texture_id ? ImVec4(0, 0, 0, 0)
+                                                   : ImVec4(0.07f, 0.08f, 0.10f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Header,        sel_bg);
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, sel_bg);
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,  sel_bg);
@@ -329,8 +338,11 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.08f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,        ImVec2(0, 6));
 
+    // The border is a rectangle around the child, which cuts across the pane
+    // and re-draws the seam the parting just removed.
     ImGui::BeginChild("##sidebar", ImVec2(kSidebarW, 0),
-                      ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
+                      (state->screen_texture_id ? 0 : ImGuiChildFlags_Borders) |
+                          ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar);
 
     const ImU32 accent = ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 1.0f));
@@ -478,7 +490,9 @@ void ContentGesture(const char* id, UiState* state) {
 }
 
 void DrawContent(UiState* state, Page page) {
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 18));
+    // The left edge is the tight one: the slot takes half its width out of
+    // this side, so the body text would otherwise start inside the lensing.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(34, 20));
 
     ImGui::BeginChild("##content", ImVec2(0, 0),
                       ImGuiChildFlags_AlwaysUseWindowPadding,
