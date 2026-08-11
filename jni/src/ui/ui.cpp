@@ -76,7 +76,7 @@ void DrawAll() {
 namespace {
 
 // ─── Exit fragmentation animation ────────────────────────────────────────
-// On 退出 click we synthesize ~90 small rotating, gravity-affected chips
+// On 退出 click the window's surface is turned into a cloud of particles
 // covering the current main window rect, fade the rest of the UI to zero,
 // then signal the main loop to quit after the animation has played out.
 // ─── Exit dissolve ───────────────────────────────────────────────────────
@@ -341,7 +341,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             // UV normalisation must use the *snapshot texture* dimensions —
             // which equal io.DisplaySize because the renderer sizes its
             // scene image to that. state->display_w/h are the physical
-            // screen dimensions and would mis-map most chips off-frame.
+            // screen dimensions and would mis-map most particles off-frame.
             const ImGuiIO& io2 = ImGui::GetIO();
             dissolve::Begin(state->last_full_pos, state->last_full_size,
                            io2.DisplaySize.x, io2.DisplaySize.y);
@@ -848,7 +848,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     // Foreground overlays: ripples on every clickable widget.
     ripple::DrawAll();
 
-    // On the click frame the chips still need to be advanced/drawn so the
+    // On the click frame the particles still need advancing/drawing so the
     // visual is continuous with the next frame, but the UI under them is
     // still the real one (so the user perceives the surface itself
     // coming apart). After this frame the early-return path takes over.
