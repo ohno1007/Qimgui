@@ -75,16 +75,24 @@ void main() {
     // caustic and the specular along with everything else, which is what made
     // the rim look grey: the highlight is the material reflecting light, not
     // content to be read through, so it must not be dimmed.
+    // Only genuinely bright content gets pulled down, and gently. Reaching
+    // further down the range greyed everything — mid-tones included — which
+    // both dulled the material and made the rim highlights look blown out
+    // against it. Text stays readable at 0.65; below that the picture is
+    // being repainted rather than made legible.
     float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
+    col *= mix(1.0, 0.65, smoothstep(0.55, 0.95, luma));
     col = mix(col, uTint.rgb, uTint.a);
 
+    // Kept well short of white: a rim that clips to full brightness stops
+    // reading as light concentrated in glass and starts reading as a drawn
+    // white border.
     float caustic = smoothstep(0.72, 0.97, bevel) * (1.0 - smoothstep(0.97, 1.0, bevel));
-    col += caustic * 0.55;
+    col += caustic * 0.20;
 
     vec2  lightDir = normalize(vec2(-0.6, -0.8));
     float spec = max(dot(n, lightDir), 0.0);
-    col += pow(spec, 3.0) * bevel * 0.42;
+    col += pow(spec, 3.0) * bevel * 0.18;
 
 
     float aa = 1.0 - smoothstep(-1.5, 0.0, d);

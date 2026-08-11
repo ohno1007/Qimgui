@@ -82,8 +82,13 @@ void main() {
     // caustic and the specular along with everything else, which is what made
     // the rim look grey: the highlight is the material reflecting light, not
     // content to be read through, so it must not be dimmed.
+    // Only genuinely bright content gets pulled down, and gently. Reaching
+    // further down the range greyed everything — mid-tones included — which
+    // both dulled the material and made the rim highlights look blown out
+    // against it. Text stays readable at 0.65; below that the picture is
+    // being repainted rather than made legible.
     float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
+    col *= mix(1.0, 0.65, smoothstep(0.55, 0.95, luma));
 
     // A whisper of wash, never enough to read as a tinted panel.
     col = mix(col, pc.tint.rgb, pc.tint.a);
@@ -91,14 +96,17 @@ void main() {
     // Caustic: bent rays pile up just inside the rim and light concentrates
     // into a bright band. This is the "concentrates light" half of the
     // material, and the strongest cue that the edge has thickness.
+    // Kept well short of white: a rim that clips to full brightness stops
+    // reading as light concentrated in glass and starts reading as a drawn
+    // white border.
     float caustic = smoothstep(0.72, 0.97, bevel) * (1.0 - smoothstep(0.97, 1.0, bevel));
-    col += caustic * 0.55;
+    col += caustic * 0.20;
 
     // Specular: brightest where the surface tilts towards the light, taken as
     // up-and-left, falling off around the rim.
     const vec2 lightDir = normalize(vec2(-0.6, -0.8));
     float spec = max(dot(n, lightDir), 0.0);
-    col += pow(spec, 3.0) * bevel * 0.42;
+    col += pow(spec, 3.0) * bevel * 0.18;
 
 
     // Feather the last pixel so the rounded border stays smooth.
