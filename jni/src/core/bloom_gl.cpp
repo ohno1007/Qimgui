@@ -299,8 +299,8 @@ void BloomGL::EndSceneAndComposite() {
     // This is a full-surface copy (on a 1080x2400 phone the square surface
     // makes that 2400*2400*4 = 23 MB). Doing it every frame burned ~2.7 GB/s
     // of memory bandwidth continuously to serve a 1.2 s animation that plays
-    // once, at exit. Refresh it at ~5 Hz instead: the chips then sample a UI
-    // image up to 200 ms old, which is invisible mid-shatter.
+    // once, at exit. Refresh it at ~5 Hz instead: particles then sample a UI
+    // image up to 200 ms old, which is invisible mid-dissolve.
     if (!m_SnapshotFrozen && SnapshotDue()) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, m_SceneFBO);
         glBindTexture(GL_TEXTURE_2D, m_PrevSceneTex);

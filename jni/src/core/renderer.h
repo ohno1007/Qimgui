@@ -26,7 +26,7 @@ public:
 
     // Sampleable snapshot of the previous frame's scene image as an opaque
     // handle suitable for casting to ImTextureID (used by the exit dissolve
-    // animation to draw real UI chips). Returns 0 if not available.
+    // animation to draw real pieces of UI). Returns 0 if not available.
     virtual unsigned long long GetSceneSnapshotID() = 0;
 
     // Freeze / unfreeze snapshot refresh. While frozen the renderer keeps

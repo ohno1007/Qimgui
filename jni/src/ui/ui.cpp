@@ -75,10 +75,6 @@ void DrawAll() {
 
 namespace {
 
-// ─── Exit fragmentation animation ────────────────────────────────────────
-// On 退出 click the window's surface is turned into a cloud of particles
-// covering the current main window rect, fade the rest of the UI to zero,
-// then signal the main loop to quit after the animation has played out.
 // ─── Exit dissolve ───────────────────────────────────────────────────────
 // The window comes apart into a cloud of small particles that drift up and
 // outward while fading, in the manner of the delete animation on Huawei's
