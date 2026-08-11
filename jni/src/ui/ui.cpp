@@ -482,7 +482,13 @@ void DrawContent(UiState* state, Page page) {
 void DrawCardContent(const UiState* state) {
     ImGuiIO& io = ImGui::GetIO();
 
-    ImGui::Dummy(ImVec2(0, 10));
+    // The card has no title bar or child to inherit padding from, so its text
+    // sat flush against the lensed rim — where the refraction is strongest and
+    // least readable. Inset it clear of that band.
+    constexpr float kCardPadX = 30.0f;
+    constexpr float kCardPadY = 24.0f;
+    ImGui::Indent(kCardPadX);
+    ImGui::Dummy(ImVec2(0, kCardPadY));
     ImGui::PushFont(nullptr, 34.0f);
     ImGui::Text("AImGui");
     ImGui::PopFont();
@@ -504,7 +510,8 @@ void DrawCardContent(const UiState* state) {
     ImGui::TextDisabled(u8"防录屏   %s", state->permeate_record ? u8"已开启" : u8"已关闭");
 
     ImGui::Dummy(ImVec2(0, 8));
-    ImGui::TextDisabled(u8"再点一次展开窗口");
+    ImGui::TextDisabled(u8"再点一次展开窗口   ·   上滑收起");
+    ImGui::Unindent(kCardPadX);
 }
 
 void DrawIslandContent() {
@@ -877,7 +884,7 @@ void DrawUi(UiState* state, bool* keep_running) {
         r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
         r.rounding = rounding;
         r.alpha = 1.0f;
-        r.tintA = 0.06f;
+        r.tintA = state->glass_clarity;
         // The pill is small, so its rim would otherwise reach most of the way
         // across it; scale the lensing down with the shorter side.
         const float minSide = win_size.x < win_size.y ? win_size.x : win_size.y;

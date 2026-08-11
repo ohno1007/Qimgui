@@ -69,6 +69,11 @@ struct UiState {
     // Post-process bloom intensity, applied at composite. 0 = bloom off.
     float bloom_intensity = 0.0f;
 
+    // How much of a wash sits over the refracted screen. 0 is bare glass, 1 is
+    // an opaque panel; the useful range is the bottom third, which is why the
+    // slider stops well short of the top.
+    float glass_clarity = 0.06f;
+
     // Live screen mirror: SurfaceFlinger composites the screen into buffers
     // we own, giving sampleable pixels for a refracting backdrop. The frame
     // counter is a liveness signal — if it stops rising, frames stopped

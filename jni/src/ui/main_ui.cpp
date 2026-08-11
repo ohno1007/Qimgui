@@ -264,6 +264,10 @@ void DrawWindow(UiState* state) {
         if (ok) {
             if (ImGui::Checkbox(u8"液体玻璃背景", &state->screen_mirror)) {}
             ripple::TouchLastItem();
+            if (state->screen_mirror) {
+                SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
+                                     0.0f, 0.35f, "%.2f");
+            }
             if (state->screen_mirror_running) {
                 ImGui::TextDisabled(u8"%dx%d  ·  %llu 帧",
                                     state->screen_mirror_w, state->screen_mirror_h,
