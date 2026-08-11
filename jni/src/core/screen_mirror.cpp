@@ -41,7 +41,8 @@ constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour 
 // therefore needs them usable as a render target. Requesting only SAMPLED
 // leaves the compositor with nothing it can draw to, and the display sits
 // there producing no frames at all rather than reporting an error.
-constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer;
+constexpr uint64_t kUsageCpuWriteOften  = 3ULL << 4;  // for the self-test below
+constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer | kUsageCpuWriteOften;
 
 struct MediaNdk {
     int32_t (*ReaderNewWithUsage)(int32_t w, int32_t h, int32_t fmt,
@@ -81,11 +82,11 @@ void DumpSurfaceFlingerDisplays() {
     // The full state of *our* display, not just its id. screenrecord drives
     // this same path successfully, so the answer is in whatever SurfaceFlinger
     // records differently for ours — power mode, attached surface, layer stack.
-    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -A12 AImGui", "r");
+    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -A6 'AImGuiMirror'", "r");
     if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
     char line[512];
     int printed = 0;
-    while (std::fgets(line, sizeof(line), pipe) && printed < 40) {
+    while (std::fgets(line, sizeof(line), pipe) && printed < 10) {
         std::fprintf(stderr, "[sf] %s", line);
         ++printed;
     }
@@ -185,8 +186,42 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
                 srcWidth, srcHeight, width, height, applyRc);
 
     MIRROR_STEP("6/6 running");
-    DumpSurfaceFlingerDisplays();
     m_Window = window;
+
+    // Self-test: post one frame into the reader ourselves, exactly as a
+    // producer would, and see whether the consumer side hands it back. This
+    // needs no extra symbols — ANativeWindow_lock/unlockAndPost are public
+    // NDK — and it splits the two remaining possibilities cleanly. If our own
+    // frame comes back, the queue, the reader and the window are all sound and
+    // the only party not producing is SurfaceFlinger. If it does not, the
+    // fault is on our side and no amount of display plumbing will help.
+    {
+        ANativeWindow_Buffer buf{};
+        const int lockRc = ANativeWindow_lock(window, &buf, nullptr);
+        if (lockRc != 0) {
+            MIRROR_STEP("self-test: lock failed rc=%d (usage may forbid CPU write)", lockRc);
+        } else {
+            uint8_t* p = static_cast<uint8_t*>(buf.bits);
+            for (int y = 0; y < buf.height; ++y) {
+                uint8_t* row = p + (size_t)y * buf.stride * 4;
+                for (int x = 0; x < buf.width; ++x) {
+                    row[x * 4 + 0] = 255; row[x * 4 + 1] = 0;
+                    row[x * 4 + 2] = 255; row[x * 4 + 3] = 255;
+                }
+            }
+            const int postRc = ANativeWindow_unlockAndPost(window);
+            void* img = nullptr;
+            const int32_t acqRc = media.ReaderAcquireLatest(reader, &img);
+            MIRROR_STEP("self-test: posted rc=%d -> acquire rc=%d img=%p  => %s",
+                        postRc, acqRc, img,
+                        (acqRc == kMediaOk && img)
+                            ? "QUEUE OK, so SurfaceFlinger is the one not producing"
+                            : "QUEUE BROKEN on our side");
+            if (img) media.ImageDelete(img);
+        }
+    }
+
+    DumpSurfaceFlingerDisplays();
     m_Reader  = reader;
     m_Token   = token.get();
     m_Width   = width;
