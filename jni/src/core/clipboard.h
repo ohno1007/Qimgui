@@ -28,6 +28,13 @@ namespace clipboard {
 
 const char* Path();
 
+// Whether the last Get/Set actually reached the Android clipboard rather than
+// falling back to the file, and why it did not. The UI shows this: a paste
+// that quietly came from somewhere other than where the user copied is the
+// worst possible failure for this feature.
+bool        UsedSystem();
+const char* SystemError();
+
 // Installs the handlers on the current ImGui context. Call after the context
 // exists; ImGui's own in-memory fallback is replaced, not wrapped.
 void Install();

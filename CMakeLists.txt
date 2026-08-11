@@ -74,6 +74,7 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/haptics.cpp
     ${JNI}/src/core/config.cpp
     ${JNI}/src/core/clipboard.cpp
+    ${JNI}/src/core/clipboard_system.cpp
     ${JNI}/src/core/glass_gl.cpp
     ${JNI}/src/core/glass_vk.cpp)
 target_compile_definitions(aimgui_core PRIVATE

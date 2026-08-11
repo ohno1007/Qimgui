@@ -408,15 +408,23 @@ void DrawWindow(UiState* state) {
             std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());  // for the inactive one
         }
 
-        // Without this a paste from an empty clipboard is indistinguishable
-        // from a paste that did not work, which is exactly the wrong thing to
-        // leave ambiguous on a feature whose whole job is moving text around.
-        if (last_len == 0) {
-            ImGui::TextDisabled(u8"剪贴板是空的 — 用下面的路径放文本进来");
-        } else if (last_len > 0) {
-            ImGui::TextDisabled(u8"%d 个字符", last_len);
+        // Which clipboard actually answered, and how much came back. A paste
+        // that quietly came from somewhere other than where the user copied is
+        // the worst way this can fail, so it is never left implicit — and an
+        // empty clipboard has to look different from a broken one.
+        if (last_len >= 0) {
+            if (clipboard::UsedSystem()) {
+                if (last_len == 0) ImGui::TextDisabled(u8"系统剪贴板是空的");
+                else               ImGui::TextDisabled(u8"系统剪贴板  ·  %d 个字符", last_len);
+            } else {
+                const char* why = clipboard::SystemError();
+                ImGui::TextDisabled(u8"文件回退  ·  %d 个字符", last_len);
+                if (why && *why) ImGui::TextDisabled(u8"系统剪贴板不可用：%s", why);
+                ImGui::TextDisabled("%s", clipboard::Path());
+            }
+        } else {
+            ImGui::TextDisabled(u8"点粘贴读取系统剪贴板");
         }
-        ImGui::TextDisabled("%s", clipboard::Path());
     }
 
     ImGui::Spacing();

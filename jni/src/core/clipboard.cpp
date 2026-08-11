@@ -1,5 +1,7 @@
 #include "clipboard.h"
 
+#include "clipboard_system.h"
+
 #include "imgui.h"
 
 #include <cstdio>
@@ -16,6 +18,7 @@ constexpr size_t      kMax  = 64 * 1024;
 // calling anything else, so a single buffer owned here is enough and saves
 // handing ownership back and forth.
 std::string g_text;
+bool        g_used_system = false;
 
 const char* GetFn(ImGuiContext*) { return Get(); }
 void        SetFn(ImGuiContext*, const char* text) { Set(text); }
@@ -23,10 +26,16 @@ void        SetFn(ImGuiContext*, const char* text) { Set(text); }
 } // namespace
 
 const char* Path() { return kPath; }
+bool UsedSystem() { return g_used_system; }
+const char* SystemError() { return sysclip::LastError(); }
 
 void Set(const char* text) {
     if (!text) text = "";
     g_text = text;
+    // The real clipboard first. Writing to it is permitted outright — the
+    // service's own check returns allowed for OP_WRITE_CLIPBOARD without
+    // needing focus — so this is the path that should normally win.
+    g_used_system = sysclip::WriteText(text);
     // Whole-file replace through a temp, same as the config: a reader that
     // catches us mid-write would otherwise get a truncated string rather than
     // the old one.
@@ -40,6 +49,16 @@ void Set(const char* text) {
 }
 
 const char* Get() {
+    // The real clipboard first; the file is what is left when the transaction
+    // is refused or the service is not there at all.
+    std::string sys;
+    if (sysclip::ReadText(&sys)) {
+        g_used_system = true;
+        g_text = std::move(sys);
+        return g_text.c_str();
+    }
+    g_used_system = false;
+
     // Read every time rather than trusting the copy in memory: the whole point
     // of the file is that something outside this process can put text there
     // while it runs, and a cache would never see it.
