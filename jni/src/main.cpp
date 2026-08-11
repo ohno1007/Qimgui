@@ -3,6 +3,7 @@
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
 #include "core/screen_mirror.h"
+#include "core/sensor_tilt.h"
 
 #include <android/hardware_buffer.h>
 #include "core/window_session.h"
@@ -76,6 +77,10 @@ int main() {
 #endif
 
     aimgui::ScreenMirror mirror;
+    // Optional: no sensor is reachable from a package-less process on some
+    // builds, in which case the glass keeps its fixed key light.
+    aimgui::SensorTilt tilt;
+    tilt.Init();
     aimgui::FramePacer pacer;
     auto last = clock::now();
     auto last_display_poll = last;
@@ -142,6 +147,15 @@ int main() {
             st.screen_texture_id = 0;
         }
         st.screen_mirror_running = mirror.running();
+        // Steer the glass's key light by how the panel is leaning. A highlight
+        // that never moves reads as painted on; one that sweeps as the device
+        // tilts is most of what sells the rim as a reflection.
+        tilt.Update(io.DeltaTime);
+        if (tilt.Available()) {
+            st.glass_light_x = -0.6f + tilt.x() * 0.9f;
+            st.glass_light_y = -0.8f + tilt.y() * 0.9f;
+        }
+
         if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();
         aimgui::kbd_input::Flush();
 
@@ -197,6 +211,7 @@ int main() {
 #ifdef AIMGUI_LIVE2D
     aimgui::live2d::Shutdown();
 #endif
+    tilt.Shutdown();
     aimgui::kbd_input::Shutdown();
     ws.Destroy();
     ImGui::DestroyContext();

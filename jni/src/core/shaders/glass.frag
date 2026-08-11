@@ -24,7 +24,7 @@ layout(push_constant) uniform Push {
     vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;    // x = rounding px, y = edge width px, z = bend, w = alpha
     vec4 tint;      // rgb = wash colour, a = wash strength
-    vec4 params2;   // x = blur radius px
+    vec4 params2;   // x = blur radius px, yz = key light direction
 } pc;
 
 // Shadow. Whatever these add up to must stay inside glass.vert's kPad, or the
@@ -78,6 +78,20 @@ vec3 sampleBlurred(vec2 px, vec2 screen, float radius) {
         wsum += 1.40;
     }
     return acc / wsum;
+}
+
+// A cheap, wide read of what surrounds a point, in linear light. This feeds the
+// rim reflection, where the only question is how bright it is over there — not
+// what the detail is — so four taps on a ring is plenty and a twelve-tap blur
+// would be paying for resolution nobody sees.
+vec3 sampleEnv(vec2 px, vec2 screen, float radius) {
+    vec3 acc = toLinear(texture(uScreen, px / screen).rgb);
+    for (int i = 0; i < 4; ++i) {
+        float a = float(i) * 1.5707963;             // 90 degrees
+        vec2  o = vec2(cos(a), sin(a)) * radius;
+        acc += toLinear(texture(uScreen, (px + o) / screen).rgb);
+    }
+    return acc * 0.2;
 }
 
 void main() {
@@ -138,7 +152,11 @@ void main() {
     // rim, which is precisely where it does the work of identifying glass.
     // Dispersion rides on top of the blur: each channel is blurred about its
     // own bent position, so the colour split survives the softening.
-    float disp = bevel * bend * 0.16;
+    // Weighted towards the corners, where the surface actually turns through a
+    // sharper angle and a real lens splits hardest. On a straight edge the
+    // normal is axis-aligned and this term is 1; at a 45-degree corner it is 0.
+    float cornerness = min(abs(n.x), abs(n.y)) * 2.0;
+    float disp = bevel * bend * 0.16 * mix(1.0, 1.7, cornerness);
     vec3 lin = vec3(
         sampleBlurred(base - n * disp, pc.screen.xy, blurPx).r,
         sampleBlurred(base,            pc.screen.xy, blurPx).g,
@@ -172,11 +190,33 @@ void main() {
     float caustic = smoothstep(0.72, 0.97, bevel) * (1.0 - smoothstep(0.97, 1.0, bevel));
     col += caustic * 0.20;
 
-    // Specular: brightest where the surface tilts towards the light, taken as
-    // up-and-left, falling off around the rim.
-    const vec2 lightDir = normalize(vec2(-0.6, -0.8));
-    float spec = max(dot(n, lightDir), 0.0);
-    col += pow(spec, 3.0) * bevel * 0.18;
+    // A thin bright stroke right at the border. The caustic sits a little way
+    // inside the edge, so without this the pane still ends abruptly — the
+    // stroke is the outermost of the three layers a real bevel shows.
+    float edgeLine = smoothstep(-2.5, -0.8, d) * (1.0 - smoothstep(-0.8, 0.0, d));
+    col += edgeLine * 0.14;
+
+    // Specular, in two parts. The key light gives the rim its shape and comes
+    // from wherever the panel is leaning, so the highlight sweeps as the device
+    // is tilted — a highlight fixed at one spot reads as painted on, which is
+    // what the old constant direction did.
+    vec2  lightDir = normalize(vec2(pc.params2.y, pc.params2.z) + 1e-6);
+    float key      = pow(max(dot(n, lightDir), 0.0), 3.0);
+    col += key * bevel * 0.18;
+
+    // The other part is the surroundings. Look outward along the normal and let
+    // whatever is actually out there light up the stretch of rim nearest to it,
+    // so the highlight slides when the content behind the pane moves. This is
+    // the difference between glass sitting in a scene and glass drawn over one.
+    vec3  envCol  = toSrgb(sampleEnv(posPx + n * edgeW * 2.2, pc.screen.xy, edgeW * 0.8));
+    float envLuma = dot(envCol, vec3(0.2126, 0.7152, 0.0722));
+    // Only genuinely bright surroundings reflect; reaching lower would just
+    // smear a muddy average of the desktop around the whole rim.
+    float envAmt  = smoothstep(0.45, 1.0, envLuma);
+    // Its hue without its brightness, so a blue window reflects as blue rather
+    // than as extra brightness that happens to lean blue.
+    vec3  envHue  = clamp(envCol / max(envLuma, 1e-3), vec3(0.0), vec3(1.6));
+    col += mix(vec3(1.0), envHue, 0.55) * envAmt * bevel * 0.26;
 
     // Feather the last pixel so the rounded border stays smooth, then lay the
     // glass over its own shadow. Compositing the two here rather than letting

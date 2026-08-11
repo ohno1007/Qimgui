@@ -74,6 +74,12 @@ struct UiState {
     // slider stops well short of the top.
     float glass_clarity = 0.06f;
 
+    // Key-light direction for the glass, in screen space. Steered by the
+    // accelerometer so the rim highlight sweeps as the panel leans; stays at
+    // the fixed up-and-left default wherever no sensor is reachable.
+    float glass_light_x = -0.6f;
+    float glass_light_y = -0.8f;
+
     // Live screen mirror: SurfaceFlinger composites the screen into buffers
     // we own, giving sampleable pixels for a refracting backdrop. The frame
     // counter is a liveness signal — if it stops rising, frames stopped

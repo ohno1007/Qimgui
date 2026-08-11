@@ -37,7 +37,7 @@ uniform vec4 uRect;
 uniform vec2 uScreen;
 uniform vec4 uParams;  // x = rounding, y = edge width, z = bend, w = alpha
 uniform vec4 uTint;    // rgb = wash colour, a = wash strength
-uniform vec4 uParams2; // x = blur radius px
+uniform vec4 uParams2; // x = blur radius px, yz = key light direction
 
 // Shadow. Must stay inside the vertex stage's kPad or it gets clipped.
 const vec2  kShadowOffset = vec2(0.0, 12.0);
@@ -87,6 +87,19 @@ vec3 sampleBlurred(vec2 px, vec2 screen, float radius) {
     return acc / wsum;
 }
 
+// A cheap, wide read of what surrounds a point, in linear light. Feeds the rim
+// reflection, where the only question is how bright it is over there — not what
+// the detail is — so four taps on a ring is plenty.
+vec3 sampleEnv(vec2 px, vec2 screen, float radius) {
+    vec3 acc = toLinear(texture(uScreenTex, px / screen).rgb);
+    for (int i = 0; i < 4; ++i) {
+        float a = float(i) * 1.5707963;             // 90 degrees
+        vec2  o = vec2(cos(a), sin(a)) * radius;
+        acc += toLinear(texture(uScreenTex, (px + o) / screen).rgb);
+    }
+    return acc * 0.2;
+}
+
 void main() {
     vec2  size   = uRect.zw;
     vec2  halfSz = size * 0.5;
@@ -132,8 +145,11 @@ void main() {
     float blurPx  = uParams2.x * mix(kCentreBlur, 1.0, rimness);
 
     // Dispersion rides on top of the blur: each channel is blurred about its
-    // own bent position, so the colour split survives the softening.
-    float disp = bevel * bend * 0.16;
+    // own bent position, so the colour split survives the softening. Weighted
+    // towards the corners, where the surface turns through a sharper angle and
+    // a real lens splits hardest.
+    float cornerness = min(abs(n.x), abs(n.y)) * 2.0;
+    float disp = bevel * bend * 0.16 * mix(1.0, 1.7, cornerness);
     vec3 lin = vec3(
         sampleBlurred(base - n * disp, uScreen, blurPx).r,
         sampleBlurred(base,            uScreen, blurPx).g,
@@ -162,9 +178,25 @@ void main() {
     float caustic = smoothstep(0.72, 0.97, bevel) * (1.0 - smoothstep(0.97, 1.0, bevel));
     col += caustic * 0.20;
 
-    vec2  lightDir = normalize(vec2(-0.6, -0.8));
-    float spec = max(dot(n, lightDir), 0.0);
-    col += pow(spec, 3.0) * bevel * 0.18;
+    // A thin bright stroke right at the border: the caustic sits a little way
+    // inside the edge, so without this the pane still ends abruptly.
+    float edgeLine = smoothstep(-2.5, -0.8, d) * (1.0 - smoothstep(-0.8, 0.0, d));
+    col += edgeLine * 0.14;
+
+    // Key light comes from wherever the panel is leaning, so the highlight
+    // sweeps as the device is tilted rather than sitting at a fixed spot.
+    vec2  lightDir = normalize(vec2(uParams2.y, uParams2.z) + 1e-6);
+    float key      = pow(max(dot(n, lightDir), 0.0), 3.0);
+    col += key * bevel * 0.18;
+
+    // Plus the surroundings: look outward along the normal and let whatever is
+    // actually out there light up the nearest stretch of rim, so the highlight
+    // slides when the content behind the pane moves.
+    vec3  envCol  = toSrgb(sampleEnv(posPx + n * edgeW * 2.2, uScreen, edgeW * 0.8));
+    float envLuma = dot(envCol, vec3(0.2126, 0.7152, 0.0722));
+    float envAmt  = smoothstep(0.45, 1.0, envLuma);
+    vec3  envHue  = clamp(envCol / max(envLuma, 1e-3), vec3(0.0), vec3(1.6));
+    col += mix(vec3(1.0), envHue, 0.55) * envAmt * bevel * 0.26;
 
     // Feather the last pixel, then lay the glass over its own shadow.
     // Compositing the two here rather than letting the feather fade to nothing
@@ -266,7 +298,7 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
         glUniform4f(m_LocRect, r.x, r.y, r.w, r.h);
         glUniform4f(m_LocParams, r.rounding, r.edgeWidth, r.bend, r.alpha);
         glUniform4f(m_LocTint, r.tintR, r.tintG, r.tintB, r.tintA);
-        glUniform4f(m_LocParams2, r.blur, 0.0f, 0.0f, 0.0f);
+        glUniform4f(m_LocParams2, r.blur, r.lightX, r.lightY, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 

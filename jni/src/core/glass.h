@@ -22,6 +22,10 @@ struct GlassRect {
     // transmit sharply, and UI text over a busy photo is unreadable however the
     // contrast is tuned — this is what buys the legibility back.
     float blur  = 7.0f;
+    // Key-light direction in screen space, normalised by the shader. Driven by
+    // the accelerometer where one is reachable, so the rim highlight sweeps as
+    // the panel leans; falls back to a fixed up-and-left key otherwise.
+    float lightX = -0.6f, lightY = -0.8f;
 };
 
 constexpr int kMaxGlassRects = 8;

@@ -885,6 +885,8 @@ void DrawUi(UiState* state, bool* keep_running) {
         r.rounding = rounding;
         r.alpha = 1.0f;
         r.tintA = state->glass_clarity;
+        r.lightX = state->glass_light_x;
+        r.lightY = state->glass_light_y;
         // The pill is small, so its rim would otherwise reach most of the way
         // across it; scale the lensing down with the shorter side.
         const float minSide = win_size.x < win_size.y ? win_size.x : win_size.y;

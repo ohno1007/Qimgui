@@ -192,6 +192,7 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
         p.params[2] = r.bend;     p.params[3] = r.alpha;
         p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
         p.params2[0] = r.blur;
+        p.params2[1] = r.lightX; p.params2[2] = r.lightY;
         vkCmdPushConstants(cmd, m_Layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(p), &p);
