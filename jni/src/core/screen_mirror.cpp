@@ -2,18 +2,19 @@
 
 #include "platform/ANativeWindowCreator.h"
 
-#include <android/log.h>
+#include <cstdio>
 #include <dlfcn.h>
 
 namespace aimgui {
 namespace {
 
-// Each risky step is logged before it runs, deliberately not gated behind
-// SURFACE_LOG_ENABLE. Every call below goes through a symbol resolved out of
-// libgui by name, so a wrong binding takes the process down with it — and when
-// that happens the last line in logcat is the only thing that says which one.
+// Each risky step is reported before it runs. Every call below goes through a
+// symbol resolved out of libgui by name, so a wrong binding takes the process
+// down with it, and the last line printed is then the only thing that says
+// which one. stderr because it is unbuffered — a buffered stdout would lose
+// the very line that matters when the process dies.
 #define MIRROR_STEP(fmt, ...) \
-    __android_log_print(ANDROID_LOG_INFO, "AImGuiMirror", fmt __VA_OPT__(,) __VA_ARGS__)
+    std::fprintf(stderr, "[mirror] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 
 
 // AImageReader is loaded at first use rather than linked. Linking libmediandk

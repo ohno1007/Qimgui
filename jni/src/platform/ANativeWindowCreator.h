@@ -517,9 +517,21 @@ namespace android {
 #else
                     const char *libguiPath = "/system/lib/libgui.so";
 #endif
+                    // Print what each search actually bound. Resolution here is
+                    // by name, so the failure mode is binding the *wrong*
+                    // symbol rather than none — and that only shows up as a
+                    // crash much later. Seeing the mangled name makes a
+                    // mismatched class obvious on sight.
                     auto bind = [&](const char *token, const char *suffix) -> void * {
                         const std::string m = FindDynSymContaining(libguiPath, token, suffix);
-                        return m.empty() ? nullptr : symbolMethod.Find(libgui, m.c_str());
+                        if (m.empty()) {
+                            fprintf(stderr, "[sym] %-46s -> NOT FOUND\n", token);
+                            return nullptr;
+                        }
+                        void *fn = symbolMethod.Find(libgui, m.c_str());
+                        fprintf(stderr, "[sym] %-46s -> %s%s\n", token, m.c_str(),
+                                fn ? "" : "  (in table but dlsym failed)");
+                        return fn;
                     };
 
                     // Tokens carry the Itanium length prefixes for both the
