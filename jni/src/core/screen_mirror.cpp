@@ -135,18 +135,27 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         return false;
     }
 
-    // Read the primary display's actual layer stack rather than assuming 0.
-    // Mirroring the wrong stack yields a display that composites nothing, and
-    // reports success at every step while doing it.
-    // Give the mirror its own layer stack rather than sharing the physical
-    // display's. Sharing one stack between two displays used to be how
-    // mirroring worked, and it is what screenrecord still looks like it does,
-    // but on this build SurfaceFlinger stores the shared stack faithfully
-    // (readback confirms layerStack=0) and then assigns no layers to the
-    // second display. Modern SurfaceFlinger mirrors by way of a mirror layer
-    // instead, so make a stack that only this display sees and put one there.
-    constexpr uint32_t kMirrorLayerStack = 0x41493344;  // arbitrary, ours alone
-    const uint32_t layerStack = kMirrorLayerStack;
+    // Share the physical display's layer stack, which is how screenrecord
+    // mirrors and the only approach known to work on every version here.
+    //
+    // This was tried first and abandoned after SurfaceFlinger listed no layers
+    // for the display — but that measurement was taken before the display was
+    // being powered on, and power-on went in during the same round as the
+    // mirror-layer approach that replaced it. The empty layer list was most
+    // likely the display being off, and crediting the fix to the mirror layer
+    // was a confound. A mirror layer also has to have its damage propagated
+    // from what it reflects for the virtual display to recompose, which is
+    // exactly the sort of thing that differs between versions and matches a
+    // display that renders once and then never again.
+    //
+    // If frames really do not arrive this way, Update() falls back to the
+    // mirror layer, so the wrong guess costs a second rather than the feature.
+    uint32_t layerStack = 0;
+    {
+        android::detail::ui::DisplayState ds{};
+        if (composer.GetDisplayInfo(&ds)) layerStack = ds.layerStack.id;
+    }
+    m_LayerStack = layerStack;
 
     android::detail::SurfaceComposerClientTransaction t;
     const bool okSurf = t.SetDisplaySurface(token, producer);
@@ -165,28 +174,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // SurfaceFlinger does not turn these on by itself here, and it only
     // attaches to our producer once one is on.
     composer.SetDisplayPowerMode(token, /*ON=*/2);
-
-    // Mirror the physical display into a layer parked on our stack, so this
-    // display has exactly one thing to composite and it is the screen. Two
-    // displays sharing a layer stack used to be enough to mirror; this
-    // SurfaceFlinger stores the shared stack faithfully and then assigns no
-    // layers to the second display, so it needs a mirror layer instead.
-    android::detail::ui::PhysicalDisplayId pid{};
-    if (android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid) &&
-        android::detail::SurfaceComposerClient::MirrorDisplaySupported()) {
-        m_MirrorLayer = composer.MirrorDisplay(pid).data;
-        if (m_MirrorLayer) {
-            android::detail::SurfaceComposerClientTransaction mt;
-            android::detail::StrongPointer<void> mp{};
-            mp.pointer = m_MirrorLayer;
-            mt.SetLayer(mp, 0);
-            mt.SetLayerStack(mp, layerStack);
-            mt.Show(mp);
-            mt.Apply(false, false);
-        } else {
-            MIRROR_FAIL("mirrorDisplay returned no layer; nothing to composite");
-        }
-    }
+    m_Started = std::chrono::steady_clock::now();
 
     m_Window = window;
 
@@ -231,6 +219,43 @@ void ScreenMirror::Stop() {
     m_SrcW       = 0;
     m_SrcH       = 0;
     m_Running    = false;
+}
+
+void ScreenMirror::Update() {
+    // Sharing the physical display's layer stack is the primary route, but if
+    // it turns out this build will not mirror that way, nothing arrives and
+    // there is no error to catch — the display simply sits there. So give it a
+    // second, and if not one frame has landed, hang a mirror layer on a stack
+    // of our own instead and let that drive the display.
+    if (!m_Running || m_Frames > 0 || m_MirrorLayer) return;
+    if (std::chrono::steady_clock::now() - m_Started < std::chrono::milliseconds(1000)) return;
+    if (!android::detail::SurfaceComposerClient::MirrorDisplaySupported()) return;
+
+    android::detail::ui::PhysicalDisplayId pid{};
+    if (!android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid)) return;
+
+    auto& composer = android::ANativeWindowCreator::GetComposerInstance();
+    m_MirrorLayer = composer.MirrorDisplay(pid).data;
+    if (!m_MirrorLayer) {
+        MIRROR_FAIL("no frames on the shared layer stack, and mirrorDisplay gave no layer");
+        return;
+    }
+
+    // Move the display onto a stack nobody else uses and put the mirror there,
+    // so it has exactly one thing to composite and that thing is the screen.
+    constexpr uint32_t kPrivateStack = 0x41493344;
+    android::detail::StrongPointer<void> token{};
+    token.pointer = m_Token;
+    android::detail::StrongPointer<void> mp{};
+    mp.pointer = m_MirrorLayer;
+
+    android::detail::SurfaceComposerClientTransaction t;
+    t.SetDisplayLayerStack(token, kPrivateStack);
+    t.SetLayer(mp, 0);
+    t.SetLayerStack(mp, kPrivateStack);
+    t.Show(mp);
+    t.Apply(false, false);
+    m_LayerStack = kPrivateStack;
 }
 
 AHardwareBuffer* ScreenMirror::AcquireLatest() {

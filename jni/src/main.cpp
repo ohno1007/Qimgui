@@ -124,6 +124,7 @@ int main() {
             mirror.Stop();
             ANativeWindowCreator::SetSkipScreenshot(ws.window(), false);
         }
+        mirror.Update();
         if (mirror.running()) {
             // Import straight to a texture — no copy, the image aliases the
             // memory SurfaceFlinger composited into. Keep the previous handle

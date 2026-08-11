@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 struct AHardwareBuffer;
@@ -37,6 +38,10 @@ public:
 
     // Newest buffer, or nullptr if no frame has arrived since the last call.
     // The returned buffer stays valid until the following AcquireLatest().
+    // Call once per frame. Watches for the mirror never producing and switches
+    // to the fallback route if so; cheap and does nothing once frames arrive.
+    void Update();
+
     AHardwareBuffer* AcquireLatest();
 
     // True when the display has rotated out from under a running mirror. The
@@ -59,6 +64,8 @@ private:
     void*    m_Image    = nullptr;   // AImage*, held while its buffer is in use
     void*    m_Token    = nullptr;   // display token (StrongPointer payload)
     void*    m_MirrorLayer = nullptr; // SurfaceControl mirroring the real display
+    uint32_t m_LayerStack   = 0;
+    std::chrono::steady_clock::time_point m_Started{};
     bool     m_Running  = false;
     int      m_Width    = 0;
     int      m_Height   = 0;
