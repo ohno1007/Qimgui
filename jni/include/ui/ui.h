@@ -72,7 +72,11 @@ struct UiState {
     // How much of a wash sits over the refracted screen. 0 is bare glass, 1 is
     // an opaque panel; the useful range is the bottom third, which is why the
     // slider stops well short of the top.
-    float glass_clarity = 0.06f;
+    //
+    // This carries the whole wash. ImGui used to paint a 5% sheet of its own on
+    // top, but that fill is always a window-shaped rectangle and would bridge
+    // the slot between parted panes — so the default here absorbs it.
+    float glass_clarity = 0.11f;
 
     // Key-light direction for the glass, in screen space. Steered by the
     // accelerometer so the rim highlight sweeps as the panel leans; stays at

@@ -7,18 +7,19 @@ namespace {
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "AImGui", __VA_ARGS__)
 
-// Four corners straight from gl_VertexID — no vertex buffer. The quad is grown
-// past the pane so the fragment stage has somewhere to draw the shadow; kPad
-// must cover the shadow's offset plus its softness.
+// Four corners straight from gl_VertexID — no vertex buffer. One quad covers
+// the whole group, because the fragment stage merges the panes' distance fields
+// and has to see all of them at once. kPad must cover the shadow's offset plus
+// its softness; the merge radius is already in uBounds.
 const char* kVS = R"(#version 300 es
 precision highp float;
 out vec2 vPx;          // this vertex in screen px
-uniform vec4 uRect;    // xy = pane min px, zw = pane size px
+uniform vec4 uBounds;  // xy = group min px, zw = group size px
 uniform vec2 uSurface; // render target size px
 const float kPad = 48.0;
 void main() {
     vec2 uv = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
-    vPx = uRect.xy - kPad + uv * (uRect.zw + 2.0 * kPad);
+    vPx = uBounds.xy - kPad + uv * (uBounds.zw + 2.0 * kPad);
     // NDC is relative to the render target — the square surface — not the
     // visible display, which is what the fragment stage samples against.
     vec2 ndc = vPx / uSurface * 2.0 - 1.0;
@@ -33,11 +34,12 @@ precision highp float;
 in  vec2 vPx;          // this pixel in screen px
 out vec4 fragColor;
 uniform sampler2D uScreenTex;
-uniform vec4 uRect;
+uniform vec4 uBounds;  // xy = group min px, zw = group size px
 uniform vec2 uScreen;
 uniform vec4 uParams;  // x = rounding, y = edge width, z = bend, w = alpha
 uniform vec4 uTint;    // rgb = wash colour, a = wash strength
-uniform vec4 uParams2; // x = blur radius px, yz = key light direction
+uniform vec4 uParams2; // x = blur px, yz = key light dir, w = merge radius px
+uniform vec4 uShapes[3]; // xy = centre px, zw = half size px; z <= 0 = unused
 
 // Shadow. Must stay inside the vertex stage's kPad or it gets clipped.
 const vec2  kShadowOffset = vec2(0.0, 12.0);
@@ -51,8 +53,31 @@ const float kContourAlpha = 0.12;
 const float kCentreBlur = 0.35;
 
 float sdRoundedBox(vec2 p, vec2 halfSz, float r) {
+    r = min(r, min(halfSz.x, halfSz.y));
     vec2 q = abs(p) - halfSz + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+// Polynomial smooth minimum. min() of two fields welds them with a crease; this
+// rounds the join over a radius k, which is what surface tension does to two
+// bodies of liquid brought close. Past a gap of k the two are left alone, so
+// the neck thins out and lets go on its own.
+float smin(float a, float b, float k) {
+    if (k <= 0.0) return min(a, b);
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// The whole group as one field, so a neck is lensed and lit like any other part
+// of the surface rather than being a seam between two panes.
+float sceneSDF(vec2 p) {
+    float d = sdRoundedBox(p - uShapes[0].xy, uShapes[0].zw, uParams.x);
+    for (int i = 1; i < 3; ++i) {
+        if (uShapes[i].z <= 0.0) continue;
+        d = smin(d, sdRoundedBox(p - uShapes[i].xy, uShapes[i].zw, uParams.x),
+                 uParams2.w);
+    }
+    return d;
 }
 
 // The mirrored screen arrives sRGB-encoded, and averaging encoded values is
@@ -101,21 +126,17 @@ vec3 sampleEnv(vec2 px, vec2 screen, float radius) {
 }
 
 void main() {
-    vec2  size   = uRect.zw;
-    vec2  halfSz = size * 0.5;
-    float round_ = uParams.x;
     float edgeW  = max(uParams.y, 1.0);
     float bendK  = uParams.z;
 
     vec2 posPx = vPx;
-    vec2 rel   = posPx - (uRect.xy + halfSz);
 
-    float d = sdRoundedBox(rel, halfSz, round_);
+    float d = sceneSDF(posPx);
 
     // Shadow, taken from the same distance field shifted down, plus a tight
     // dark contour hugging the rim. Without anything outside it the pane is a
     // hole cut in the screen rather than a sheet lying on it.
-    float ds      = sdRoundedBox(rel - kShadowOffset, halfSz, round_);
+    float ds      = sceneSDF(posPx - kShadowOffset);
     float shadowA = (1.0 - smoothstep(0.0, kShadowSoft, ds)) * kShadowAlpha
                   + (1.0 - smoothstep(0.0, 1.5, d)) * kContourAlpha;
     shadowA *= uParams.w;
@@ -125,10 +146,12 @@ void main() {
         return;
     }
 
+    // Gradient of the merged field, so the neck between two panes gets a normal
+    // that curves smoothly from one into the other.
     const float e = 1.0;
     vec2 n = normalize(vec2(
-        sdRoundedBox(rel + vec2(e, 0.0), halfSz, round_) - sdRoundedBox(rel - vec2(e, 0.0), halfSz, round_),
-        sdRoundedBox(rel + vec2(0.0, e), halfSz, round_) - sdRoundedBox(rel - vec2(0.0, e), halfSz, round_)) + 1e-6);
+        sceneSDF(posPx + vec2(e, 0.0)) - sceneSDF(posPx - vec2(e, 0.0)),
+        sceneSDF(posPx + vec2(0.0, e)) - sceneSDF(posPx - vec2(0.0, e))) + 1e-6);
 
     float t     = clamp(1.0 + d / edgeW, 0.0, 1.0);
     float bevel = t * t * (3.0 - 2.0 * t) * t;
@@ -251,7 +274,15 @@ bool GlassGL::Init() {
     }
 
     m_LocScreenTex = glGetUniformLocation(m_Prog, "uScreenTex");
-    m_LocRect      = glGetUniformLocation(m_Prog, "uRect");
+    m_LocBounds    = glGetUniformLocation(m_Prog, "uBounds");
+    // GLSL ES guarantees an array's elements take consecutive locations, so one
+    // location plus a count uploads the whole thing. Drivers disagree on which
+    // spelling of the name they answer to, and getting -1 here would upload
+    // nothing at all and leave the shader building its field from zeroes — so
+    // try both rather than find out on a device.
+    m_LocShapes    = glGetUniformLocation(m_Prog, "uShapes[0]");
+    if (m_LocShapes < 0) m_LocShapes = glGetUniformLocation(m_Prog, "uShapes");
+    if (m_LocShapes < 0) LOGE("glass: uShapes not found");
     m_LocScreen    = glGetUniformLocation(m_Prog, "uScreen");
     m_LocSurface   = glGetUniformLocation(m_Prog, "uSurface");
     m_LocParams    = glGetUniformLocation(m_Prog, "uParams");
@@ -292,13 +323,14 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
     glUniform2f(m_LocScreen, (float)screenW, (float)screenH);
     glUniform2f(m_LocSurface, (float)surfaceW, (float)surfaceH);
 
-    for (int i = 0; i < count; ++i) {
-        const GlassRect& r = rects[i];
-        if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
-        glUniform4f(m_LocRect, r.x, r.y, r.w, r.h);
+    GlassGroup g;
+    if (BuildGlassGroup(rects, count, &g)) {
+        const GlassRect& r = rects[0];
+        glUniform4f(m_LocBounds, g.bx, g.by, g.bw, g.bh);
         glUniform4f(m_LocParams, r.rounding, r.edgeWidth, r.bend, r.alpha);
         glUniform4f(m_LocTint, r.tintR, r.tintG, r.tintB, r.tintA);
-        glUniform4f(m_LocParams2, r.blur, r.lightX, r.lightY, 0.0f);
+        glUniform4f(m_LocParams2, r.blur, r.lightX, r.lightY, r.merge);
+        glUniform4fv(m_LocShapes, kMaxMergedShapes, g.shapes);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 

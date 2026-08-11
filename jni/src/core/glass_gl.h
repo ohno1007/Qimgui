@@ -19,6 +19,11 @@ public:
     // sample it by their own position, so a pane shows what is behind it.
     // `screenW/H` is the visible display, which the panes sample against;
     // `surfaceW/H` is the render target, which is the square surface.
+    //
+    // The rects are one merged group, not a list of independent panes: they are
+    // drawn in a single pass whose distance field is their smooth union, so
+    // panes set close together grow a neck between them. Shared material
+    // settings come from rects[0]. At most kMaxMergedShapes take part.
     void Draw(GLuint screenTex, int screenW, int screenH,
               int surfaceW, int surfaceH,
               const GlassRect* rects, int count);
@@ -28,7 +33,8 @@ private:
     GLuint m_Prog    = 0;
     GLuint m_VAO     = 0;
     GLint  m_LocScreenTex = -1;
-    GLint  m_LocRect      = -1;
+    GLint  m_LocBounds    = -1;
+    GLint  m_LocShapes    = -1;
     GLint  m_LocScreen    = -1;
     GLint  m_LocSurface   = -1;
     GLint  m_LocParams    = -1;

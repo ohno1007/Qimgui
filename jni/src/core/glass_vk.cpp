@@ -10,13 +10,17 @@ namespace {
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "AImGui", __VA_ARGS__)
 
 // Mirrors the push-constant block in shaders/glass.{vert,frag}.
+// Exactly 128 bytes, which is the smallest maxPushConstantsSize Vulkan
+// guarantees — kMaxMergedShapes is sized to land on it, so this must not grow.
 struct Push {
-    float rect[4];    // xy = pane min px, zw = pane size px
+    float bounds[4];  // xy = group min px, zw = group size px
     float screen[4];  // xy = display size px (UV), zw = surface size px (NDC)
     float params[4];  // rounding, edge width, bend, alpha
     float tint[4];    // rgb = wash colour, a = wash strength
-    float params2[4]; // x = blur radius px
+    float params2[4]; // blur px, light x, light y, merge radius px
+    float shapes[kMaxMergedShapes * 4];  // xy = centre px, zw = half size px
 };
+static_assert(sizeof(Push) <= 128, "push constants must fit the guaranteed 128 bytes");
 
 VkShaderModule MakeModule(VkDevice d, const uint32_t* code, size_t bytes) {
     VkShaderModuleCreateInfo si{};
@@ -181,23 +185,28 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, 1, &m_DS, 0, nullptr);
 
-    for (int i = 0; i < count; ++i) {
-        const GlassRect& r = rects[i];
-        if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
-        Push p{};
-        p.rect[0] = r.x; p.rect[1] = r.y; p.rect[2] = r.w; p.rect[3] = r.h;
-        p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
-        p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
-        p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
-        p.params[2] = r.bend;     p.params[3] = r.alpha;
-        p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
-        p.params2[0] = r.blur;
-        p.params2[1] = r.lightX; p.params2[2] = r.lightY;
-        vkCmdPushConstants(cmd, m_Layout,
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(p), &p);
-        vkCmdDraw(cmd, 4, 1, 0, 0);
-    }
+    // One pass for the whole group: the fragment shader's distance field is
+    // their smooth union, so a pane cannot be drawn on its own without losing
+    // the neck it shares with its neighbours.
+    GlassGroup g;
+    if (!BuildGlassGroup(rects, count, &g)) return;
+
+    const GlassRect& r = rects[0];   // shared material settings
+    Push p{};
+    p.bounds[0] = g.bx; p.bounds[1] = g.by; p.bounds[2] = g.bw; p.bounds[3] = g.bh;
+    p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
+    p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
+    p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
+    p.params[2] = r.bend;     p.params[3] = r.alpha;
+    p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
+    p.params2[0] = r.blur;
+    p.params2[1] = r.lightX; p.params2[2] = r.lightY;
+    p.params2[3] = r.merge;
+    for (int i = 0; i < kMaxMergedShapes * 4; ++i) p.shapes[i] = g.shapes[i];
+    vkCmdPushConstants(cmd, m_Layout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(p), &p);
+    vkCmdDraw(cmd, 4, 1, 0, 0);
 }
 
 void GlassVK::Shutdown() {

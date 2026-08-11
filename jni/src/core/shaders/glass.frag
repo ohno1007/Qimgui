@@ -20,11 +20,12 @@ layout(location = 0) out vec4 fragColor;
 layout(set = 0, binding = 0) uniform sampler2D uScreen;
 
 layout(push_constant) uniform Push {
-    vec4 rect;      // pane in screen px: xy = min, zw = size
+    vec4 bounds;    // quad bounds in screen px: xy = min, zw = size
     vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;    // x = rounding px, y = edge width px, z = bend, w = alpha
     vec4 tint;      // rgb = wash colour, a = wash strength
-    vec4 params2;   // x = blur radius px, yz = key light direction
+    vec4 params2;   // x = blur px, yz = key light direction, w = merge radius px
+    vec4 shapes[3]; // xy = centre px, zw = half size px; z <= 0 means unused
 } pc;
 
 // Shadow. Whatever these add up to must stay inside glass.vert's kPad, or the
@@ -42,8 +43,34 @@ const float kCentreBlur = 0.35;
 
 // Signed distance to a rounded box centred on the origin. Negative inside.
 float sdRoundedBox(vec2 p, vec2 half_, float r) {
+    r = min(r, min(half_.x, half_.y));
     vec2 q = abs(p) - half_ + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+// Polynomial smooth minimum. Taking min() of two distance fields welds them
+// with a crease; this rounds the join over a radius k, which is what surface
+// tension does to two bodies of liquid brought close together. Where the gap
+// is wider than k the two are left alone, so the neck thins out and lets go on
+// its own rather than being switched off.
+float smin(float a, float b, float k) {
+    if (k <= 0.0) return min(a, b);
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// The whole group as one field. Panes are merged here rather than drawn one at
+// a time because a neck belongs to two panes at once: everything downstream —
+// the normal, the bevel, the rim — reads this, so the join is lensed and lit
+// like any other part of the surface instead of being a seam between two.
+float sceneSDF(vec2 p) {
+    float d = sdRoundedBox(p - pc.shapes[0].xy, pc.shapes[0].zw, pc.params.x);
+    for (int i = 1; i < 3; ++i) {
+        if (pc.shapes[i].z <= 0.0) continue;
+        d = smin(d, sdRoundedBox(p - pc.shapes[i].xy, pc.shapes[i].zw, pc.params.x),
+                 pc.params2.w);
+    }
+    return d;
 }
 
 // The mirrored screen arrives sRGB-encoded, and averaging encoded values is
@@ -95,23 +122,19 @@ vec3 sampleEnv(vec2 px, vec2 screen, float radius) {
 }
 
 void main() {
-    vec2 size    = pc.rect.zw;
-    vec2 halfSz  = size * 0.5;
-    float round_ = pc.params.x;
     float edgeW  = max(pc.params.y, 1.0);
     float bendK  = pc.params.z;
     float alpha  = pc.params.w;
 
     vec2 posPx = vPx;
-    vec2 rel   = posPx - (pc.rect.xy + halfSz);
 
-    float d = sdRoundedBox(rel, halfSz, round_);
+    float d = sceneSDF(posPx);
 
     // Shadow, taken from the same distance field shifted down, plus a tight
     // dark contour hugging the rim. Without anything outside it the pane is a
     // hole cut in the screen rather than a sheet lying on it; this is the only
     // cue that gives the glass a height above the desktop.
-    float ds      = sdRoundedBox(rel - kShadowOffset, halfSz, round_);
+    float ds      = sceneSDF(posPx - kShadowOffset);
     float shadowA = (1.0 - smoothstep(0.0, kShadowSoft, ds)) * kShadowAlpha
                   + (1.0 - smoothstep(0.0, 1.5, d)) * kContourAlpha;
     shadowA *= alpha;
@@ -121,11 +144,14 @@ void main() {
         return;
     }
 
-    // Gradient of the distance field is the glass surface normal here.
+    // Gradient of the merged distance field is the glass surface normal here,
+    // so the neck between two panes gets a normal that curves smoothly from one
+    // into the other — which is the whole reason the merge happens in the field
+    // rather than by drawing the panes over each other.
     const float e = 1.0;
     vec2 n = normalize(vec2(
-        sdRoundedBox(rel + vec2(e, 0.0), halfSz, round_) - sdRoundedBox(rel - vec2(e, 0.0), halfSz, round_),
-        sdRoundedBox(rel + vec2(0.0, e), halfSz, round_) - sdRoundedBox(rel - vec2(0.0, e), halfSz, round_)) + 1e-6);
+        sceneSDF(posPx + vec2(e, 0.0)) - sceneSDF(posPx - vec2(e, 0.0)),
+        sceneSDF(posPx + vec2(0.0, e)) - sceneSDF(posPx - vec2(0.0, e))) + 1e-6);
 
     // 0 deep inside, 1 at the rim. The bevel term keeps the surface near-flat
     // until it turns over hard at the border, which is what makes the edge read

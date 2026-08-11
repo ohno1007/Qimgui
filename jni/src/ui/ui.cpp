@@ -287,6 +287,22 @@ void ApplyStyleOnce() {
 // itself cannot drift apart.
 constexpr float kSidebarW = 230.0f;
 
+// How far the nav column's pane and the title/content pane are held apart, over
+// what radius the field between them is smoothed, and the strand left spanning
+// the slot.
+//
+// The smooth union of two edges a gap g apart closes at the midline only when
+// the merge radius exceeds 2g — below that the slot stays genuinely open, which
+// is what is wanted here. So merge is deliberately under 2*gap and the slot
+// does not heal on its own; a third small shape straddling the divide is what
+// connects the two, and the same smoothing flares it into a proper neck where
+// it lands on each side. Slot open above and below, one strand across.
+constexpr float kGlassGap      = 18.0f;
+constexpr float kGlassMerge    = 26.0f;
+constexpr float kGlassStrandW  = 26.0f;   // added to the gap, so it overlaps
+constexpr float kGlassStrandH  = 96.0f;
+constexpr float kGlassStrandAt = 0.46f;   // down the window, 0..1
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────
 void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     constexpr float kInnerPadX     = 18.0f;
@@ -845,12 +861,18 @@ void DrawUi(UiState* state, bool* keep_running) {
         // carried two fills where the title bar, which ImGui paints separately,
         // carried one. Matching the two colours is not enough while one side is
         // doubled; the children have to contribute nothing.
-        const ImVec4 kSheet(1, 1, 1, 0.05f);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg,         kSheet);
-        ImGui::PushStyleColor(ImGuiCol_TitleBg,          kSheet);
-        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    kSheet);
-        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kSheet);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,          ImVec4(0, 0, 0, 0));
+        // Nothing at all, now that the panes can be parted: any fill ImGui
+        // paints is a window-shaped rectangle, so it would bridge the slot
+        // between them with a flat wash and undo the parting. The body the
+        // fill used to provide is the shader's own wash instead — one wash on
+        // the real silhouette rather than two on different shapes — which is
+        // what glass_clarity's default accounts for.
+        const ImVec4 kNone(0, 0, 0, 0);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg,         kNone);
+        ImGui::PushStyleColor(ImGuiCol_TitleBg,          kNone);
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    kNone);
+        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kNone);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,          kNone);
         pushed_glass_text = 5;
     }
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
@@ -880,28 +902,75 @@ void DrawUi(UiState* state, bool* keep_running) {
     // left a rectangle of glass hanging where the window used to be.
     state->glass_count = 0;
     if (state->screen_texture_id && !state->exit_anim_active) {
-        GlassRect r{};
-        r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
-        r.rounding = rounding;
-        r.alpha = 1.0f;
-        r.tintA = state->glass_clarity;
-        r.lightX = state->glass_light_x;
-        r.lightY = state->glass_light_y;
+        GlassRect base{};
+        base.rounding = rounding;
+        base.alpha    = 1.0f;
+        base.tintA    = state->glass_clarity;
+        base.lightX   = state->glass_light_x;
+        base.lightY   = state->glass_light_y;
         // The pill is small, so its rim would otherwise reach most of the way
         // across it; scale the lensing down with the shorter side.
         const float minSide = win_size.x < win_size.y ? win_size.x : win_size.y;
         if (minSide < 200.0f) {
-            r.edgeWidth = minSide * 0.30f;
-            r.blur      = 5.0f;
+            base.edgeWidth = minSide * 0.30f;
+            base.blur      = 5.0f;
         }
-        state->glass_rects[state->glass_count++] = r;
+
+        // Below the full-window stage there is nothing to part: the island and
+        // the card are a single body, and win_pos/win_size already interpolate
+        // all the way down to the pill.
+        const float split = lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f;
+        GlassRect a = base, b = base, strand = base;
+        bool parted = false;
+        if (split > 0.01f) {
+            // Two bodies rather than one, parted along the nav column's edge,
+            // with a strand left across the middle. The gap opens from zero
+            // with the stage, so the parting grows out of the single pane
+            // rather than appearing on top of it; at zero the two shapes meet
+            // exactly and the smoothing fills the notches their rounded corners
+            // would otherwise leave along the seam.
+            const ImGuiStyle& stl = ImGui::GetStyle();
+            const float divide = win_pos.x + stl.WindowPadding.x + kSidebarW;
+            const float gap    = kGlassGap * split;
+
+            a.x = win_pos.x;
+            a.y = win_pos.y;
+            a.w = (divide - gap * 0.5f) - a.x;
+            a.h = win_size.y;
+
+            b.x = divide + gap * 0.5f;
+            b.y = win_pos.y;
+            b.w = (win_pos.x + win_size.x) - b.x;
+            b.h = win_size.y;
+
+            strand.w = gap + kGlassStrandW;
+            strand.h = kGlassStrandH;
+            strand.x = divide - strand.w * 0.5f;
+            strand.y = win_pos.y + win_size.y * kGlassStrandAt - strand.h * 0.5f;
+
+            a.merge = b.merge = strand.merge = kGlassMerge;
+            parted = a.w > 2.0f && b.w > 2.0f;
+        }
+        if (parted) {
+            state->glass_rects[state->glass_count++] = a;
+            state->glass_rects[state->glass_count++] = b;
+            state->glass_rects[state->glass_count++] = strand;
+        } else {
+            GlassRect r = base;
+            r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
+            state->glass_rects[state->glass_count++] = r;
+        }
     }
 
     // With the Live2D character as the collapsed visual, fade the window
     // background + border in as it expands so only the character shows when
     // collapsed (no stray pill box around the tiny character).
     const bool l2d_hidden_chrome = l2d_active && lt < 0.999f;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, l2d_hidden_chrome ? 0.0f : 1.0f);
+    // ImGui's border is a rectangle around the window, so once the panes are
+    // parted it would run straight across the slot. The glass draws its own
+    // edge stroke on the real silhouette anyway.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,
+                        (l2d_hidden_chrome || state->screen_texture_id) ? 0.0f : 1.0f);
     if (l2d_hidden_chrome) {
         ImGui::SetNextWindowBgAlpha(lt);
     } else if (state->screen_texture_id) {
