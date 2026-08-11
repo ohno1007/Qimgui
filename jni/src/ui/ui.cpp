@@ -96,6 +96,7 @@ struct Particle {
     float  delay;     // staggered so the cloud peels away rather than bursting
     float  spin;
     float  rot;
+    float  sway;      // phase of the lateral drift, so no two wander alike
     ImVec2 uv0, uv1;  // patch of the snapshot this particle carries
     ImU32  color;     // fallback if there is no snapshot to sample
 };
