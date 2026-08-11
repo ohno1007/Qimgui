@@ -291,9 +291,9 @@ void BloomGL::EndSceneAndComposite() {
     glActiveTexture(GL_TEXTURE0);
     if (m_OverDest) glDisable(GL_BLEND);
 
-    // Snapshot the just-rendered scene into m_PrevSceneTex so the shatter
-    // chips can sample what the UI looked like before they peeled off.
-    // Skipped while frozen so chips keep sampling the pre-shatter UI
+    // Snapshot the just-rendered scene into m_PrevSceneTex so the dissolve
+    // particles can sample what the UI looked like before it came apart.
+    // Skipped while frozen so they keep sampling the pre-dissolve UI
     // throughout the exit animation.
     //
     // This is a full-surface copy (on a 1080x2400 phone the square surface
