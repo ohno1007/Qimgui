@@ -116,6 +116,13 @@ int main() {
                     ahb, mirror.width(), mirror.height());
                 if (id) st.screen_texture_id = id;
             }
+            if (st.display_w > 0 && st.display_h > 0) {
+                st.screen_luma = mirror.AverageLuma(
+                    st.last_full_pos.x / (float)st.display_w,
+                    st.last_full_pos.y / (float)st.display_h,
+                    st.last_full_size.x / (float)st.display_w,
+                    st.last_full_size.y / (float)st.display_h);
+            }
             st.screen_mirror_frames = mirror.frames();
             st.screen_mirror_w      = mirror.width();
             st.screen_mirror_h      = mirror.height();
@@ -144,6 +151,7 @@ int main() {
         aimgui::live2d::SetBallScale(st.ball_scale);
         aimgui::live2d::SetView(st.expand);
 #endif
+        ws.renderer()->SetGlassRects(st.glass_rects, st.glass_count);
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);
         ws.renderer()->SetSnapshotFrozen(st.exit_anim_active);
         ws.renderer()->EndFrame();

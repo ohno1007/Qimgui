@@ -1,5 +1,7 @@
 #pragma once
 
+#include "glass.h"
+
 #include <android/native_window.h>
 #include <memory>
 
@@ -51,6 +53,14 @@ public:
                                                 int width, int height) {
         (void)rgba; (void)width; (void)height;
         return 0;
+    }
+
+    // Panes of glass to refract the live screen through, drawn by the backend
+    // before ImGui's draw data so widgets composite on top. Submitted per
+    // frame; an empty list draws nothing. The source is whatever was last
+    // handed to ImportHardwareBuffer.
+    virtual void SetGlassRects(const GlassRect* rects, int count) {
+        (void)rects; (void)count;
     }
 
     // Imports a screen-mirror AHardwareBuffer as a sampled texture and returns

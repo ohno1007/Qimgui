@@ -4,6 +4,7 @@
 
 #include <android/native_window.h>
 
+#include <chrono>
 #include <cstdio>
 #include <dlfcn.h>
 
@@ -42,7 +43,41 @@ constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour 
 // leaves the compositor with nothing it can draw to, and the display sits
 // there producing no frames at all rather than reporting an error.
 constexpr uint64_t kUsageCpuWriteOften  = 3ULL << 4;  // for the self-test below
-constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer | kUsageCpuWriteOften;
+constexpr uint64_t kUsageCpuReadOften   = 3ULL;       // for the luminance probe
+constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer |
+                                 kUsageCpuWriteOften | kUsageCpuReadOften;
+
+// AHardwareBuffer_lock/unlock are API 26, and this builds against 24, so they
+// are resolved at runtime like the AImageReader entry points.
+struct AhbNdk {
+    int  (*Lock)(AHardwareBuffer*, uint64_t usage, int32_t fence, const void* rect, void** out) = nullptr;
+    int  (*Unlock)(AHardwareBuffer*, int32_t* fence)                                            = nullptr;
+    void (*Describe)(const AHardwareBuffer*, void* desc)                                        = nullptr;
+    bool ok = false;
+};
+
+const AhbNdk& Ahb() {
+    static AhbNdk a = [] {
+        AhbNdk r;
+        void* lib = ::dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+        if (!lib) return r;
+        r.Lock     = (decltype(r.Lock))     ::dlsym(lib, "AHardwareBuffer_lock");
+        r.Unlock   = (decltype(r.Unlock))   ::dlsym(lib, "AHardwareBuffer_unlock");
+        r.Describe = (decltype(r.Describe)) ::dlsym(lib, "AHardwareBuffer_describe");
+        r.ok = r.Lock && r.Unlock && r.Describe;
+        return r;
+    }();
+    return a;
+}
+
+// Only the leading fields are read, and this prefix has been stable across
+// every version that has AHardwareBuffer at all.
+struct AhbDescPrefix {
+    uint32_t width, height, layers, format;
+    uint64_t usage;
+    uint32_t stride, rfu0;
+    uint64_t rfu1;
+};
 
 struct MediaNdk {
     int32_t (*ReaderNewWithUsage)(int32_t w, int32_t h, int32_t fmt,
@@ -288,6 +323,55 @@ void ScreenMirror::Stop() {
     m_Running = false;
 }
 
+float ScreenMirror::AverageLuma(float fx, float fy, float fw, float fh) {
+    // Mean brightness of the mirrored screen under a rectangle, so the UI can
+    // pick text that stays legible over whatever happens to be behind it.
+    //
+    // Read on the CPU rather than on the GPU because the answer is needed by
+    // ImGui while building the frame, and getting a GPU reduction back would
+    // cost a readback and a stall. The buffer is small, only a sparse grid is
+    // sampled, and it is throttled — this is a few thousand reads a second.
+    const AhbNdk& ahb = Ahb();
+    if (!ahb.ok || !m_Image || !m_LastBuffer) return m_Luma;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_LastLuma < std::chrono::milliseconds(150)) return m_Luma;
+    m_LastLuma = now;
+
+    AhbDescPrefix d{};
+    ahb.Describe(m_LastBuffer, &d);
+    if (d.width == 0 || d.height == 0 || d.stride == 0) return m_Luma;
+
+    void* bits = nullptr;
+    if (ahb.Lock(m_LastBuffer, kUsageCpuReadOften, -1, nullptr, &bits) != 0 || !bits)
+        return m_Luma;
+
+    const int x0 = (int)(fx * (float)d.width),  x1 = (int)((fx + fw) * (float)d.width);
+    const int y0 = (int)(fy * (float)d.height), y1 = (int)((fy + fh) * (float)d.height);
+    const int cx0 = x0 < 0 ? 0 : x0, cy0 = y0 < 0 ? 0 : y0;
+    const int cx1 = x1 > (int)d.width  ? (int)d.width  : x1;
+    const int cy1 = y1 > (int)d.height ? (int)d.height : y1;
+
+    double sum = 0.0;
+    int    n   = 0;
+    const int stepX = (cx1 - cx0) / 24 + 1;
+    const int stepY = (cy1 - cy0) / 24 + 1;
+    const uint8_t* base = static_cast<const uint8_t*>(bits);
+    for (int y = cy0; y < cy1; y += stepY) {
+        const uint8_t* row = base + (size_t)y * d.stride * 4;
+        for (int x = cx0; x < cx1; x += stepX) {
+            const uint8_t* px = row + (size_t)x * 4;
+            sum += 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
+            ++n;
+        }
+    }
+    int32_t fence = -1;
+    ahb.Unlock(m_LastBuffer, &fence);
+
+    if (n > 0) m_Luma = (float)(sum / n / 255.0);
+    return m_Luma;
+}
+
 AHardwareBuffer* ScreenMirror::AcquireLatest() {
     if (!m_Running || !m_Reader) return nullptr;
     const MediaNdk& media = Media();
@@ -337,6 +421,7 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
 
     AHardwareBuffer* buffer = nullptr;
     if (media.ImageGetHardwareBuffer(image, &buffer) != kMediaOk) return nullptr;
+    m_LastBuffer = buffer;
     return buffer;
 }
 

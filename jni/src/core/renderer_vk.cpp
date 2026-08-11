@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "bloom_vk.h"
+#include "glass_vk.h"
 
 #include <android/hardware_buffer.h>
 #include "vulkan_wrapper.h"
@@ -82,6 +83,9 @@ public:
 #endif
         }
 
+        m_Glass.Init(m_Device, m_DescPool,
+                     m_Bloom.Ready() ? m_Bloom.GetSceneRenderPass() : m_WD->RenderPass);
+
         SetupImGuiBackend();
 
         // Now that ImGui's Vulkan impl has its descriptor pool wired up,
@@ -114,6 +118,7 @@ public:
         DestroyLive2DResources();
 #endif
         m_Bloom.Shutdown();
+        m_Glass.Shutdown();
         ImGui_ImplVulkan_Shutdown();
         if (m_WD) {
             ImGui_ImplVulkanH_DestroyWindow(m_Instance, m_Device, m_WD, nullptr);
@@ -145,10 +150,15 @@ public:
     // imports are cached by buffer pointer — re-importing per frame would mean
     // creating and destroying an image, a memory allocation and a descriptor
     // set 120 times a second.
+    void SetGlassRects(const GlassRect* rects, int count) override {
+        m_GlassRects = rects;
+        m_GlassCount = count;
+    }
+
     unsigned long long ImportHardwareBuffer(AHardwareBuffer* ahb, int w, int h) override {
         if (!ahb || m_Device == VK_NULL_HANDLE) return 0;
         for (const auto& e : m_AhbCache)
-            if (e.ahb == ahb) return (unsigned long long)(uintptr_t)e.ds;
+            if (e.ahb == ahb) { m_ScreenView = e.view; return (unsigned long long)(uintptr_t)e.ds; }
         if (m_AhbCache.size() >= 8) return 0;   // reader cycles far fewer than this
 
         auto getProps = (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
@@ -233,6 +243,7 @@ public:
             return 0;
         }
         m_AhbCache.push_back(e);
+        m_ScreenView = e.view;
         return (unsigned long long)(uintptr_t)e.ds;
     }
 
@@ -479,6 +490,16 @@ private:
         m_SwapChainRebuild = false;
     }
 
+    void RecordGlass(VkCommandBuffer cmd) {
+        if (!m_Glass.Ready() || m_GlassCount <= 0 || m_ScreenView == VK_NULL_HANDLE) return;
+        m_Glass.SetScreenImage(m_ScreenView);
+        VkViewport vp{ 0.0f, 0.0f, (float)m_Width, (float)m_Height, 0.0f, 1.0f };
+        VkRect2D   sc{ {0, 0}, { (uint32_t)m_Width, (uint32_t)m_Height } };
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+        m_Glass.Record(cmd, m_Width, m_Height, m_GlassRects, m_GlassCount);
+    }
+
     void Submit(ImDrawData* draw) {
         VkResult err;
 #ifdef AIMGUI_LIVE2D
@@ -510,6 +531,7 @@ private:
             // separable Gaussian blur populate the bloom image, and the
             // composite pass writes scene + bloom into the swapchain.
             m_Bloom.BeginScene(fd->CommandBuffer);
+            RecordGlass(fd->CommandBuffer);
             ImGui_ImplVulkan_RenderDrawData(draw, fd->CommandBuffer);
             m_Bloom.EndSceneAndBlur(fd->CommandBuffer);
 
@@ -544,6 +566,7 @@ private:
             rpi.clearValueCount = 1;
             rpi.pClearValues = &m_WD->ClearValue;
             vkCmdBeginRenderPass(fd->CommandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+            RecordGlass(fd->CommandBuffer);
             ImGui_ImplVulkan_RenderDrawData(draw, fd->CommandBuffer);
             vkCmdEndRenderPass(fd->CommandBuffer);
         }
@@ -740,6 +763,10 @@ private:
         VkDescriptorSet  ds    = VK_NULL_HANDLE;
     };
     std::vector<AhbEntry> m_AhbCache;
+    VkImageView           m_ScreenView = VK_NULL_HANDLE;  // newest mirrored frame
+    GlassVK               m_Glass;
+    const GlassRect*      m_GlassRects = nullptr;
+    int                   m_GlassCount = 0;
 
     ANativeWindow* m_Window = nullptr;
     VkInstance m_Instance = VK_NULL_HANDLE;

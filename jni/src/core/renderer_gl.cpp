@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "bloom_gl.h"
+#include "glass_gl.h"
 
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -60,6 +61,7 @@ public:
 
         if (!ImGui_ImplOpenGL3_Init("#version 300 es")) return false;
         m_Bloom.Init(width, height); // best-effort; renderer still works if it fails
+        m_Glass.Init();              // ditto
         return true;
     }
 
@@ -85,6 +87,7 @@ public:
             }
             m_Bloom.SetCompositeOverDest(m_ScenePreDraw != nullptr);
             m_Bloom.BeginScene();
+            DrawGlass();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             m_Bloom.EndSceneAndComposite();
         } else {
@@ -92,6 +95,7 @@ public:
             glViewport(0, 0, m_Width, m_Height);
             glClear(GL_COLOR_BUFFER_BIT);
             if (m_ScenePreDraw) m_ScenePreDraw();
+            DrawGlass();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
         eglSwapBuffers(m_Display, m_Surface);
@@ -99,8 +103,19 @@ public:
 
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
 
+    void SetGlassRects(const GlassRect* rects, int count) override {
+        m_GlassRects = rects;
+        m_GlassCount = count;
+    }
+
+    void DrawGlass() {
+        if (m_GlassCount > 0 && m_BackdropTex)
+            m_Glass.Draw(m_BackdropTex, m_Width, m_Height, m_GlassRects, m_GlassCount);
+    }
+
     void Shutdown() override {
         m_Bloom.Shutdown();
+        m_Glass.Shutdown();
         if (m_BackdropTex) { glDeleteTextures(1, &m_BackdropTex); m_BackdropTex = 0; }
         ImGui_ImplOpenGL3_Shutdown();
         if (m_Display != EGL_NO_DISPLAY) {
@@ -161,6 +176,9 @@ private:
     GLuint m_BackdropTex = 0;
     int    m_BackdropW = 0, m_BackdropH = 0;
     BloomGL m_Bloom;
+    GlassGL m_Glass;
+    const GlassRect* m_GlassRects = nullptr;
+    int              m_GlassCount = 0;
     void (*m_ScenePreDraw)() = nullptr;
 };
 

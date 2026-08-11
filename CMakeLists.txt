@@ -69,7 +69,9 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/keyboard_input.cpp
     ${JNI}/src/core/window_session.cpp
     ${JNI}/src/core/screen_capture.cpp
-    ${JNI}/src/core/screen_mirror.cpp)
+    ${JNI}/src/core/screen_mirror.cpp
+    ${JNI}/src/core/glass_gl.cpp
+    ${JNI}/src/core/glass_vk.cpp)
 target_compile_definitions(aimgui_core PRIVATE
     VK_USE_PLATFORM_ANDROID_KHR
     IMGUI_IMPL_VULKAN_NO_PROTOTYPES)

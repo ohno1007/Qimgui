@@ -2,6 +2,8 @@
 
 #include "imgui.h"   // ImVec2
 
+#include "core/glass.h"
+
 #include <cstdint>
 
 namespace aimgui {
@@ -69,6 +71,15 @@ struct UiState {
     // ImTextureID for the newest mirrored frame, 0 when unavailable. Sampling
     // this is what makes a refracting backdrop possible at all.
     unsigned long long screen_texture_id = 0;
+    // Mean brightness behind the window, 0..1, refreshed by the main loop from
+    // the mirror. Drives the light/dark flip so text stays legible over
+    // whatever happens to be underneath.
+    float screen_luma = 0.5f;
+    // Panes to refract this frame, rebuilt by DrawUi and consumed by the main
+    // loop right after. Held here rather than passed around because the main
+    // loop is what talks to the renderer.
+    GlassRect glass_rects[kMaxGlassRects];
+    int       glass_count = 0;
 
     // Frosted-glass backdrop. SurfaceFlinger blurs what it composites behind
     // the window, so this costs nothing per frame — but it needs Android 12+
