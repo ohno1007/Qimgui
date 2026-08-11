@@ -2,6 +2,7 @@
 
 #include "bloom_gl.h"
 #include "glass_gl.h"
+#include "text_outline.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -79,6 +80,7 @@ public:
 
     void EndFrame() override {
         ImGui::Render();
+        OutlineText(ImGui::GetDrawData(), kTextOutlineRadius);
         if (m_Bloom.Ready()) {
             if (m_ScenePreDraw) {
                 // Draw the Live2D model as a background straight onto FB0 so it

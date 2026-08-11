@@ -2,6 +2,7 @@
 
 #include "bloom_vk.h"
 #include "glass_vk.h"
+#include "text_outline.h"
 
 #include <android/hardware_buffer.h>
 #include "vulkan_wrapper.h"
@@ -107,6 +108,7 @@ public:
     void EndFrame() override {
         ImGui::Render();
         ImDrawData* draw = ImGui::GetDrawData();
+        OutlineText(draw, kTextOutlineRadius);
         if (!draw || draw->DisplaySize.x <= 0 || draw->DisplaySize.y <= 0) return;
         Submit(draw);
     }
