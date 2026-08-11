@@ -95,7 +95,7 @@ struct UiState {
 
     // Opaque ImTextureID-compatible handle to last frame's scene snapshot,
     // updated by main loop from IRenderer::GetSceneSnapshotID(). Lets the
-    // shatter chips sample the real UI as a texture.
+    // dissolve particles sample the real UI as a texture.
     unsigned long long scene_snapshot_id = 0;
 };
 

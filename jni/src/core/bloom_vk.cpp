@@ -527,13 +527,13 @@ bool BloomVK::SnapshotDue() {
 
 void BloomVK::RecordSnapshotCopy(VkCommandBuffer cmd) {
     if (!m_Ready || m_PrevSceneImage == VK_NULL_HANDLE) return;
-    if (m_SnapshotFrozen) return; // keep serving the pre-shatter snapshot
+    if (m_SnapshotFrozen) return; // keep serving the pre-dissolve snapshot
 
     // Full-surface vkCmdCopyImage — on a 1080x2400 phone the square surface
     // makes that 2400*2400*4 = 23 MB. Recording it every frame burned ~2.7 GB/s
     // of memory bandwidth continuously to serve a 1.2 s animation that plays
     // once, at exit. Refresh at ~5 Hz instead; a snapshot up to 200 ms old is
-    // invisible mid-shatter.
+    // invisible mid-dissolve.
     if (!SnapshotDue()) return;
 
     // scene image: SHADER_READ_ONLY (after RP) -> TRANSFER_SRC

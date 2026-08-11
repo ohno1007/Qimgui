@@ -45,7 +45,7 @@ public:
 
 private:
     // True at most once per snapshot interval; rate-limits the full-surface
-    // copy that feeds the shatter animation. See EndSceneAndComposite().
+    // copy that feeds the dissolve animation. See EndSceneAndComposite().
     bool SnapshotDue();
 
     bool m_Ready  = false;
