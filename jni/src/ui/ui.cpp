@@ -602,8 +602,8 @@ void DrawResizeGrip(const UiState* state) {
 // is what reads as elastic — the overshoot is the whole effect, and the squash
 // applied from this spring's velocity is the other half of it.
 void UpdateSpring(float* pos, float* vel, float target, float dt) {
-    constexpr float kOmega = 13.5f;
-    constexpr float kZeta  = 0.52f;
+    constexpr float kOmega = 7.2f;
+    constexpr float kZeta  = 0.58f;
     const float diff  = target - *pos;
     const float accel = kOmega * kOmega * diff - 2.0f * kZeta * kOmega * (*vel);
     *vel += accel * dt;
@@ -950,8 +950,29 @@ void DrawUi(UiState* state, bool* keep_running) {
             DrawCardContent(state);
             ImGui::PopStyleVar();
 
+            // Tap opens the next rest; a flick upwards closes back to the
+            // island. Up is the direction the card came from, so sending it
+            // back that way is the gesture that already means "put it away".
+            static bool   s_press   = false;
+            static ImVec2 s_from    = ImVec2(0, 0);
+            static bool   s_handled = false;
             if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-                if (state->stage < UiState::StageWindow) ++state->stage;
+                s_press = true; s_handled = false; s_from = io.MousePos;
+            }
+            if (s_press && io.MouseDown[0] && !s_handled) {
+                if (io.MousePos.y - s_from.y < -46.0f) {
+                    state->stage = UiState::StageIsland;
+                    s_handled = true;
+                }
+            }
+            if (s_press && !io.MouseDown[0]) {
+                const float dy = io.MousePos.y - s_from.y;
+                const float dx = io.MousePos.x - s_from.x;
+                if (!s_handled && std::fabs(dy) < 18.0f && std::fabs(dx) < 18.0f &&
+                    state->stage < UiState::StageWindow) {
+                    ++state->stage;
+                }
+                s_press = false;
             }
         }
 

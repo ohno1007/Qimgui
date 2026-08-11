@@ -87,7 +87,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
 
     void* reader = nullptr;
     if (media.ReaderNewWithUsage(width, height, kFormatRgba8888, kMirrorUsage,
-                                 /*maxImages=*/3, &reader) != kMediaOk || !reader) {
+                                 /*maxImages=*/5, &reader) != kMediaOk || !reader) {
         MIRROR_FAIL("AImageReader_newWithUsage failed (%dx%d)", width, height);
         return false;
     }
@@ -179,6 +179,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
             android::detail::SurfaceComposerClientTransaction mt;
             android::detail::StrongPointer<void> mp{};
             mp.pointer = m_MirrorLayer;
+            mt.SetLayer(mp, 0);
             mt.SetLayerStack(mp, layerStack);
             mt.Show(mp);
             mt.Apply(false, false);
