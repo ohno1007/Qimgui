@@ -669,16 +669,21 @@ void DrawUi(UiState* state, bool* keep_running) {
     // background now.
     int pushed_glass_text = 0;
     if (state->screen_texture_id) {
-        // Identical on every region: one sheet of glass, uniform throughout.
-        // Giving the title bar and the sidebar different densities drew the
-        // boundaries between them, which is the thing that made the window look
-        // assembled from pieces.
+        // One sheet, so one fill — the same colour and the same alpha on the
+        // window body and the title bar, and nothing at all on the children.
+        //
+        // The content area looked greyer than the title bar because it was:
+        // a child paints ChildBg *over* the window's WindowBg, so that region
+        // carried two fills where the title bar, which ImGui paints separately,
+        // carried one. Matching the two colours is not enough while one side is
+        // doubled; the children have to contribute nothing.
         const ImVec4 kSheet(1, 1, 1, 0.05f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg,         kSheet);
         ImGui::PushStyleColor(ImGuiCol_TitleBg,          kSheet);
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    kSheet);
         ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kSheet);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,          kSheet);
-        pushed_glass_text = 4;
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,          ImVec4(0, 0, 0, 0));
+        pushed_glass_text = 5;
     }
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
@@ -733,12 +738,8 @@ void DrawUi(UiState* state, bool* keep_running) {
     if (l2d_hidden_chrome) {
         ImGui::SetNextWindowBgAlpha(lt);
     } else if (state->screen_texture_id) {
-        // The refracted screen is drawn on the background draw list, which
-        // renders before any window, so the window's own fill sits on top of
-        // it. Keep that fill to a whisper: this material is meant to be clear
-        // in the middle and to announce itself at the rim, so anything more
-        // than a faint wash reads as a tinted panel rather than as glass.
-        ImGui::SetNextWindowBgAlpha(0.08f);
+        // WindowBg is pushed explicitly above so it can match the title bar
+        // exactly; overriding its alpha here as well would undo that.
     } else if (state->backdrop_blur && state->backdrop_blur_supported) {
         // Same reasoning for SurfaceFlinger's own blur, which is also behind us.
         ImGui::SetNextWindowBgAlpha(0.45f);
