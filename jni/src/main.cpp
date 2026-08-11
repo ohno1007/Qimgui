@@ -94,7 +94,10 @@ int main() {
         // Live screen mirror. Half the display's resolution is plenty for a
         // blurred/refracted backdrop and halves the compositor's scaling work.
         if (st.screen_mirror && !mirror.running()) {
-            mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
+            if (st.screen_mirror_probe)
+                mirror.StartVisibleProbe(info.width / 2, info.height / 2, info.width, info.height);
+            else
+                mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
         } else if (!st.screen_mirror && mirror.running()) {
             mirror.Stop();
         }

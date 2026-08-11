@@ -296,6 +296,9 @@ void DrawWindow(UiState* state) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
             if (ImGui::Checkbox(u8"启动实时取屏", &state->screen_mirror)) {}
             ripple::TouchLastItem();
+            if (ImGui::Checkbox(u8"诊断: 镜像到可见图层", &state->screen_mirror_probe)) {}
+            ripple::TouchLastItem();
+            ImGui::TextDisabled(u8"勾上后若屏幕内容出现在一个方框里，说明虚拟显示能用");
             if (state->screen_mirror_running) {
                 ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
                                    u8"运行中 — 已收到 %llu 帧  (%dx%d)",

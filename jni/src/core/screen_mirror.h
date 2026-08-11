@@ -32,6 +32,10 @@ public:
     // compositor's scaling work. Returns false if the display couldn't be
     // created (see ANativeWindowCreator::ScreenCaptureSupported).
     bool Start(int width, int height, int srcWidth, int srcHeight);
+    // Diagnostic variant: sends the mirror to a visible layer instead of an
+    // AImageReader, to tell "SF won't drive our virtual displays" apart from
+    // "SF won't talk to AImageReader's producer".
+    bool StartVisibleProbe(int width, int height, int srcWidth, int srcHeight);
     void Stop();
     bool running() const { return m_Running; }
 

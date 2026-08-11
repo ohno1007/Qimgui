@@ -95,6 +95,56 @@ bool ScreenMirror::Available() {
     return Media().ok && android::ANativeWindowCreator::ScreenCaptureSupported();
 }
 
+// Diagnostic: point the virtual display at a plain visible SurfaceControl
+// instead of an AImageReader. If SurfaceFlinger composites into that (the
+// mirrored screen becomes visible on top, feedback loop and all), then the
+// virtual-display mechanism works here and the problem is specific to
+// AImageReader's producer. If it stays blank, SF refuses to drive
+// caller-created virtual displays on this ROM at all and no amount of
+// parameter fiddling will change that.
+bool ScreenMirror::StartVisibleProbe(int width, int height, int srcWidth, int srcHeight) {
+    if (m_Running) return true;
+    if (!android::ANativeWindowCreator::ScreenCaptureSupported()) return false;
+
+    ANativeWindow* win = android::ANativeWindowCreator::Create("AImGuiMirrorProbe",
+                                                              width, height, false);
+    if (!win) { MIRROR_STEP("probe: layer create failed"); return false; }
+
+    const auto& fns = android::detail::Functionals::GetInstance();
+    constexpr size_t kSurfaceToWindow = sizeof(std::max_align_t) / 2;
+    void* surface = reinterpret_cast<char*>(win) - kSurfaceToWindow;
+    android::detail::StrongPointer<void> producer =
+        fns.Surface__GetIGraphicBufferProducer(surface);
+    if (!producer.get()) { MIRROR_STEP("probe: no producer"); return false; }
+
+    auto& composer = android::ANativeWindowCreator::GetComposerInstance();
+    android::detail::StrongPointer<void> token =
+        composer.CreateVirtualDisplay("AImGuiProbe", false);
+    if (!token.get()) { MIRROR_STEP("probe: no display token"); return false; }
+
+    uint32_t layerStack = 0;
+    { android::detail::ui::DisplayState ds{};
+      if (composer.GetDisplayInfo(&ds)) layerStack = ds.layerStack.id; }
+
+    android::detail::SurfaceComposerClientTransaction t;
+    t.SetDisplaySurface(token, producer);
+    t.SetDisplayLayerStack(token, layerStack);
+    const android::detail::ui::Rect src{0, 0, srcWidth, srcHeight};
+    const android::detail::ui::Rect dst{0, 0, width, height};
+    t.SetDisplayProjection(token, 0, src, dst);
+    const int32_t rc = t.Apply(false, false);
+    MIRROR_STEP("probe: visible layer %dx%d attached to virtual display, apply rc=%d",
+                width, height, rc);
+    MIRROR_STEP("probe: if the screen appears mirrored in a box, SF drives caller-made "
+                "virtual displays and AImageReader's producer is the problem");
+
+    m_Token   = token.get();
+    m_Width   = width;
+    m_Height  = height;
+    m_Running = true;
+    return true;
+}
+
 bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     if (m_Running) return true;
     if (width <= 0 || height <= 0 || srcWidth <= 0 || srcHeight <= 0) return false;
