@@ -1526,9 +1526,19 @@ namespace android {
                 if (radius <= 0) return; // don't pay for a layer nobody asked for
                 // eFXSurfaceEffect: no buffer of its own; its bounds come from
                 // the crop, which is exactly what the blur needs.
+                //
+                // eNoColorFill is what keeps it from painting over its own
+                // blur. An effect layer fills with its colour by default —
+                // opaque black until told otherwise — so SurfaceFlinger blurred
+                // the content behind it and then covered the result with black.
+                // Setting alpha to 0 instead does not work: SurfaceFlinger
+                // treats a fully transparent layer as invisible and skips it,
+                // taking the blur with it.
                 constexpr uint32_t kFXSurfaceEffect = 0x00020000;
+                constexpr uint32_t kNoColorFill     = 0x00004000;
                 blurLayer = GetComposerInstance().CreateSurface(
-                    "AImGuiBlur", surfaceSide, surfaceSide, kFXSurfaceEffect);
+                    "AImGuiBlur", surfaceSide, surfaceSide,
+                    kFXSurfaceEffect | kNoColorFill);
                 if (nullptr == blurLayer.data) return;
             }
 

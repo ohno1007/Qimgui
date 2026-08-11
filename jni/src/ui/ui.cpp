@@ -612,7 +612,14 @@ void DrawUi(UiState* state, bool* keep_running) {
     // collapsed (no stray pill box around the tiny character).
     const bool l2d_hidden_chrome = l2d_active && lt < 0.999f;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, l2d_hidden_chrome ? 0.0f : 1.0f);
-    if (l2d_hidden_chrome) ImGui::SetNextWindowBgAlpha(lt);
+    if (l2d_hidden_chrome) {
+        ImGui::SetNextWindowBgAlpha(lt);
+    } else if (state->backdrop_blur && state->backdrop_blur_supported) {
+        // The frosted backdrop sits *behind* this window, so it only shows if
+        // the window itself lets it through. The dark theme's WindowBg is 94%
+        // opaque, which would hide the blur almost entirely.
+        ImGui::SetNextWindowBgAlpha(0.45f);
+    }
 
     // Suppress ImGui's built-in resize handle: the custom DrawResizeGrip
     // (with preview-then-animate behaviour) owns resizing. NoMove is also
