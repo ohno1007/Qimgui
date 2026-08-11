@@ -372,66 +372,91 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
 // Forward decl — body lives further down, but DrawContent invokes it.
 void DrawResizeGrip(const UiState* state);
 
-// ─── Touch scrolling ─────────────────────────────────────────────────────
-// Drag anywhere in the content to scroll it, with the throw-and-glide the
-// gesture implies. Call once inside the child, after its contents.
+// ─── Content gestures ────────────────────────────────────────────────────
+// One drag in the content can mean two things — scroll the page, or move the
+// window — so decide which from the gesture itself rather than reserving a
+// strip of chrome for one of them. Restricting window moves to the title bar
+// worked but made a large window awkward to reposition, since the only handle
+// was a thin bar that might be anywhere on screen.
 //
-// A scrollbar is a mouse affordance: it asks for a precise grab on a 26 px
-// target, which is the wrong thing to hand a finger on a surface this size.
-// Dragging the content itself is how every touch UI does this.
-void TouchScroll(const char* id) {
-    // Per-child state, keyed by id — the sidebar and the content pane both
-    // scroll and must not share momentum.
-    struct Scroll {
-        bool  dragging   = false;
-        bool  cancelled  = false;   // gesture claimed by a widget
-        float start_y    = 0.0f;
-        float velocity   = 0.0f;
+// The finger is given a few pixels of travel before anything happens, and what
+// it does in those pixels decides the rest of the gesture:
+//
+//   mostly vertical, and the page has somewhere to scroll  -> scroll
+//   anything else                                          -> move the window
+//
+// So a page that fits entirely drags the window from anywhere in it, a long
+// page scrolls, and a sideways drag moves the window even on a long page. The
+// choice is made once and held until release, because a gesture that changes
+// meaning halfway through feels broken.
+void ContentGesture(const char* id, UiState* state) {
+    enum class Mode { Undecided, Scroll, Move, Widget };
+
+    struct Drag {
+        bool   active   = false;
+        Mode   mode     = Mode::Undecided;
+        ImVec2 start    = ImVec2(0, 0);
+        float  velocity = 0.0f;   // scroll momentum, px/s
     };
-    static std::vector<std::pair<const char*, Scroll>> states;
-    Scroll* st = nullptr;
-    for (auto& e : states) if (e.first == id) { st = &e.second; break; }
-    if (!st) { states.push_back({id, Scroll{}}); st = &states.back().second; }
+    // Keyed by id: the sidebar and the content pane both scroll and must not
+    // share momentum or a decision.
+    static std::vector<std::pair<const char*, Drag>> states;
+    Drag* d = nullptr;
+    for (auto& e : states) if (e.first == id) { d = &e.second; break; }
+    if (!d) { states.push_back({id, Drag{}}); d = &states.back().second; }
 
-    ImGuiIO&   io = ImGui::GetIO();
+    ImGuiIO&    io = ImGui::GetIO();
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
+    const bool  hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                                                 ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
-    const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
-                                                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-
-    if (io.MouseDown[0] && hovered && !st->cancelled) {
-        if (!st->dragging) {
-            st->dragging = true;
-            st->start_y  = io.MousePos.y;
+    if (io.MouseDown[0] && (d->active || hovered)) {
+        if (!d->active) {
+            d->active = true;
+            d->start  = io.MousePos;
             // A press that lands on a widget belongs to that widget for the
-            // whole gesture. Taking it back partway would need ClearActiveID,
-            // which lives in imgui_internal.h and is not vendored here — and
-            // handing a slider's drag to the scroller halfway through would be
-            // worse than not scrolling. Pressing anywhere else scrolls.
-            st->cancelled = ImGui::IsAnyItemActive();
+            // whole gesture; taking it back partway would need ClearActiveID,
+            // which is not in the vendored public headers, and stealing a
+            // slider's drag halfway would be worse than not scrolling.
+            d->mode   = ImGui::IsAnyItemActive() ? Mode::Widget : Mode::Undecided;
         }
-        if (!st->cancelled && std::fabs(io.MousePos.y - st->start_y) > 2.0f) {
-            const float d = io.MouseDelta.y;
-            ImGui::SetScrollY(ImGui::GetScrollY() - d);
-            // Smoothed so a jittery last frame doesn't define the throw.
-            st->velocity = st->velocity * 0.65f + (-d / dt) * 0.35f;
+
+        const float dx = io.MousePos.x - d->start.x;
+        const float dy = io.MousePos.y - d->start.y;
+
+        if (d->mode == Mode::Undecided && (std::fabs(dx) > 6.0f || std::fabs(dy) > 6.0f)) {
+            const bool vertical  = std::fabs(dy) > std::fabs(dx);
+            const bool canScroll = ImGui::GetScrollMaxY() > 1.0f;
+            d->mode = (vertical && canScroll) ? Mode::Scroll : Mode::Move;
+        }
+
+        if (d->mode == Mode::Scroll) {
+            ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+            // Smoothed, so one jittery frame cannot define the throw.
+            d->velocity = d->velocity * 0.65f + (-io.MouseDelta.y / dt) * 0.35f;
+        } else if (d->mode == Mode::Move) {
+            state->last_full_pos.x += io.MouseDelta.x;
+            state->last_full_pos.y += io.MouseDelta.y;
+            state->content_moving = true;
         }
     } else {
-        if (st->dragging && !st->cancelled) {
-            // Released: glide on, shedding speed exponentially. 4.5/s reaches a
-            // stop in roughly a second, which reads as friction rather than as
-            // the list being yanked away.
-            st->velocity *= std::exp(-4.5f * dt);
-            if (std::fabs(st->velocity) > 8.0f) {
-                ImGui::SetScrollY(ImGui::GetScrollY() + st->velocity * dt);
+        state->content_moving = false;
+        if (d->active && d->mode == Mode::Scroll) {
+            // Released: glide on, shedding speed exponentially, coming to rest
+            // in about a second so it reads as friction rather than the list
+            // being yanked away.
+            d->velocity *= std::exp(-4.5f * dt);
+            if (std::fabs(d->velocity) > 8.0f) {
+                ImGui::SetScrollY(ImGui::GetScrollY() + d->velocity * dt);
             } else {
-                st->velocity = 0.0f;
-                st->dragging = false;
+                d->velocity = 0.0f;
+                d->active   = false;
+                d->mode     = Mode::Undecided;
             }
         } else {
-            st->dragging  = false;
-            st->cancelled = false;
-            st->velocity  = 0.0f;
+            d->active   = false;
+            d->mode     = Mode::Undecided;
+            d->velocity = 0.0f;
         }
     }
 }
@@ -446,7 +471,7 @@ void DrawContent(UiState* state, Page page) {
     DrawPage(state, page);
     // Pips + preview frame only (input handled before Begin in DrawUi).
     DrawResizeGrip(state);
-    TouchScroll("##content");
+    ContentGesture("##content", state);
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
@@ -706,7 +731,12 @@ void DrawUi(UiState* state, bool* keep_running) {
         ImGui::SetNextWindowPos (win_pos);
         ImGui::SetNextWindowSize(win_size);
     } else {
-        ImGui::SetNextWindowPos (state->last_full_pos,  ImGuiCond_FirstUseEver);
+        // A drag in the content moves the window, so on those frames the
+        // position here is authoritative and has to be pushed every frame;
+        // otherwise ImGui owns it and this is just the initial placement.
+        ImGui::SetNextWindowPos(state->last_full_pos,
+                                state->content_moving ? ImGuiCond_Always
+                                                      : ImGuiCond_FirstUseEver);
         // last_full_size is now driven by the custom resize spring, so
         // push it every frame instead of only once.
         ImGui::SetNextWindowSize(state->last_full_size, ImGuiCond_Always);

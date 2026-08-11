@@ -45,6 +45,9 @@ struct UiState {
     // Remembered full-window pos / size so the window springs back to
     // wherever the user last dragged it.
     ImVec2 last_full_pos  = ImVec2(60, 100);
+    // True while a drag in the content is moving the window, during which
+    // last_full_pos is authoritative rather than mirroring ImGui's own.
+    bool   content_moving = false;
     ImVec2 last_full_size = ImVec2(900, 620);
 
     // Bottom-right resize handle: a drag previews a thick rounded frame at

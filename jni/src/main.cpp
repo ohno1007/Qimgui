@@ -35,8 +35,10 @@ int main() {
     io.IniFilename = nullptr; io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
     // ImGui moves a window when dragged from anywhere in it by default, which
-    // collides head-on with dragging the content to scroll. Restrict moving to
-    // the title bar, which is also what a finger expects.
+    // collides head-on with dragging the content to scroll. Restrict its own
+    // moves to the title bar; ContentGesture in ui.cpp decides for itself when
+    // a drag in the content should move the window instead of scrolling, and
+    // drives the position directly on those frames.
     io.ConfigWindowsMoveFromTitleBarOnly = true;
     // ImGui 1.92's stb font loader raises a *recoverable* IM_ASSERT_USER_ERROR
     // when a system font fails to parse. By default that aborts the process
