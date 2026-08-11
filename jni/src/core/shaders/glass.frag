@@ -14,7 +14,7 @@
 // express dispersion (each channel needs its own bend) and quantises the
 // lensing to the grid exactly where it varies fastest — at the border.
 
-layout(location = 0) in  vec2 vUV;      // position within the pane, 0..1
+layout(location = 0) in  vec2 vPx;      // this pixel in screen px
 layout(location = 0) out vec4 fragColor;
 
 layout(set = 0, binding = 0) uniform sampler2D uScreen;
@@ -27,32 +27,54 @@ layout(push_constant) uniform Push {
     vec4 params2;   // x = blur radius px
 } pc;
 
+// Shadow. Whatever these add up to must stay inside glass.vert's kPad, or the
+// shadow is clipped by the quad it is drawn on.
+const vec2  kShadowOffset = vec2(0.0, 12.0);
+const float kShadowSoft   = 28.0;
+const float kShadowAlpha  = 0.30;
+const float kContourAlpha = 0.12;
+
+// How much of the rim's blur the middle of the pane gets. Not zero: the middle
+// is where text sits, and a perfectly clear centre puts UI type straight onto
+// whatever photo happens to be behind the window. This is the legibility knob
+// that the material's own description argues against having at all.
+const float kCentreBlur = 0.35;
+
 // Signed distance to a rounded box centred on the origin. Negative inside.
 float sdRoundedBox(vec2 p, vec2 half_, float r) {
     vec2 q = abs(p) - half_ + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
+// The mirrored screen arrives sRGB-encoded, and averaging encoded values is
+// not averaging light: it pulls the mean towards the darker sample, so a blur
+// over anything high-contrast comes out muddier and dimmer than the scene it
+// came from. That is what made the refracted image read as grey rather than
+// bright. Gamma 2.0 instead of the exact sRGB curve — the error is far below
+// what is visible here and it costs a multiply instead of a pow.
+vec3 toLinear(vec3 c) { return c * c; }
+vec3 toSrgb(vec3 c)   { return sqrt(max(c, vec3(0.0))); }
 
-// Refracted content, softened. Glass this thick does not transmit a sharp
-// image, and more practically: UI text sits on whatever happens to be behind
-// the window, and a busy photo underneath makes it unreadable no matter how
-// the contrast is tuned. Blurring the transmitted image is what buys back the
-// legibility, and it is the one place a blur belongs in this material — the
-// rim still bends and concentrates light rather than scattering it.
+// Refracted content, softened, accumulated in linear light. Glass this thick
+// does not transmit a sharp image, and more practically: UI text sits on
+// whatever happens to be behind the window, and a busy photo underneath makes
+// it unreadable no matter how the contrast is tuned. Blurring the transmitted
+// image is what buys back the legibility, and it is the one place a blur
+// belongs in this material — the rim still bends and concentrates light rather
+// than scattering it.
 //
 // Twelve taps on two rings, offset from each other so the pattern does not
 // show up as spokes. The mirror is already half resolution and the sampler is
 // linear, so each tap is doing more work than its count suggests.
 vec3 sampleBlurred(vec2 px, vec2 screen, float radius) {
-    vec3 acc = texture(uScreen, px / screen).rgb;
+    vec3 acc = toLinear(texture(uScreen, px / screen).rgb);
     float wsum = 1.0;
     for (int i = 0; i < 6; ++i) {
         float a = float(i) * 1.0471975;             // 60 degrees
         vec2  d1 = vec2(cos(a), sin(a)) * radius;
         vec2  d2 = vec2(cos(a + 0.5236), sin(a + 0.5236)) * radius * 0.55;
-        acc += texture(uScreen, (px + d1) / screen).rgb * 0.55;
-        acc += texture(uScreen, (px + d2) / screen).rgb * 0.85;
+        acc += toLinear(texture(uScreen, (px + d1) / screen).rgb) * 0.55;
+        acc += toLinear(texture(uScreen, (px + d2) / screen).rgb) * 0.85;
         wsum += 1.40;
     }
     return acc / wsum;
@@ -66,11 +88,24 @@ void main() {
     float bendK  = pc.params.z;
     float alpha  = pc.params.w;
 
-    vec2 posPx = pc.rect.xy + vUV * size;   // this pixel, in screen space
+    vec2 posPx = vPx;
     vec2 rel   = posPx - (pc.rect.xy + halfSz);
 
     float d = sdRoundedBox(rel, halfSz, round_);
-    if (d > 0.0) { fragColor = vec4(0.0); return; }   // outside the rounded corners
+
+    // Shadow, taken from the same distance field shifted down, plus a tight
+    // dark contour hugging the rim. Without anything outside it the pane is a
+    // hole cut in the screen rather than a sheet lying on it; this is the only
+    // cue that gives the glass a height above the desktop.
+    float ds      = sdRoundedBox(rel - kShadowOffset, halfSz, round_);
+    float shadowA = (1.0 - smoothstep(0.0, kShadowSoft, ds)) * kShadowAlpha
+                  + (1.0 - smoothstep(0.0, 1.5, d)) * kContourAlpha;
+    shadowA *= alpha;
+
+    if (d > 0.0) {   // outside the pane: shadow only
+        fragColor = vec4(0.0, 0.0, 0.0, shadowA);
+        return;
+    }
 
     // Gradient of the distance field is the glass surface normal here.
     const float e = 1.0;
@@ -90,17 +125,27 @@ void main() {
     // the pane shows what is actually behind it, undistorted.
     vec2 base = posPx + n * bend;
 
+    // Blur only where the glass is doing something. A constant radius across
+    // the whole pane is a frosted sheet with a nice edge; the material this is
+    // after is clear in the middle and turns over at the rim, so the softening
+    // has to follow the same profile the lensing does. The ramp is much wider
+    // than the bevel so it reads as a gradient rather than a ring.
+    float rimness = smoothstep(-edgeW * 2.5, 0.0, d);
+    float blurPx  = pc.params2.x * mix(kCentreBlur, 1.0, rimness);
+
     // Dispersion: glass bends short wavelengths more than long ones, so each
     // channel is sampled at its own bend. The split is only perceptible at the
     // rim, which is precisely where it does the work of identifying glass.
     // Dispersion rides on top of the blur: each channel is blurred about its
     // own bent position, so the colour split survives the softening.
     float disp = bevel * bend * 0.16;
-    float blurPx = pc.params2.x;
-    vec3 col = vec3(
+    vec3 lin = vec3(
         sampleBlurred(base - n * disp, pc.screen.xy, blurPx).r,
         sampleBlurred(base,            pc.screen.xy, blurPx).g,
         sampleBlurred(base + n * disp, pc.screen.xy, blurPx).b);
+    // Back to display space: everything below was tuned against encoded values
+    // and is artistic rather than physical, so it belongs on this side.
+    vec3 col = toSrgb(lin);
 
     // Legibility, per pixel — applied to the refracted background only, before
     // any of the glass's own light is added. Doing it afterwards crushed the
@@ -133,8 +178,13 @@ void main() {
     float spec = max(dot(n, lightDir), 0.0);
     col += pow(spec, 3.0) * bevel * 0.18;
 
-
-    // Feather the last pixel so the rounded border stays smooth.
-    float aa = 1.0 - smoothstep(-1.5, 0.0, d);
-    fragColor = vec4(col, alpha * aa);
+    // Feather the last pixel so the rounded border stays smooth, then lay the
+    // glass over its own shadow. Compositing the two here rather than letting
+    // the feather fade to nothing is what keeps the border from opening a
+    // one-pixel gap straight through to the desktop. The shadow is black, so
+    // it contributes no colour of its own.
+    float aa     = 1.0 - smoothstep(-1.5, 0.0, d);
+    float glassA = alpha * aa;
+    float outA   = glassA + shadowA * (1.0 - glassA);
+    fragColor = vec4(col * glassA / max(outA, 1e-4), outA);
 }
