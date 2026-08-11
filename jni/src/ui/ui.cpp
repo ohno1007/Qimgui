@@ -669,10 +669,15 @@ void DrawUi(UiState* state, bool* keep_running) {
     // background now.
     int pushed_glass_text = 0;
     if (state->screen_texture_id) {
-        ImGui::PushStyleColor(ImGuiCol_TitleBg,          ImVec4(1, 1, 1, 0.07f));
-        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    ImVec4(1, 1, 1, 0.10f));
-        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(1, 1, 1, 0.07f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,          ImVec4(0, 0, 0, 0.10f));
+        // Identical on every region: one sheet of glass, uniform throughout.
+        // Giving the title bar and the sidebar different densities drew the
+        // boundaries between them, which is the thing that made the window look
+        // assembled from pieces.
+        const ImVec4 kSheet(1, 1, 1, 0.05f);
+        ImGui::PushStyleColor(ImGuiCol_TitleBg,          kSheet);
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    kSheet);
+        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kSheet);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,          kSheet);
         pushed_glass_text = 4;
     }
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;

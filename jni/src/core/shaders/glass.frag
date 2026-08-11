@@ -77,6 +77,17 @@ void main() {
         texture(uScreen, uvG).g,
         texture(uScreen, uvB).b);
 
+    // Legibility, per pixel — applied to the refracted background only, before
+    // any of the glass's own light is added. Doing it afterwards crushed the
+    // caustic and the specular along with everything else, which is what made
+    // the rim look grey: the highlight is the material reflecting light, not
+    // content to be read through, so it must not be dimmed.
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
+
+    // A whisper of wash, never enough to read as a tinted panel.
+    col = mix(col, pc.tint.rgb, pc.tint.a);
+
     // Caustic: bent rays pile up just inside the rim and light concentrates
     // into a bright band. This is the "concentrates light" half of the
     // material, and the strongest cue that the edge has thickness.
@@ -89,17 +100,6 @@ void main() {
     float spec = max(dot(n, lightDir), 0.0);
     col += pow(spec, 3.0) * bevel * 0.42;
 
-
-    // Legibility, per pixel. Rather than flipping the whole palette from an
-    // average — which is the wrong granularity, and leaves text unreadable on
-    // whichever half of the window disagrees with the average — squeeze bright
-    // areas down locally. Dark regions are left alone, so the material stays
-    // clear over them, and one text colour then works everywhere.
-    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
-
-    // A whisper of wash, never enough to read as a tinted panel.
-    col = mix(col, pc.tint.rgb, pc.tint.a);
 
     // Feather the last pixel so the rounded border stays smooth.
     float aa = 1.0 - smoothstep(-1.5, 0.0, d);

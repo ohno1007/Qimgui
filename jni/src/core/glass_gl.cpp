@@ -70,6 +70,15 @@ void main() {
         texture(uScreenTex,  base            / uScreen).g,
         texture(uScreenTex, (base + n * disp) / uScreen).b);
 
+    // Legibility, per pixel — applied to the refracted background only, before
+    // any of the glass's own light is added. Doing it afterwards crushed the
+    // caustic and the specular along with everything else, which is what made
+    // the rim look grey: the highlight is the material reflecting light, not
+    // content to be read through, so it must not be dimmed.
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
+    col = mix(col, uTint.rgb, uTint.a);
+
     float caustic = smoothstep(0.72, 0.97, bevel) * (1.0 - smoothstep(0.97, 1.0, bevel));
     col += caustic * 0.55;
 
@@ -77,16 +86,6 @@ void main() {
     float spec = max(dot(n, lightDir), 0.0);
     col += pow(spec, 3.0) * bevel * 0.42;
 
-
-    // Legibility, per pixel. Rather than flipping the whole palette from an
-    // average — which is the wrong granularity, and leaves text unreadable on
-    // whichever half of the window disagrees with the average — squeeze bright
-    // areas down locally. Dark regions are left alone, so the material stays
-    // clear over them, and one text colour then works everywhere.
-    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
-
-    col = mix(col, uTint.rgb, uTint.a);
 
     float aa = 1.0 - smoothstep(-1.5, 0.0, d);
     fragColor = vec4(col, uParams.w * aa);
