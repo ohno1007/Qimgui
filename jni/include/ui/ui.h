@@ -2,6 +2,8 @@
 
 #include "imgui.h"   // ImVec2
 
+#include <cstdint>
+
 namespace aimgui {
 
 // State shared between main loop and the UI layer. The main loop owns
@@ -54,6 +56,16 @@ struct UiState {
 
     // Post-process bloom intensity, applied at composite. 0 = bloom off.
     float bloom_intensity = 0.75f;
+
+    // Live screen mirror: SurfaceFlinger composites the screen into buffers
+    // we own, giving sampleable pixels for a refracting backdrop. The frame
+    // counter is a liveness signal — if it stops rising, frames stopped
+    // arriving.
+    bool     screen_mirror         = false;
+    bool     screen_mirror_running = false;
+    uint64_t screen_mirror_frames  = 0;
+    int      screen_mirror_w       = 0;
+    int      screen_mirror_h       = 0;
 
     // Frosted-glass backdrop. SurfaceFlinger blurs what it composites behind
     // the window, so this costs nothing per frame — but it needs Android 12+

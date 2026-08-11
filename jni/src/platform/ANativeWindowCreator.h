@@ -800,6 +800,33 @@ namespace android {
                 return true;
             }
 
+            // ── Virtual display ─────────────────────────────────────────
+            // Attaching a display to a producer we own is what makes
+            // SurfaceFlinger composite the screen into our buffers.
+            bool SetDisplaySurface(StrongPointer<void> &token, StrongPointer<void> &producer) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetDisplaySurface;
+                if (nullptr == fn) return false;
+                fn(data, token, producer);
+                return true;
+            }
+
+            bool SetDisplayLayerStack(StrongPointer<void> &token, uint32_t layerStack) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetDisplayLayerStack;
+                if (nullptr == fn) return false;
+                fn(data, token, layerStack);
+                return true;
+            }
+
+            // `layerStackRect` is the region of the source display to read,
+            // `displayRect` where it lands in our virtual display.
+            bool SetDisplayProjection(StrongPointer<void> &token, int32_t orientation,
+                                      const ui::Rect &layerStackRect, const ui::Rect &displayRect) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetDisplayProjection;
+                if (nullptr == fn) return false;
+                fn(data, token, orientation, &layerStackRect, &displayRect);
+                return true;
+            }
+
             static bool BackgroundBlurSupported() {
                 return nullptr != Functionals::GetInstance().SurfaceComposerClient__Transaction__SetBackgroundBlurRadius
                     && nullptr != Functionals::GetInstance().SurfaceComposerClient__Transaction__SetCrop;
@@ -992,6 +1019,28 @@ namespace android {
 
             void CloseGlobalTransaction(bool synchronous) {
                 Functionals::GetInstance().SurfaceComposerClient__CloseGlobalTransaction(synchronous);
+            }
+
+            // Creates a virtual display. Android 14 renamed this and switched
+            // String8 for std::string, so both ABIs are handled here and the
+            // caller just gets a token back.
+            StrongPointer<void> CreateVirtualDisplay(const char *name, bool secure) {
+                const auto &f = Functionals::GetInstance();
+                if (f.SurfaceComposerClient__CreateVirtualDisplay) {
+                    const std::string n(name);
+                    const std::string uniqueId;
+                    return f.SurfaceComposerClient__CreateVirtualDisplay(&n, secure, &uniqueId, 0.0f);
+                }
+                if (f.SurfaceComposerClient__CreateDisplay) {
+                    String8 n(name);
+                    return f.SurfaceComposerClient__CreateDisplay(n, secure);
+                }
+                return {};
+            }
+
+            void DestroyVirtualDisplay(StrongPointer<void> &token) {
+                const auto &f = Functionals::GetInstance();
+                if (f.SurfaceComposerClient__DestroyDisplay) f.SurfaceComposerClient__DestroyDisplay(token);
             }
 
             SurfaceControl MirrorSurface(SurfaceControl &surface, uint32_t layerStack) {

@@ -2,6 +2,7 @@
 #include "core/font.h"
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
+#include "core/screen_mirror.h"
 #include "core/window_session.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -66,6 +67,7 @@ int main() {
     st.expand = 0.0f;
 #endif
 
+    aimgui::ScreenMirror mirror;
     aimgui::FramePacer pacer;
     auto last = clock::now();
     auto last_display_poll = last;
@@ -88,6 +90,21 @@ int main() {
             if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
         }
         if (aimgui::kbd_input::ConsumeVolumePresses() > 0) st.collapsed = !st.collapsed;
+
+        // Live screen mirror. Half the display's resolution is plenty for a
+        // blurred/refracted backdrop and halves the compositor's scaling work.
+        if (st.screen_mirror && !mirror.running()) {
+            mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
+        } else if (!st.screen_mirror && mirror.running()) {
+            mirror.Stop();
+        }
+        if (mirror.running()) {
+            mirror.AcquireLatest();   // take delivery; texture import comes next
+            st.screen_mirror_frames = mirror.frames();
+            st.screen_mirror_w      = mirror.width();
+            st.screen_mirror_h      = mirror.height();
+        }
+        st.screen_mirror_running = mirror.running();
         if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();
         aimgui::kbd_input::Flush();
 

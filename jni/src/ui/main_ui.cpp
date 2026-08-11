@@ -289,9 +289,19 @@ void DrawWindow(UiState* state) {
         }
         if (ok) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
-            ImGui::TextWrapped(
-                u8"可以让 SurfaceFlinger 把屏幕实时合成到我们自己的 Surface，"
-                u8"再作为纹理采样 —— 液体玻璃需要的就是这个。");
+            if (ImGui::Checkbox(u8"启动实时取屏", &state->screen_mirror)) {}
+            ripple::TouchLastItem();
+            if (state->screen_mirror_running) {
+                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
+                                   u8"运行中 — 已收到 %llu 帧  (%dx%d)",
+                                   (unsigned long long)state->screen_mirror_frames,
+                                   state->screen_mirror_w, state->screen_mirror_h);
+                ImGui::TextWrapped(
+                    u8"帧数在涨说明 SurfaceFlinger 正把屏幕合成进我们的 buffer，"
+                    u8"接下来就可以把它导入成纹理做折射了。");
+            } else if (state->screen_mirror) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), u8"启动失败");
+            }
         } else {
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), u8"不可用");
             ImGui::TextWrapped(u8"缺失符号：%s", missing.c_str());

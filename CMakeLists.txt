@@ -67,7 +67,9 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/bloom_vk.cpp
     ${JNI}/src/core/font.cpp
     ${JNI}/src/core/keyboard_input.cpp
-    ${JNI}/src/core/window_session.cpp)
+    ${JNI}/src/core/window_session.cpp
+    ${JNI}/src/core/screen_capture.cpp
+    ${JNI}/src/core/screen_mirror.cpp)
 target_compile_definitions(aimgui_core PRIVATE
     VK_USE_PLATFORM_ANDROID_KHR
     IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
@@ -84,7 +86,7 @@ add_executable(AImGui
 target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
     aimgui_core aimgui_platform imgui
-    log android EGL GLESv3)
+    log android EGL GLESv3 mediandk)
 
 # ── Optional Live2D Cubism layer ─────────────────────────────────────────
 # Requires the user to drop the Cubism SDK's Core/ and Framework/ into

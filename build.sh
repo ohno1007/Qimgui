@@ -15,7 +15,8 @@ BUILD="build/${ABI}"
 
 # The Live2D layer uses AImageDecoder (NDK API 30+). Bump the platform
 # automatically when it's enabled, unless the caller overrides it.
-PLATFORM="android-24"
+# AImageReader (used by the screen-mirror backdrop) is API 26+.
+PLATFORM="android-26"
 if [[ "$*" == *AIMGUI_LIVE2D=ON* && "$*" != *ANDROID_PLATFORM* ]]; then
     PLATFORM="android-30"
 fi
