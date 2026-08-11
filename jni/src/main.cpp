@@ -2,6 +2,7 @@
 #include "core/font.h"
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
+#include "core/clipboard.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -51,6 +52,7 @@ int main() {
     io.ConfigErrorRecoveryEnableAssert = false;
     ImGui::StyleColorsDark();
     aimgui::LoadDefaultAndSystemCJKFont(25.0f);
+    aimgui::clipboard::Install();
 
     aimgui::UiState st;
     st.display_w = info.width; st.display_h = info.height;
@@ -140,15 +142,24 @@ int main() {
             mirror.Stop();
         }
         if (st.screen_mirror && !mirror.running()) {
-            if (mirror.Start(info.width / 2, info.height / 2, info.width, info.height)) {
-                // Keep our own output out of the frames we sample, or drawing
-                // the mirror inside the window feeds the window back into the
-                // next mirrored frame and the loop saturates to white.
-                ANativeWindowCreator::SetSkipScreenshot(ws.window(), true);
-            }
+            mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
         } else if (!st.screen_mirror && mirror.running()) {
             mirror.Stop();
-            ANativeWindowCreator::SetSkipScreenshot(ws.window(), false);
+        }
+        // Keeping our own output out of the frames we sample is what stops the
+        // mirror feeding the window back into itself until the glass saturates
+        // — but the same flag is what a screenshot obeys, so it is applied only
+        // while both the mirror is running and the user has left it on. Pushed
+        // only on a change: it is a binder round-trip to SurfaceFlinger.
+        {
+            const bool want_hidden = mirror.running() && st.mirror_hides_window;
+            static bool hidden_now = false;
+            static bool hidden_known = false;
+            if (!hidden_known || want_hidden != hidden_now) {
+                ANativeWindowCreator::SetSkipScreenshot(ws.window(), want_hidden);
+                hidden_now   = want_hidden;
+                hidden_known = true;
+            }
         }
         mirror.Update();
         if (mirror.running()) {

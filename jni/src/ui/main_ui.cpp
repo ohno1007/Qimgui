@@ -14,6 +14,7 @@
 #include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
+#include "core/clipboard.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -304,6 +305,16 @@ void DrawWindow(UiState* state) {
             if (state->screen_mirror) {
                 SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
                                      0.0f, 0.35f, "%.2f");
+                // The coupling behind this is not guessable from the outside,
+                // so it is spelled out rather than left as a surprise.
+                ImGui::Checkbox(u8"镜像时对截屏隐藏窗口", &state->mirror_hides_window);
+                chrome::LastItemFrame(u8"镜像时对截屏隐藏窗口");
+                ripple::TouchLastItem();
+                if (state->mirror_hides_window) {
+                    ImGui::TextDisabled(u8"关掉就能截到窗口，但玻璃会套娃");
+                } else {
+                    ImGui::TextDisabled(u8"能被截屏了，玻璃可能发白");
+                }
             }
             if (state->screen_mirror_running) {
                 ImGui::TextDisabled(u8"%dx%d  ·  %llu 帧",
@@ -339,6 +350,33 @@ void DrawWindow(UiState* state) {
         if (!has_vibrator && state->haptics_enabled) {
             ImGui::TextDisabled(u8"本机没有可用的振动器");
         }
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText(u8"剪贴板");
+    {
+        static char buf[512] = "";
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##clip", u8"在这里编辑文本", buf, sizeof(buf));
+        chrome::LastItem(14.0f);
+
+        // A phone has no Ctrl+C, so the two operations get buttons. They are
+        // also the only way in or out for anyone without a keyboard attached.
+        const float w = (ImGui::GetContentRegionAvail().x -
+                         ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+        const bool copied = ImGui::Button(ICON_FA_COPY u8"  复制", ImVec2(w, 0));
+        chrome::LastItem();
+        ripple::TouchLastItem();
+        if (copied) clipboard::Set(buf);
+        ImGui::SameLine();
+        const bool pasted = ImGui::Button(ICON_FA_PAPER_PLANE u8"  粘贴", ImVec2(w, 0));
+        chrome::LastItem();
+        ripple::TouchLastItem();
+        if (pasted) {
+            const char* t = clipboard::Get();
+            std::snprintf(buf, sizeof(buf), "%s", t ? t : "");
+        }
+        ImGui::TextDisabled("%s", clipboard::Path());
     }
 
     ImGui::Spacing();

@@ -34,6 +34,7 @@ const Field kFields[] = {
     F(screen_mirror,    Kind::Bool),
     F(permeate_record,  Kind::Bool),
     F(haptics_enabled,  Kind::Bool),
+    F(mirror_hides_window, Kind::Bool),
     F(stage,            Kind::Int),
     F(nav_page,         Kind::Int),
     F(ball_scale,       Kind::Float),

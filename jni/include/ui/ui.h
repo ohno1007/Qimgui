@@ -19,6 +19,17 @@ struct UiState {
     bool permeate_record         = false;
     bool request_permeate_toggle = false;
 
+    // Whether the live mirror is allowed to hide this window from captures.
+    //
+    // It has to hide it from *its own* capture or the mirror feeds the window
+    // back into itself and the glass saturates. But SurfaceFlinger's
+    // skipScreenshot is one flag, not one per capture: it cannot tell our
+    // virtual display apart from the user pressing screenshot. So this is a
+    // genuine either/or, and it is a setting rather than a hidden side effect
+    // of turning the glass on — which is what made "anti-record is off, why
+    // can't I screenshot the UI" so mystifying.
+    bool mirror_hides_window = true;
+
     // Frame-rate cap. 0 = vsync (panel refresh).
     int target_fps = 0;
 
