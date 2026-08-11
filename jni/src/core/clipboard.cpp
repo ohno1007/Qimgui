@@ -29,6 +29,23 @@ const char* Path() { return kPath; }
 bool UsedSystem() { return g_used_system; }
 const char* SystemError() { return sysclip::LastError(); }
 
+// Also to the terminal this was launched from, not only to logcat and the UI.
+//
+// With the glass on, the window sets skipScreenshot — so the one surface that
+// says what happened is the one surface that cannot be captured, and asking for
+// a screenshot of it is asking for the impossible. stderr is not redirected and
+// lands in the shell the binary was exec'd from, which is somewhere the answer
+// can actually be read.
+void Report(const char* op, bool system_path, size_t n) {
+    if (system_path) {
+        std::fprintf(stderr, "[clip] %s: system clipboard, %zu bytes\n", op, n);
+    } else {
+        std::fprintf(stderr, "[clip] %s: FILE FALLBACK, %zu bytes (%s)\n",
+                     op, n, sysclip::LastError());
+    }
+    std::fflush(stderr);
+}
+
 void Set(const char* text) {
     if (!text) text = "";
     g_text = text;
@@ -36,6 +53,7 @@ void Set(const char* text) {
     // service's own check returns allowed for OP_WRITE_CLIPBOARD without
     // needing focus — so this is the path that should normally win.
     g_used_system = sysclip::WriteText(text);
+    Report("copy", g_used_system, g_text.size());
     // Whole-file replace through a temp, same as the config: a reader that
     // catches us mid-write would otherwise get a truncated string rather than
     // the old one.
@@ -55,6 +73,7 @@ const char* Get() {
     if (sysclip::ReadText(&sys)) {
         g_used_system = true;
         g_text = std::move(sys);
+        Report("paste", true, g_text.size());
         return g_text.c_str();
     }
     g_used_system = false;
@@ -63,7 +82,7 @@ const char* Get() {
     // of the file is that something outside this process can put text there
     // while it runs, and a cache would never see it.
     FILE* f = std::fopen(kPath, "rb");
-    if (!f) return g_text.c_str();
+    if (!f) { Report("paste", false, 0); return g_text.c_str(); }
 
     std::string in;
     char buf[4096];
@@ -78,6 +97,7 @@ const char* Get() {
     // to paste.
     while (!in.empty() && (in.back() == '\n' || in.back() == '\r')) in.pop_back();
     g_text = std::move(in);
+    Report("paste", false, g_text.size());
     return g_text.c_str();
 }
 
