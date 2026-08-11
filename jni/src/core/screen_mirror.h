@@ -22,6 +22,11 @@ class ScreenMirror {
 public:
     ~ScreenMirror() { Stop(); }
 
+    // Whether libmediandk loaded and the display symbols resolved. Checked
+    // before Start() so an unsupported device disables the feature instead
+    // of failing mid-setup.
+    static bool Available();
+
     // `width`/`height` size the mirror buffers; passing the display size
     // divided by 2-4 is plenty for a blurred backdrop and cuts the
     // compositor's scaling work. Returns false if the display couldn't be

@@ -86,7 +86,7 @@ add_executable(AImGui
 target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
     aimgui_core aimgui_platform imgui
-    log android EGL GLESv3 mediandk)
+    log android EGL GLESv3)
 
 # ── Optional Live2D Cubism layer ─────────────────────────────────────────
 # Requires the user to drop the Cubism SDK's Core/ and Framework/ into

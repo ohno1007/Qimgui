@@ -13,6 +13,7 @@
 #include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
+#include "core/screen_mirror.h"
 
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
@@ -286,6 +287,10 @@ void DrawWindow(UiState* state) {
         if (!probed) {
             probed = true;
             ok = android::ANativeWindowCreator::ScreenCaptureSupported(&missing);
+            if (ok && !ScreenMirror::Available()) {
+                ok = false;
+                missing = u8"libmediandk (AImageReader)";
+            }
         }
         if (ok) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
