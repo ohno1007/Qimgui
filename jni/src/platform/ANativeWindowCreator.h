@@ -363,7 +363,12 @@ namespace android {
             // sample: GPU to GPU, no readback, at display refresh rate. These
             // are far older APIs than the blur path (they predate Android 5),
             // which is what makes this viable on old versions too.
-            StrongPointer<void> (*SurfaceComposerClient__CreateDisplay)(void *name, bool secure) = nullptr;
+            // Android 14 renamed createDisplay -> createVirtualDisplay and
+            // swapped String8 for std::string (plus a refresh-rate arg), so
+            // the two ABIs need separate pointers and the caller has to know
+            // which one it bound.
+            StrongPointer<void> (*SurfaceComposerClient__CreateDisplay)(void *name_String8, bool secure) = nullptr;
+            StrongPointer<void> (*SurfaceComposerClient__CreateVirtualDisplay)(const std::string *name, bool secure, const std::string *uniqueId, float refreshRate) = nullptr;
             void (*SurfaceComposerClient__DestroyDisplay)(StrongPointer<void> &display) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplaySurface)(void *thiz, StrongPointer<void> &token, StrongPointer<void> &bufferProducer) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplayLayerStack)(void *thiz, StrongPointer<void> &token, uint32_t layerStack) = nullptr;
@@ -500,22 +505,57 @@ namespace android {
                 // parameter types around Android 13 (uint32_t -> ui::LayerStack,
                 // int32_t -> ui::Rotation), so try the modern mangling first
                 // and fall back to the legacy one.
-                ResolveMethod(SurfaceComposerClient, CreateDisplay, libgui, "_ZN7android21SurfaceComposerClient13createDisplayERKNS_7String8Eb");
-                ResolveMethod(SurfaceComposerClient, DestroyDisplay, libgui, "_ZN7android21SurfaceComposerClient14destroyDisplayERKNS_2spINS_7IBinderEEE");
-                ResolveMethod(SurfaceComposerClient__Transaction, SetDisplaySurface, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setDisplaySurfaceERKNS_2spINS_7IBinderEEERKNS2_INS_22IGraphicBufferProducerEEE");
-                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayLayerStack) {
-                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayLayerStack, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayLayerStackERKNS_2spINS_7IBinderEEENS_2ui10LayerStackE");
+                // These have been renamed and had their parameter types
+                // changed across versions, so hand-written manglings keep
+                // missing — that is exactly how mirrorSurface ended up
+                // unresolved. Search the symbol table by name instead and let
+                // a required suffix pin down which overload was found, so we
+                // never bind one we don't know how to call.
+                {
+#ifdef __LP64__
+                    const char *libguiPath = "/system/lib64/libgui.so";
+#else
+                    const char *libguiPath = "/system/lib/libgui.so";
+#endif
+                    auto bind = [&](const char *token, const char *suffix) -> void * {
+                        const std::string m = FindDynSymContaining(libguiPath, token, suffix);
+                        return m.empty() ? nullptr : symbolMethod.Find(libgui, m.c_str());
+                    };
+
+                    // Android 14+: createVirtualDisplay(const std::string&,
+                    // bool, const std::string&, float) — mangling ends in 'f'.
+                    SurfaceComposerClient__CreateVirtualDisplay =
+                        reinterpret_cast<decltype(SurfaceComposerClient__CreateVirtualDisplay)>(
+                            bind("createVirtualDisplay", "f"));
+                    // Legacy: createDisplay(const String8&, bool) — ends in 'b'.
+                    if (nullptr == SurfaceComposerClient__CreateVirtualDisplay) {
+                        SurfaceComposerClient__CreateDisplay =
+                            reinterpret_cast<decltype(SurfaceComposerClient__CreateDisplay)>(
+                                bind("createDisplay", "b"));
+                    }
+
+                    SurfaceComposerClient__DestroyDisplay =
+                        reinterpret_cast<decltype(SurfaceComposerClient__DestroyDisplay)>(
+                            bind("destroyVirtualDisplay", nullptr));
+                    if (nullptr == SurfaceComposerClient__DestroyDisplay) {
+                        SurfaceComposerClient__DestroyDisplay =
+                            reinterpret_cast<decltype(SurfaceComposerClient__DestroyDisplay)>(
+                                bind("destroyDisplay", nullptr));
+                    }
+
+                    SurfaceComposerClient__Transaction__SetDisplaySurface =
+                        reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplaySurface)>(
+                            bind("setDisplaySurface", nullptr));
+                    SurfaceComposerClient__Transaction__SetDisplayLayerStack =
+                        reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplayLayerStack)>(
+                            bind("setDisplayLayerStack", nullptr));
+                    SurfaceComposerClient__Transaction__SetDisplayProjection =
+                        reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplayProjection)>(
+                            bind("setDisplayProjection", nullptr));
+                    Surface__GetIGraphicBufferProducer =
+                        reinterpret_cast<decltype(Surface__GetIGraphicBufferProducer)>(
+                            bind("getIGraphicBufferProducer", nullptr));
                 }
-                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayLayerStack) {
-                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayLayerStack, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayLayerStackERKNS_2spINS_7IBinderEEEj");
-                }
-                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayProjection) {
-                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayProjection, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayProjectionERKNS_2spINS_7IBinderEEENS_2ui8RotationERKNS_4RectESA_");
-                }
-                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayProjection) {
-                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayProjection, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayProjectionERKNS_2spINS_7IBinderEEEiRKNS_4RectES8_");
-                }
-                ResolveMethod(Surface, GetIGraphicBufferProducer, libgui, "_ZNK7android7Surface25getIGraphicBufferProducerEv");
 
                 // Display related methods - version specific selection
                 if (5 <= systemVersion && 9 >= systemVersion) {
@@ -1545,7 +1585,9 @@ namespace android {
         static bool ScreenCaptureSupported(std::string* missing = nullptr) {
             const auto& f = detail::Functionals::GetInstance();
             struct { const char* name; const void* fn; } syms[] = {
-                {"createDisplay",        (const void*)f.SurfaceComposerClient__CreateDisplay},
+                {"createDisplay",        (const void*)(f.SurfaceComposerClient__CreateVirtualDisplay
+                                                       ? (const void*)f.SurfaceComposerClient__CreateVirtualDisplay
+                                                       : (const void*)f.SurfaceComposerClient__CreateDisplay)},
                 {"destroyDisplay",       (const void*)f.SurfaceComposerClient__DestroyDisplay},
                 {"setDisplaySurface",    (const void*)f.SurfaceComposerClient__Transaction__SetDisplaySurface},
                 {"setDisplayLayerStack", (const void*)f.SurfaceComposerClient__Transaction__SetDisplayLayerStack},
