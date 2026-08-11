@@ -62,7 +62,6 @@ struct UiState {
     // counter is a liveness signal — if it stops rising, frames stopped
     // arriving.
     bool     screen_mirror         = false;
-    bool     screen_mirror_probe   = false;  // diagnostic: mirror to a visible layer
     bool     screen_mirror_running = false;
     uint64_t screen_mirror_frames  = 0;
     int      screen_mirror_w       = 0;

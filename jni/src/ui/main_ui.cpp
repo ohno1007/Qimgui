@@ -296,11 +296,9 @@ void DrawWindow(UiState* state) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
             if (ImGui::Checkbox(u8"启动实时取屏", &state->screen_mirror)) {}
             ripple::TouchLastItem();
-            if (ImGui::Checkbox(u8"诊断: 镜像到可见图层", &state->screen_mirror_probe)) {}
-            ripple::TouchLastItem();
             ImGui::TextWrapped(
-                u8"本机实测：虚拟显示能建出来、事务也被接受，但 SurfaceFlinger "
-                u8"从不往里合成（两种输出都试过）。这条路在本机不可用。");
+                u8"系统的 screenrecord 走的是同一条 native 路径且能正常录制，"
+                u8"所以本机的 SurfaceFlinger 确实会驱动自建的虚拟显示。");
             if (state->screen_mirror_running) {
                 ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
                                    u8"运行中 — 已收到 %llu 帧  (%dx%d)",
