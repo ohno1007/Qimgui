@@ -356,8 +356,36 @@ void DrawWindow(UiState* state) {
     ImGui::SeparatorText(u8"剪贴板");
     {
         static char buf[512] = "";
+        static std::string incoming;
+        static bool        paste_pending = false;
+        static int         last_len      = -1;
+
+        // Writing to `buf` from outside the widget only lands while the widget
+        // is inactive: once it has focus ImGui keeps its own copy of the text
+        // and writes that back over the buffer every frame. So a paste is
+        // handed in through the callback as well, which is the one path that
+        // reaches the live editing state.
+        struct Pending { std::string* text; bool* flag; };
+        static Pending pending{&incoming, &paste_pending};
+        auto on_edit = [](ImGuiInputTextCallbackData* d) -> int {
+            Pending* p = (Pending*)d->UserData;
+            if (*p->flag) {
+                *p->flag = false;
+                d->DeleteChars(0, d->BufTextLen);
+                if (!p->text->empty()) d->InsertChars(0, p->text->c_str());
+            }
+            return 0;
+        };
+
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##clip", u8"在这里编辑文本", buf, sizeof(buf));
+        ImGui::InputTextWithHint("##clip", u8"在这里编辑文本", buf, sizeof(buf),
+                                 ImGuiInputTextFlags_CallbackAlways, on_edit, &pending);
+        // The callback only runs while the field is active. If it did not run,
+        // the direct write to `buf` already did the job — so the request has to
+        // be dropped here either way, or a paste made while the field was
+        // unfocused would lie in wait and wipe the text the next time it is
+        // tapped.
+        paste_pending = false;
         chrome::LastItem(14.0f);
 
         // A phone has no Ctrl+C, so the two operations get buttons. They are
@@ -367,14 +395,26 @@ void DrawWindow(UiState* state) {
         const bool copied = ImGui::Button(ICON_FA_COPY u8"  复制", ImVec2(w, 0));
         chrome::LastItem();
         ripple::TouchLastItem();
-        if (copied) clipboard::Set(buf);
+        if (copied) { clipboard::Set(buf); last_len = (int)std::strlen(buf); }
         ImGui::SameLine();
-        const bool pasted = ImGui::Button(ICON_FA_PAPER_PLANE u8"  粘贴", ImVec2(w, 0));
+        const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴", ImVec2(w, 0));
         chrome::LastItem();
         ripple::TouchLastItem();
         if (pasted) {
             const char* t = clipboard::Get();
-            std::snprintf(buf, sizeof(buf), "%s", t ? t : "");
+            incoming      = t ? t : "";
+            last_len      = (int)incoming.size();
+            paste_pending = true;                       // for the active case
+            std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());  // for the inactive one
+        }
+
+        // Without this a paste from an empty clipboard is indistinguishable
+        // from a paste that did not work, which is exactly the wrong thing to
+        // leave ambiguous on a feature whose whole job is moving text around.
+        if (last_len == 0) {
+            ImGui::TextDisabled(u8"剪贴板是空的 — 用下面的路径放文本进来");
+        } else if (last_len > 0) {
+            ImGui::TextDisabled(u8"%d 个字符", last_len);
         }
         ImGui::TextDisabled("%s", clipboard::Path());
     }
