@@ -298,7 +298,9 @@ void DrawWindow(UiState* state) {
             ripple::TouchLastItem();
             if (ImGui::Checkbox(u8"诊断: 镜像到可见图层", &state->screen_mirror_probe)) {}
             ripple::TouchLastItem();
-            ImGui::TextDisabled(u8"勾上后若屏幕内容出现在一个方框里，说明虚拟显示能用");
+            ImGui::TextWrapped(
+                u8"本机实测：虚拟显示能建出来、事务也被接受，但 SurfaceFlinger "
+                u8"从不往里合成（两种输出都试过）。这条路在本机不可用。");
             if (state->screen_mirror_running) {
                 ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
                                    u8"运行中 — 已收到 %llu 帧  (%dx%d)",
