@@ -71,7 +71,7 @@ int main() {
         ws.renderer()->SetScenePreDraw(&Live2DScenePreDraw);
     }
     // Boot as the floating ball (the character), not the open window.
-    st.collapsed = true;
+    st.stage = aimgui::UiState::StageIsland;
     st.expand = 0.0f;
 #endif
 
@@ -97,7 +97,13 @@ int main() {
             st.display_w = info.width; st.display_h = info.height;
             if (info.orientation != orient) { orient = info.orientation; Touch::setOrientation((int)orient); }
         }
-        if (aimgui::kbd_input::ConsumeVolumePresses() > 0) st.collapsed = !st.collapsed;
+        // Volume key jumps between the two ends rather than stepping, so it
+        // stays a one-press show/hide however far the window is opened.
+        if (aimgui::kbd_input::ConsumeVolumePresses() > 0) {
+            st.stage = (st.stage == aimgui::UiState::StageIsland)
+                           ? aimgui::UiState::StageWindow
+                           : aimgui::UiState::StageIsland;
+        }
 
         // Live screen mirror. Half the display's resolution is plenty for a
         // blurred/refracted backdrop and halves the compositor's scaling work.

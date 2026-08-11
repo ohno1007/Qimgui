@@ -477,6 +477,36 @@ void DrawContent(UiState* state, Page page) {
     ImGui::PopStyleVar();
 }
 
+// What the middle rest shows: enough to answer "is it running and how fast"
+// without opening the window, and a line saying the next tap opens it.
+void DrawCardContent(const UiState* state) {
+    ImGuiIO& io = ImGui::GetIO();
+
+    ImGui::Dummy(ImVec2(0, 10));
+    ImGui::PushFont(nullptr, 34.0f);
+    ImGui::Text("AImGui");
+    ImGui::PopFont();
+    ImGui::Spacing();
+
+    ImGui::Text(u8"%.0f FPS   ·   %.2f ms", io.Framerate, 1000.0f / io.Framerate);
+    ImGui::TextDisabled("%s", state->renderer_name ? state->renderer_name : "?");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (state->screen_mirror_running) {
+        ImGui::TextDisabled(u8"液体玻璃   %dx%d", state->screen_mirror_w,
+                            state->screen_mirror_h);
+    } else {
+        ImGui::TextDisabled(u8"液体玻璃   未开启");
+    }
+    ImGui::TextDisabled(u8"防录屏   %s", state->permeate_record ? u8"已开启" : u8"已关闭");
+
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::TextDisabled(u8"再点一次展开窗口");
+}
+
 void DrawIslandContent() {
     ImGuiIO& io = ImGui::GetIO();
     char buf[32];
@@ -567,9 +597,13 @@ void DrawResizeGrip(const UiState* state) {
 }
 
 // Critically-ish damped spring with mild overshoot for the "灵动" feel.
+// Under-damped on purpose: at 0.82 the window arrived and stopped, which is
+// correct and lifeless. At 0.52 it overshoots slightly and settles back, which
+// is what reads as elastic — the overshoot is the whole effect, and the squash
+// applied from this spring's velocity is the other half of it.
 void UpdateSpring(float* pos, float* vel, float target, float dt) {
-    constexpr float kOmega = 12.0f;
-    constexpr float kZeta  = 0.82f;
+    constexpr float kOmega = 13.5f;
+    constexpr float kZeta  = 0.52f;
     const float diff  = target - *pos;
     const float accel = kOmega * kOmega * diff - 2.0f * kZeta * kOmega * (*vel);
     *vel += accel * dt;
@@ -655,7 +689,11 @@ void DrawUi(UiState* state, bool* keep_running) {
             }
             if (s_dragging && ImGui::IsMouseReleased(0)) {
                 s_dragging = false;
-                if (!s_moved) { state->collapsed = false; live2d::Poke(); }
+                if (!s_moved) {
+                    // One step per tap: ball -> card -> window.
+                    if (state->stage < UiState::StageWindow) ++state->stage;
+                    live2d::Poke();
+                }
             }
         } else {
             s_dragging = false;
@@ -680,7 +718,8 @@ void DrawUi(UiState* state, bool* keep_running) {
         state->last_full_size = state->resize_drag_start_size;
     }
 
-    const float target = state->collapsed ? 0.0f : 1.0f;
+    state->collapsed = (state->stage == UiState::StageIsland);
+    const float target = (float)state->stage * 0.5f;
     UpdateSpring(&state->expand, &state->expand_vel, target, dt);
     const float t = state->expand;
     const float lt = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
@@ -697,6 +736,19 @@ void DrawUi(UiState* state, bool* keep_running) {
         ? ImVec2(state->ball_pos.x - kIslandW * 0.5f, state->ball_pos.y - kIslandH * 0.5f)
         : ImVec2(dw * 0.5f - kIslandW * 0.5f, kIslandTop);
     const ImVec2 island_size(kIslandW, kIslandH);
+
+    // The card: big enough to read, small enough to still feel like the island
+    // opened rather than the window arrived. It grows from the island's centre
+    // and is kept on screen, so opening a ball dragged to a corner does not put
+    // the card half off the edge.
+    const float dh = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
+    const ImVec2 card_size(560.0f, 360.0f);
+    ImVec2 card_pos(island_pos.x + kIslandW * 0.5f - card_size.x * 0.5f,
+                    island_pos.y + kIslandH * 0.5f - card_size.y * 0.35f);
+    if (card_pos.x < 16.0f) card_pos.x = 16.0f;
+    if (card_pos.y < 16.0f) card_pos.y = 16.0f;
+    if (card_pos.x + card_size.x > dw - 16.0f) card_pos.x = dw - 16.0f - card_size.x;
+    if (card_pos.y + card_size.y > dh - 16.0f) card_pos.y = dh - 16.0f - card_size.y;
 
     auto lerp = [](ImVec2 a, ImVec2 b, float u) {
         return ImVec2(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u);
@@ -721,10 +773,39 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->last_full_size.y = (float)state->display_h;
     }
 
-    const ImVec2 win_pos  = lerp(island_pos,  state->last_full_pos,  lt);
-    const ImVec2 win_size = lerp(island_size, state->last_full_size, lt);
+    // Two segments rather than one: island -> card over the first half of the
+    // spring, card -> window over the second.
+    ImVec2 win_pos, win_size;
+    if (lt <= 0.5f) {
+        const float k = lt * 2.0f;
+        win_pos  = lerp(island_pos,  card_pos,  k);
+        win_size = lerp(island_size, card_size, k);
+    } else {
+        const float k = (lt - 0.5f) * 2.0f;
+        win_pos  = lerp(card_pos,  state->last_full_pos,  k);
+        win_size = lerp(card_size, state->last_full_size, k);
+    }
 
-    const bool show_chrome    = (lt > 0.55f);
+    // Squash and stretch, taken straight from the spring's velocity: opening
+    // stretches along the direction of growth and pinches across it, closing
+    // does the reverse, and it vanishes the moment the spring settles. Without
+    // this the overshoot alone just looks like a bounce; the deformation is
+    // what makes the thing feel soft rather than rigid.
+    {
+        float j = state->expand_vel * 0.055f;
+        if (j >  0.16f) j =  0.16f;
+        if (j < -0.16f) j = -0.16f;
+        const ImVec2 c(win_pos.x + win_size.x * 0.5f, win_pos.y + win_size.y * 0.5f);
+        win_size.x *= (1.0f + j * 0.55f);
+        win_size.y *= (1.0f - j * 0.85f);
+        win_pos.x = c.x - win_size.x * 0.5f;
+        win_pos.y = c.y - win_size.y * 0.5f;
+    }
+
+    // Above the card's rest, and clear of it: the spring is deliberately
+    // under-damped and overshoots past 0.5 on its way to the card, so a
+    // threshold close to it would flash the title bar during the bounce.
+    const bool show_chrome    = (lt > 0.75f);
     const bool overriding_pos = (lt < 0.999f);
 
     if (overriding_pos) {
@@ -837,7 +918,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     std::snprintf(title, sizeof(title), "AImGui  v%s###aimgui_main", ImGui::GetVersion());
 
     if (ImGui::Begin(title, show_chrome ? keep_running : nullptr, flags)) {
-        if (lt >= 0.999f && !state->collapsed) {
+        if (lt >= 0.999f && state->stage == UiState::StageWindow) {
             state->last_full_pos  = ImGui::GetWindowPos();
             state->last_full_size = ImGui::GetWindowSize();
         }
@@ -852,7 +933,25 @@ void DrawUi(UiState* state, bool* keep_running) {
             ImGui::PopStyleVar();
 
             if (!show_chrome && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-                state->collapsed = false;
+                if (state->stage < UiState::StageWindow) ++state->stage;
+            }
+        }
+
+        // The card. It occupies the gap the two fades above and below leave —
+        // the island's content is gone by 0.30 and the window's does not arrive
+        // until 0.70, so without this the middle rest is an empty sheet of
+        // glass. A glance's worth of information and an invitation to open the
+        // rest.
+        const float card_alpha = (lt <= 0.30f || lt >= 0.72f) ? 0.0f
+                               : (lt < 0.46f ? (lt - 0.30f) / 0.16f
+                                             : (lt > 0.62f ? (0.72f - lt) / 0.10f : 1.0f));
+        if (card_alpha > 0.01f) {
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, card_alpha);
+            DrawCardContent(state);
+            ImGui::PopStyleVar();
+
+            if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
+                if (state->stage < UiState::StageWindow) ++state->stage;
             }
         }
 

@@ -28,10 +28,17 @@ struct UiState {
     int display_h = 0;
 
     // ── Dynamic Island ───────────────────────────────────────────────
-    // `collapsed` is the *target* state (true = pill at top, false =
-    // full window). `expand` is the animated value lerping toward it
-    // through a spring; `expand_vel` is the spring's velocity.
-    bool  collapsed   = false;
+    // Three resting states rather than two: the pill, a compact card, and
+    // the full window. One tap moves up a step, so the island can be opened
+    // far enough to read at a glance without committing to the whole window.
+    //
+    // `stage` is the target; `expand` is the animated value chasing it
+    // through a spring, at 0.0 / 0.5 / 1.0, and `expand_vel` is that
+    // spring's velocity — also what drives the squash-and-stretch, since a
+    // fast-moving spring is exactly when a jelly should deform.
+    enum Stage { StageIsland = 0, StageCard = 1, StageWindow = 2 };
+    int   stage       = StageWindow;
+    bool  collapsed   = false;   // derived: stage == StageIsland
     float expand      = 1.0f;
     float expand_vel  = 0.0f;
 
