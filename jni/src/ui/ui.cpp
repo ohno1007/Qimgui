@@ -408,13 +408,7 @@ void ApplyStyleOnce() {
 // ─── Page contents live in main_ui.cpp ──────────────────────────────────
 // Width of the nav column. Named so the glass pane behind it and the child
 // itself cannot drift apart.
-constexpr float kSidebarW = 250.0f;
-
-// The nav column is a slab in its own right now, but its left and bottom edges
-// still sat flush against the window's while every other edge in the layout has
-// a slot. Inset them by the same amount so the column is separated on all four
-// sides rather than jammed into the corner.
-constexpr float kNavInset = 14.0f;
+constexpr float kSidebarW = 230.0f;
 
 // How far the nav column's pane and the title/content pane are held apart, over
 // what radius the field between them is smoothed, and the strand left spanning
@@ -460,14 +454,11 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // right edge is the tighter of the two now that the slot eats half its
     // width out of this column, so the padding is set by that side and the
     // left simply inherits it.
-    // Measured from the pane's edge, not the child's: the two differ by the
-    // window padding on the left and by the inset on the right, and it is the
-    // pane the eye reads the text against.
-    constexpr float kInnerPadX     = 38.0f;
+    constexpr float kInnerPadX     = 30.0f;
     // The nav column's pane starts below the title bar with a slot between
     // them, so its top edge is lensed too and the first entry has to clear it.
     // The lag needs no allowance here: the labels move with the pane.
-    constexpr float kInnerPadY     = 44.0f;
+    constexpr float kInnerPadY     = 30.0f;
     constexpr float kSelectableH   = 48.0f;
     // Inside a row, measured from the capsule's own edge. SelectableTextAlign
     // cannot express this: it is a fraction of the *leftover* space, so the
@@ -477,7 +468,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     constexpr float kRowPadX       = 24.0f;
     constexpr float kRowIconGap    = 16.0f;
     constexpr float kFooterH       = 150.0f;
-    constexpr float kBottomMargin  = 36.0f;
+    constexpr float kBottomMargin  = 16.0f;
 
     // The selected entry is drawn below as a capsule, so ImGui's own Header
     // fills stay out of it entirely — a slab of flat blue was the single most
@@ -1303,10 +1294,10 @@ void DrawUi(UiState* state, bool* keep_running) {
             // its widgets by the same offset, so the labels ride along and the
             // throw can be as far in one direction as the other.
             const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
-            a.x = win_pos.x + kNavInset + lag.x;
+            a.x = win_pos.x + lag.x;
             a.y = nav_y0 + lag.y;
-            a.w = (divide - gap * 0.5f) - (win_pos.x + kNavInset);
-            a.h = (win_b - kNavInset) - nav_y0;
+            a.w = (divide - gap * 0.5f) - win_pos.x;
+            a.h = win_b - nav_y0;
 
             // The strand is what is left of the join once the bodies are too
             // far apart for the merge alone. It necks down as the slot opens
