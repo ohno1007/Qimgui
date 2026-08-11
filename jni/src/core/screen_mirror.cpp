@@ -95,9 +95,22 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         media.ReaderDelete(reader);
         return false;
     }
-    MIRROR_STEP("3/6 Surface::getIGraphicBufferProducer(%p)", (void*)window);
+    // An ANativeWindow* is not the Surface's address. android::Surface derives
+    // from ANativeObjectBase<ANativeWindow, Surface, RefBase>, and RefBase's
+    // vtable sits first, so the ANativeWindow subobject lives 16 bytes into
+    // the Surface. ANativeWindowCreator::Create() already relies on this in
+    // the other direction — SurfaceControl::GetSurface() adds the same 16 to
+    // turn a Surface* into the ANativeWindow* it hands out.
+    //
+    // Passing the window straight through as `this` made the callee read its
+    // members at the wrong offsets and then incStrong the garbage it found
+    // there, which is the segfault.
+    constexpr size_t kSurfaceToWindow = sizeof(std::max_align_t) / 2;
+    void* surface = reinterpret_cast<char*>(window) - kSurfaceToWindow;
+    MIRROR_STEP("3/6 Surface::getIGraphicBufferProducer(window=%p surface=%p)",
+                (void*)window, surface);
     android::detail::StrongPointer<void> producer =
-        fns.Surface__GetIGraphicBufferProducer(window);
+        fns.Surface__GetIGraphicBufferProducer(surface);
     if (!producer.get()) {
         media.ReaderDelete(reader);
         return false;

@@ -368,7 +368,11 @@ namespace android {
             // the two ABIs need separate pointers and the caller has to know
             // which one it bound.
             StrongPointer<void> (*SurfaceComposerClient__CreateDisplay)(void *name_String8, bool secure) = nullptr;
-            StrongPointer<void> (*SurfaceComposerClient__CreateVirtualDisplay)(const std::string *name, bool secure, const std::string *uniqueId, float refreshRate) = nullptr;
+            // Android 14+. The device's own symbol shows the real shape:
+            //   ...basic_string...E b b S9_ f
+            // i.e. (const std::string&, bool, bool, const std::string&, float)
+            // — two bools, not one.
+            StrongPointer<void> (*SurfaceComposerClient__CreateVirtualDisplay)(const std::string *name, bool secure, bool optimizeForPower, const std::string *uniqueId, float refreshRate) = nullptr;
             void (*SurfaceComposerClient__DestroyDisplay)(StrongPointer<void> &display) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplaySurface)(void *thiz, StrongPointer<void> &token, StrongPointer<void> &bufferProducer) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplayLayerStack)(void *thiz, StrongPointer<void> &token, uint32_t layerStack) = nullptr;
@@ -1051,7 +1055,8 @@ namespace android {
                 if (f.SurfaceComposerClient__CreateVirtualDisplay) {
                     const std::string n(name);
                     const std::string uniqueId;
-                    return f.SurfaceComposerClient__CreateVirtualDisplay(&n, secure, &uniqueId, 0.0f);
+                    // (name, isSecure, optimizeForPower, uniqueId, requestedRefreshRate)
+                    return f.SurfaceComposerClient__CreateVirtualDisplay(&n, secure, false, &uniqueId, 0.0f);
                 }
                 if (f.SurfaceComposerClient__CreateDisplay) {
                     String8 n(name);
