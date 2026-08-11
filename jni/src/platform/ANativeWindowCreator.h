@@ -387,7 +387,14 @@ namespace android {
             // contents, to be parented onto whichever layer stack should show
             // it. This is how modern SurfaceFlinger mirrors, having moved away
             // from two displays simply sharing one layer stack.
-            StrongPointer<void> (*SurfaceComposerClient__MirrorDisplay)(ui::PhysicalDisplayId displayId) = nullptr;
+            //
+            // Non-static despite appearances: it issues its binder call
+            // through the client's own mClient member, so `this` comes first.
+            // C++ manglings do not encode staticness, so the symbol name for a
+            // static and a member overload is identical and gives no hint —
+            // calling it without `this` puts displayId where the object should
+            // be and segfaults on the first member access.
+            StrongPointer<void> (*SurfaceComposerClient__MirrorDisplay)(void *thiz, ui::PhysicalDisplayId displayId) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Show)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Hide)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
@@ -1029,7 +1036,7 @@ namespace android {
             SurfaceControl MirrorDisplay(ui::PhysicalDisplayId id) {
                 auto fn = Functionals::GetInstance().SurfaceComposerClient__MirrorDisplay;
                 if (nullptr == fn) return {};
-                return SurfaceControl{fn(id).get()};
+                return SurfaceControl{fn(data, id).get()};
             }
 
             static bool MirrorDisplaySupported() {
