@@ -193,19 +193,6 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
                 okSurf, okStack, layerStack, okProj,
                 srcWidth, srcHeight, width, height, applyRc);
 
-    // Read our own display's state back. getDisplayState works on any display
-    // token, so it reports what SurfaceFlinger actually stored rather than what
-    // we believe we sent. SF listing no layers for this display points at the
-    // layer stack never taking effect — if it stayed at the UINT32_MAX default
-    // it would match nothing, which is exactly the symptom.
-    {
-        android::detail::ui::DisplayState vs{};
-        const bool got = composer.GetDisplayStateOf(token, &vs);
-        MIRROR_STEP("readback: query=%d layerStack=%u (want %u) orientation=%d rect=%dx%d",
-                    got, vs.layerStack.id, layerStack, (int)vs.orientation,
-                    vs.layerStackSpaceRect.width, vs.layerStackSpaceRect.height);
-    }
-
     MIRROR_STEP("6/6 running");
     m_Window = window;
 
@@ -287,6 +274,19 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
             // these would reflect what it asked for; unchanged values mean the
             // display exists and the transaction was accepted, but nothing on
             // SF's side ever touched our buffer queue.
+            // Now that SurfaceFlinger has long since processed the
+            // transaction, ask what it actually stored for our display.
+            // Immediately after apply() this raced: apply is asynchronous, so
+            // the display did not exist yet and the query simply failed.
+            android::detail::ui::DisplayState vs{};
+            android::detail::StrongPointer<void> tok{};
+            tok.pointer = m_Token;
+            const bool got =
+                android::ANativeWindowCreator::GetComposerInstance().GetDisplayStateOf(tok, &vs);
+            MIRROR_STEP("readback: query=%d layerStack=%u orientation=%d rect=%dx%d",
+                        got, vs.layerStack.id, (int)vs.orientation,
+                        vs.layerStackSpaceRect.width, vs.layerStackSpaceRect.height);
+
             ANativeWindow* w = static_cast<ANativeWindow*>(m_Window);
             MIRROR_STEP("acquire still empty after %llu tries, rc=%d; queue now %dx%d fmt=%d",
                         (unsigned long long)m_AcquireMisses, rc,

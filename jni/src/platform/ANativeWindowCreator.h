@@ -375,7 +375,7 @@ namespace android {
             StrongPointer<void> (*SurfaceComposerClient__CreateVirtualDisplay)(const std::string *name, bool secure, bool optimizeForPower, const std::string *uniqueId, float refreshRate) = nullptr;
             void (*SurfaceComposerClient__DestroyDisplay)(StrongPointer<void> &display) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplaySurface)(void *thiz, StrongPointer<void> &token, StrongPointer<void> &bufferProducer) = nullptr;
-            void *(*SurfaceComposerClient__Transaction__SetDisplayLayerStack)(void *thiz, StrongPointer<void> &token, uint32_t layerStack) = nullptr;
+            void *(*SurfaceComposerClient__Transaction__SetDisplayLayerStack)(void *thiz, StrongPointer<void> &token, ui::LayerStack layerStack) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetDisplayProjection)(void *thiz, StrongPointer<void> &token, int32_t orientation, const ui::Rect *layerStackRect, const ui::Rect *displayRect) = nullptr;
             // ANativeWindow is an android::Surface; this hands back the
             // producer end to attach to the virtual display.
@@ -842,7 +842,9 @@ namespace android {
             bool SetDisplayLayerStack(StrongPointer<void> &token, uint32_t layerStack) {
                 auto fn = Functionals::GetInstance().SurfaceComposerClient__Transaction__SetDisplayLayerStack;
                 if (nullptr == fn) return false;
-                fn(data, token, layerStack);
+                ui::LayerStack ls{};
+                ls.id = layerStack;
+                fn(data, token, ls);
                 return true;
             }
 
