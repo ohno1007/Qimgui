@@ -580,6 +580,13 @@ void DrawUi(UiState* state, bool* keep_running) {
         const float t01     = (now - state->exit_anim_start) / 1.35f;
         const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
 
+        // This path returns before the pane submission below ever runs, so the
+        // count has to be cleared here too — leaving it alone meant the
+        // renderer kept drawing whatever was submitted on the last normal
+        // frame, which is the slab of glass still sitting there after the
+        // window had come apart.
+        state->glass_count = 0;
+
         ripple::DrawAll();
         dissolve::Step(dt, clamped,
                       (ImTextureID)(uintptr_t)state->scene_snapshot_id);
