@@ -78,11 +78,14 @@ const MediaNdk& Media() {
 // actually matters is whether SF created the display at all — and only SF can
 // answer that.
 void DumpSurfaceFlingerDisplays() {
-    FILE* pipe = ::popen("dumpsys SurfaceFlinger --display-id 2>/dev/null", "r");
+    // The full state of *our* display, not just its id. screenrecord drives
+    // this same path successfully, so the answer is in whatever SurfaceFlinger
+    // records differently for ours — power mode, attached surface, layer stack.
+    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -A12 AImGui", "r");
     if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
     char line[512];
     int printed = 0;
-    while (std::fgets(line, sizeof(line), pipe) && printed < 8) {
+    while (std::fgets(line, sizeof(line), pipe) && printed < 40) {
         std::fprintf(stderr, "[sf] %s", line);
         ++printed;
     }
