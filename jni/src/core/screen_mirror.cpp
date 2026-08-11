@@ -196,29 +196,33 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // Powering on is what finally made SurfaceFlinger attach to our producer
     // (the self-test's ANativeWindow_lock started failing with EINVAL once the
     // queue was connected elsewhere). It does not do this on its own here.
+    MIRROR_STEP("5a power on");
     const bool poweredOn = composer.SetDisplayPowerMode(token, /*ON=*/2);
 
-    // Mirror the physical display into a layer and park it on our stack, which
-    // gives this display something to composite.
+    // Mirror the physical display into a layer parked on our stack, so this
+    // display has exactly one thing to composite and it is the screen.
+    MIRROR_STEP("5b power=%d, mirrorDisplay symbol=%d; querying display id",
+                poweredOn,
+                android::detail::SurfaceComposerClient::MirrorDisplaySupported());
     android::detail::ui::PhysicalDisplayId pid{};
-    bool mirrored = false;
-    if (android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid)) {
+    const bool gotPid = android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid);
+    MIRROR_STEP("5c display id: got=%d value=%llu", gotPid,
+                (unsigned long long)pid.value);
+
+    if (gotPid && android::detail::SurfaceComposerClient::MirrorDisplaySupported()) {
+        MIRROR_STEP("5d calling mirrorDisplay");
         m_MirrorLayer = composer.MirrorDisplay(pid).data;
+        MIRROR_STEP("5e mirrorDisplay -> %p", m_MirrorLayer);
         if (m_MirrorLayer) {
             android::detail::SurfaceComposerClientTransaction mt;
             android::detail::StrongPointer<void> mp{};
             mp.pointer = m_MirrorLayer;
             mt.SetLayerStack(mp, layerStack);
             mt.Show(mp);
-            mt.Apply(false, false);
-            mirrored = true;
+            const int32_t mrc = mt.Apply(false, false);
+            MIRROR_STEP("5f mirror layer -> stack %u, apply rc=%d", layerStack, mrc);
         }
     }
-    MIRROR_STEP("power on: %d, mirrorDisplay supported=%d layer=%p -> stack %u",
-                poweredOn,
-                android::detail::SurfaceComposerClient::MirrorDisplaySupported(),
-                m_MirrorLayer, layerStack);
-    (void)mirrored;
 
     MIRROR_STEP("6/6 running");
     m_Window = window;
