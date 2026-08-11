@@ -23,9 +23,17 @@ namespace {
 // this project already hit with linker namespaces. Loading it lazily also
 // keeps the build at API 24 instead of forcing 26 on everyone, and turns "this
 // device can't do it" into a disabled feature rather than a failure.
-constexpr int32_t  kMediaOk            = 0;
-constexpr int32_t  kFormatPrivate      = 0x22;      // AIMAGE_FORMAT_PRIVATE
-constexpr uint64_t kUsageGpuSampled    = 1ULL << 8; // GPU_SAMPLED_IMAGE
+constexpr int32_t  kMediaOk         = 0;
+constexpr int32_t  kFormatPrivate   = 0x22;      // AIMAGE_FORMAT_PRIVATE
+constexpr uint64_t kUsageGpuSampled = 1ULL << 8; // GPU_SAMPLED_IMAGE
+constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour output)
+
+// Both halves are required. SAMPLED is for us — we read these buffers as a
+// texture. FRAMEBUFFER is for SurfaceFlinger, which composites *into* them and
+// therefore needs them usable as a render target. Requesting only SAMPLED
+// leaves the compositor with nothing it can draw to, and the display sits
+// there producing no frames at all rather than reporting an error.
+constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer;
 
 struct MediaNdk {
     int32_t (*ReaderNewWithUsage)(int32_t w, int32_t h, int32_t fmt,
@@ -71,12 +79,13 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     if (!media.ok) return false;
     if (!android::ANativeWindowCreator::ScreenCaptureSupported()) return false;
 
-    // PRIVATE format keeps the buffers in whatever layout the GPU prefers — we
-    // only ever sample them, never touch them from the CPU, so there is no
-    // reason to make the compositor convert into a linear layout.
-    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d", width, height);
+    // PRIVATE format keeps the buffers in whatever layout the GPU prefers —
+    // they are only ever composited into and sampled, never touched from the
+    // CPU, so there is no reason to force a linear layout.
+    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d usage=0x%llx", width, height,
+                (unsigned long long)kMirrorUsage);
     void* reader = nullptr;
-    if (media.ReaderNewWithUsage(width, height, kFormatPrivate, kUsageGpuSampled,
+    if (media.ReaderNewWithUsage(width, height, kFormatPrivate, kMirrorUsage,
                                  /*maxImages=*/3, &reader) != kMediaOk || !reader) {
         return false;
     }
@@ -179,6 +188,7 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
     // flight, so it is only released once a newer one has arrived.
     if (m_Image) media.ImageDelete(m_Image);
     m_Image = image;
+    if (m_Frames == 0) MIRROR_STEP("first frame acquired");
     ++m_Frames;
 
     AHardwareBuffer* buffer = nullptr;
