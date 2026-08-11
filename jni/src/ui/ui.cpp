@@ -466,17 +466,19 @@ void UpdateSpring(float* pos, float* vel, float target, float dt) {
 
 
 // ─── Liquid glass ────────────────────────────────────────────────────────
-// Draws the live screen behind the window as if seen through a thick pane of
-// glass: the middle is clear, and towards the rim the image bends and
-// compresses the way it does through a rounded edge, finished with a specular
-// highlight along the lit side.
+// The window as a pane of glass over the live screen. Apple's description of
+// the material is the useful specification here: earlier "frosted" materials
+// scattered light, whereas this one bends and *concentrates* it. So the middle
+// stays genuinely clear rather than blurred, and presence is conveyed entirely
+// at the rim — by lensing, by the bright caustic where bent rays pile up, by
+// colour splitting slightly as glass disperses it, and by a specular highlight
+// on the lit side.
 //
-// The refraction is done per-vertex over a tessellated quad rather than in a
-// shader. A custom pipeline would have to be written twice, once per backend,
-// and hooked into the bloom composite; a grid rides ImGui's existing textured
-// path and costs a few hundred vertices. The distortion is smooth and
-// low-frequency, so evaluating it per-vertex and letting the rasteriser
-// interpolate is visually indistinguishable from doing it per-pixel.
+// It is drawn per-vertex over a tessellated quad rather than in a shader: a
+// custom pipeline would need writing once per backend and threading through
+// the bloom composite, while a grid rides ImGui's existing textured path. The
+// distortion is smooth and low-frequency, so evaluating it at grid points and
+// letting the rasteriser interpolate is indistinguishable from per-pixel.
 namespace glass {
 
 // Signed distance to a rounded box centred on the origin. Negative inside.
@@ -490,24 +492,21 @@ float SdRoundedBox(const ImVec2& p, const ImVec2& half, float r) {
     return (inside < 0.0f ? inside : 0.0f) + outside - r;
 }
 
-void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size,
-          float rounding, float display_w, float display_h, float alpha) {
-    if (!tex || size.x < 4.0f || size.y < 4.0f) return;
-    if (display_w <= 0.0f || display_h <= 0.0f) return;
+constexpr int   kCells     = 28;
+constexpr float kEdgeWidth = 60.0f;  // how far in the bending reaches, px
+constexpr float kBend      = 1.15f;  // rim lensing strength
+constexpr float kCentreMag = 0.018f; // thick glass magnifies slightly throughout
 
-    constexpr int   kCells     = 24;    // grid resolution
-    constexpr float kEdgeWidth = 46.0f; // how far in the bending reaches, px
-    constexpr float kBend      = 0.42f; // how hard the rim pulls the image
-
-    const ImVec2 half(size.x * 0.5f, size.y * 0.5f);
-    const ImVec2 centre(pos.x + half.x, pos.y + half.y);
-    const int    nx = kCells + 1, ny = kCells + 1;
-
+// One lensed pass over the pane. `bendScale` shifts how hard this pass bends,
+// which is what separates the colour channels; `edgeOnly` fades the pass out
+// towards the centre so the dispersion copies only tint the rim.
+void Pass(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size,
+          const ImVec2& half, const ImVec2& centre, float rounding,
+          float dw, float dh, ImU32 col, float bendScale, bool edgeOnly) {
+    const int nx = kCells + 1, ny = kCells + 1;
     dl->PushTexture(ImTextureRef(tex));
     dl->PrimReserve(kCells * kCells * 6, nx * ny);
-
     const unsigned int base = dl->_VtxCurrentIdx;
-    const ImU32 col = IM_COL32(255, 255, 255, (int)(alpha * 255.0f));
 
     for (int j = 0; j < ny; ++j) {
         for (int i = 0; i < nx; ++i) {
@@ -515,12 +514,10 @@ void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size
             const float v = (float)j / (float)kCells;
             const ImVec2 p(pos.x + size.x * u, pos.y + size.y * v);
 
-            // Distance to the rim, and the direction pointing away from it.
             const ImVec2 rel(p.x - centre.x, p.y - centre.y);
             const float  d = SdRoundedBox(rel, half, rounding);
 
-            // Gradient of the distance field by central difference — the
-            // surface normal of the glass edge at this point.
+            // Gradient of the distance field is the glass surface normal here.
             constexpr float kEps = 1.5f;
             const float gx = SdRoundedBox(ImVec2(rel.x + kEps, rel.y), half, rounding) -
                              SdRoundedBox(ImVec2(rel.x - kEps, rel.y), half, rounding);
@@ -528,20 +525,31 @@ void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size
                              SdRoundedBox(ImVec2(rel.x, rel.y - kEps), half, rounding);
             const float glen = std::sqrt(gx * gx + gy * gy) + 1e-5f;
 
-            // Ramps from 0 well inside the pane to 1 at the very rim, so the
-            // centre stays honest and only the border refracts.
-            float t = 1.0f + d / kEdgeWidth;   // d is negative inside
-            if (t < 0.0f) t = 0.0f;
-            if (t > 1.0f) t = 1.0f;
-            const float bend = t * t * kEdgeWidth * kBend;
+            float e = 1.0f + d / kEdgeWidth;          // 0 deep inside, 1 at rim
+            if (e < 0.0f) e = 0.0f;
+            if (e > 1.0f) e = 1.0f;
 
-            // Sample from further out near the rim: the border magnifies and
-            // drags in what lies just outside the window, as thick glass does.
-            const ImVec2 sp(p.x + (gx / glen) * bend, p.y + (gy / glen) * bend);
-            dl->PrimWriteVtx(p, ImVec2(sp.x / display_w, sp.y / display_h), col);
+            // A rounded bevel, not a linear ramp: the surface is almost flat
+            // until close to the rim and then turns over hard, which is what
+            // makes the edge read as a lens rather than a smear.
+            const float bevel = e * e * (3.0f - 2.0f * e) * e;
+            const float bend  = bevel * kEdgeWidth * kBend * bendScale;
+
+            // Sample from further out along the normal, so the rim drags in and
+            // compresses what lies just outside the window.
+            ImVec2 sp(p.x + (gx / glen) * bend, p.y + (gy / glen) * bend);
+            // ...plus a touch of overall magnification, as thick glass has.
+            sp.x += (centre.x - p.x) * kCentreMag;
+            sp.y += (centre.y - p.y) * kCentreMag;
+
+            ImU32 c = col;
+            if (edgeOnly) {
+                const int a = (int)(((col >> IM_COL32_A_SHIFT) & 0xFF) * bevel);
+                c = (col & ~IM_COL32_A_MASK) | ((ImU32)a << IM_COL32_A_SHIFT);
+            }
+            dl->PrimWriteVtx(p, ImVec2(sp.x / dw, sp.y / dh), c);
         }
     }
-
     for (int j = 0; j < kCells; ++j) {
         for (int i = 0; i < kCells; ++i) {
             const unsigned int i0 = base + (unsigned int)(j * nx + i);
@@ -553,16 +561,61 @@ void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size
         }
     }
     dl->PopTexture();
+}
 
-    // Specular rim: a bright hairline along the top-left, fading round to the
-    // unlit side, which is what reads as "this has thickness".
+void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size,
+          float rounding, float display_w, float display_h, float alpha) {
+    if (!tex || size.x < 4.0f || size.y < 4.0f) return;
+    if (display_w <= 0.0f || display_h <= 0.0f) return;
+
+    const ImVec2 half(size.x * 0.5f, size.y * 0.5f);
+    const ImVec2 centre(pos.x + half.x, pos.y + half.y);
     const ImVec2 mx(pos.x + size.x, pos.y + size.y);
-    // 1.92.8 swapped thickness/flags on these; the old order is =delete'd.
+    const int    A = (int)(alpha * 255.0f);
     constexpr float kPi = 3.14159265f;
-    dl->AddRect(pos, mx, IM_COL32(255, 255, 255, (int)(70 * alpha)), rounding, 2.0f);
-    dl->PathArcTo(ImVec2(pos.x + rounding, pos.y + rounding), rounding, kPi, kPi * 1.5f, 12);
-    dl->PathLineTo(ImVec2(mx.x - rounding, pos.y));
-    dl->PathStroke(IM_COL32(255, 255, 255, (int)(150 * alpha)), 1.5f);
+
+    // Depth: a soft shadow so the pane floats above the screen instead of
+    // being painted onto it.
+    for (int i = 6; i >= 1; --i) {
+        const float o = (float)i * 2.0f;
+        dl->AddRect(ImVec2(pos.x - o, pos.y - o + 3.0f),
+                    ImVec2(mx.x + o, mx.y + o + 3.0f),
+                    IM_COL32(0, 0, 0, (int)(7 * alpha)), rounding + o, o * 0.9f);
+    }
+
+    // Main refracted image, then two rim-only copies bent slightly more and
+    // less. Glass disperses wavelengths by different amounts, and that colour
+    // splitting at the border is a large part of why something reads as glass
+    // rather than as a translucent panel.
+    Pass(dl, tex, pos, size, half, centre, rounding, display_w, display_h,
+         IM_COL32(255, 255, 255, A), 1.0f, false);
+    Pass(dl, tex, pos, size, half, centre, rounding, display_w, display_h,
+         IM_COL32(120, 180, 255, (int)(A * 0.40f)), 1.35f, true);
+    Pass(dl, tex, pos, size, half, centre, rounding, display_w, display_h,
+         IM_COL32(255, 170, 120, (int)(A * 0.34f)), 0.62f, true);
+
+    // Caustic: bent rays pile up just inside the rim, so light concentrates
+    // there into a bright band. This is the "concentrates light" half of the
+    // material, and the single strongest cue that the edge has thickness.
+    dl->AddRect(ImVec2(pos.x + 1.5f, pos.y + 1.5f), ImVec2(mx.x - 1.5f, mx.y - 1.5f),
+                IM_COL32(255, 255, 255, (int)(90 * alpha)), rounding - 1.5f, 3.0f);
+    dl->AddRect(pos, mx, IM_COL32(255, 255, 255, (int)(38 * alpha)), rounding, 1.0f);
+
+    // Specular: a bright sweep along the top-left, as if lit from up-left, and
+    // a fainter answering glint on the opposite corner.
+    dl->PathArcTo(ImVec2(pos.x + rounding, pos.y + rounding), rounding - 1.0f,
+                  kPi, kPi * 1.5f, 14);
+    dl->PathLineTo(ImVec2(pos.x + size.x * 0.55f, pos.y + 1.0f));
+    dl->PathStroke(IM_COL32(255, 255, 255, (int)(190 * alpha)), 2.0f);
+
+    dl->PathArcTo(ImVec2(pos.x + rounding, pos.y + rounding), rounding - 1.0f,
+                  kPi * 0.75f, kPi, 10);
+    dl->PathLineTo(ImVec2(pos.x + 1.0f, pos.y + size.y * 0.45f));
+    dl->PathStroke(IM_COL32(255, 255, 255, (int)(120 * alpha)), 1.5f);
+
+    dl->PathArcTo(ImVec2(mx.x - rounding, mx.y - rounding), rounding - 1.0f,
+                  0.0f, kPi * 0.5f, 12);
+    dl->PathStroke(IM_COL32(255, 255, 255, (int)(70 * alpha)), 1.5f);
 }
 
 } // namespace glass
@@ -729,11 +782,11 @@ void DrawUi(UiState* state, bool* keep_running) {
         ImGui::SetNextWindowBgAlpha(lt);
     } else if (state->screen_texture_id) {
         // The refracted screen is drawn on the background draw list, which
-        // renders before any window — so the window's own fill sits on top of
-        // it. At the dark theme's 94% opaque WindowBg that hides the glass
-        // completely, which just looks black. Let most of it through and keep
-        // a thin wash for legibility.
-        ImGui::SetNextWindowBgAlpha(0.18f);
+        // renders before any window, so the window's own fill sits on top of
+        // it. Keep that fill to a whisper: this material is meant to be clear
+        // in the middle and to announce itself at the rim, so anything more
+        // than a faint wash reads as a tinted panel rather than as glass.
+        ImGui::SetNextWindowBgAlpha(0.08f);
     } else if (state->backdrop_blur && state->backdrop_blur_supported) {
         // Same reasoning for SurfaceFlinger's own blur, which is also behind us.
         ImGui::SetNextWindowBgAlpha(0.45f);
