@@ -16,6 +16,7 @@ enum class Page {
 
 struct PageItem {
     Page        id;
+    const char* icon;    // from ui/icons.h; may be null
     const char* label;
 };
 

@@ -29,12 +29,15 @@
 namespace aimgui {
 
 // ─── Nav entries ─────────────────────────────────────────────────────────
+// Icon and label are separate so the row can lay them out on a fixed pixel
+// grid — baked into one string they were only ever separable by counting
+// spaces, which lands wherever the font happens to put it.
 const PageItem kPages[] = {
-    { Page::Dashboard,   ICON_FA_GAUGE       u8"   概览" },
-    { Page::Widgets,     ICON_FA_SLIDERS     u8"   控件" },
-    { Page::Window,      ICON_FA_WINDOW      u8"   窗口" },
-    { Page::Performance, ICON_FA_BOLT        u8"   性能" },
-    { Page::About,       ICON_FA_CIRCLE_INFO u8"   关于" },
+    { Page::Dashboard,   ICON_FA_GAUGE,       u8"概览" },
+    { Page::Widgets,     ICON_FA_SLIDERS,     u8"控件" },
+    { Page::Window,      ICON_FA_WINDOW,      u8"窗口" },
+    { Page::Performance, ICON_FA_BOLT,        u8"性能" },
+    { Page::About,       ICON_FA_CIRCLE_INFO, u8"关于" },
 };
 const int kPagesCount = (int)(sizeof(kPages) / sizeof(kPages[0]));
 

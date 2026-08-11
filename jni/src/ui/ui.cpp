@@ -468,8 +468,15 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // them, so its top edge is lensed too and the first entry has to clear it.
     // The lag needs no allowance here: the labels move with the pane.
     constexpr float kInnerPadY     = 44.0f;
-    constexpr float kSelectableH   = 44.0f;
-    constexpr float kFooterH       = 110.0f;
+    constexpr float kSelectableH   = 48.0f;
+    // Inside a row, measured from the capsule's own edge. SelectableTextAlign
+    // cannot express this: it is a fraction of the *leftover* space, so the
+    // inset moves with the label's width — for these labels it worked out at
+    // about 7px, which is why the icons sat against the capsule. The row lays
+    // itself out instead.
+    constexpr float kRowPadX       = 24.0f;
+    constexpr float kRowIconGap    = 16.0f;
+    constexpr float kFooterH       = 150.0f;
     constexpr float kBottomMargin  = 36.0f;
 
     // The selected entry is drawn below as a capsule, so ImGui's own Header
@@ -487,10 +494,10 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,  sel_bg);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,       ImVec2(kInnerPadX, kInnerPadY));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,         ImVec2(0, 4));
-    // Inset the label inside the highlight rect so text doesn't touch the
-    // selected (blue) background's left edge.
-    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.08f, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,         ImVec2(0, 8));
+    // Unused now that the row draws its own content, but the Selectable still
+    // reads it, so keep it neutral.
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,        ImVec2(0, 6));
 
     // Ride the column's lag, so the labels stay put on the pane while the whole
@@ -510,36 +517,64 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     const ImU32 accent = ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 1.0f));
     for (int i = 0; i < kPagesCount; ++i) {
         const PageItem& p = kPages[i];
-        bool selected = (current == p.id);
-        if (ImGui::Selectable(p.label, selected, 0, ImVec2(0, kSelectableH))) {
+        const bool selected = (current == p.id);
+        // The Selectable is the hit area and nothing else — an empty visible
+        // label, because the row places its own icon and text below.
+        ImGui::PushID(i);
+        if (ImGui::Selectable("##nav", selected, 0, ImVec2(0, kSelectableH))) {
             current = p.id;
         }
         ripple::TouchLastItem();
+
         // A capsule rather than a filled bar, and the accent lives *in* it
         // instead of as a stripe alongside — a separate bar would collide with
         // the capsule's rounded end, and the colour reads better as the pill
         // being lit than as a marker stuck to its edge.
         const ImVec2 a = ImGui::GetItemRectMin();
         const ImVec2 b = ImGui::GetItemRectMax();
+        const bool hovered = ImGui::IsItemHovered();
         if (selected) {
             ImGui::GetWindowDrawList()->AddRectFilled(
                 a, b, (accent & ~IM_COL32_A_MASK) | (46u << IM_COL32_A_SHIFT),
                 (b.y - a.y) * 0.5f);
             chrome::Rect(a, b, -1.0f, false, true);
-        } else if (ImGui::IsItemHovered()) {
+        } else if (hovered) {
             chrome::Rect(a, b, -1.0f, true, false);
         }
+
+        // Icon and label on a fixed pixel grid, both centred on the row's
+        // middle so a tall icon and a short label share one baseline.
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float  cy  = (a.y + b.y) * 0.5f;
+        const ImU32  col = ImGui::GetColorU32(
+            ImVec4(1, 1, 1, selected ? 1.0f : (hovered ? 0.92f : 0.78f)));
+        float x = a.x + kRowPadX;
+        if (p.icon && *p.icon) {
+            const ImVec2 is = ImGui::CalcTextSize(p.icon);
+            dl->AddText(ImVec2(x, cy - is.y * 0.5f), col, p.icon);
+            x += is.x + kRowIconGap;
+        }
+        const ImVec2 ls = ImGui::CalcTextSize(p.label);
+        dl->AddText(ImVec2(x, cy - ls.y * 0.5f), col, p.label);
+        ImGui::PopID();
     }
 
     float remaining = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - kFooterH - kBottomMargin;
     if (remaining > 0) ImGui::Dummy(ImVec2(0, remaining));
 
+    // The footer sits on the same grid as the rows: the rule and the backend
+    // name line up with the icons above them rather than starting at the
+    // column's edge, and the rule gets air on both sides instead of being
+    // sandwiched between the last row and the text under it.
+    ImGui::Indent(kRowPadX);
+    ImGui::Dummy(ImVec2(0, 6));
     ImGui::Separator();
-    ImGui::Spacing();
+    ImGui::Dummy(ImVec2(0, 10));
     ImGui::TextDisabled("%s", state->renderer_name ? state->renderer_name : "?");
-    ImGui::Spacing();
+    ImGui::Unindent(kRowPadX);
+    ImGui::Dummy(ImVec2(0, 14));
 
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 12));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 14));
     const bool exit_pressed = ImGui::Button(ICON_FA_POWER u8"  退出", ImVec2(-1, 0));
     chrome::LastItem();
     if (exit_pressed) {
