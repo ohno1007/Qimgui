@@ -408,7 +408,13 @@ void ApplyStyleOnce() {
 // ─── Page contents live in main_ui.cpp ──────────────────────────────────
 // Width of the nav column. Named so the glass pane behind it and the child
 // itself cannot drift apart.
-constexpr float kSidebarW = 230.0f;
+constexpr float kSidebarW = 250.0f;
+
+// The nav column is a slab in its own right now, but its left and bottom edges
+// still sat flush against the window's while every other edge in the layout has
+// a slot. Inset them by the same amount so the column is separated on all four
+// sides rather than jammed into the corner.
+constexpr float kNavInset = 14.0f;
 
 // How far the nav column's pane and the title/content pane are held apart, over
 // what radius the field between them is smoothed, and the strand left spanning
@@ -454,14 +460,17 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // right edge is the tighter of the two now that the slot eats half its
     // width out of this column, so the padding is set by that side and the
     // left simply inherits it.
-    constexpr float kInnerPadX     = 30.0f;
+    // Measured from the pane's edge, not the child's: the two differ by the
+    // window padding on the left and by the inset on the right, and it is the
+    // pane the eye reads the text against.
+    constexpr float kInnerPadX     = 38.0f;
     // The nav column's pane starts below the title bar with a slot between
     // them, so its top edge is lensed too and the first entry has to clear it.
     // The lag needs no allowance here: the labels move with the pane.
-    constexpr float kInnerPadY     = 30.0f;
+    constexpr float kInnerPadY     = 44.0f;
     constexpr float kSelectableH   = 44.0f;
     constexpr float kFooterH       = 110.0f;
-    constexpr float kBottomMargin  = 16.0f;
+    constexpr float kBottomMargin  = 36.0f;
 
     // The selected entry is drawn below as a capsule, so ImGui's own Header
     // fills stay out of it entirely — a slab of flat blue was the single most
@@ -967,6 +976,11 @@ void DrawUi(UiState* state, bool* keep_running) {
     // radius, because a smooth union closes at the midline only past 2*gap —
     // so at rest the two are joined by a thread rather than being separate,
     // and it is the drag pulling them apart that breaks it.
+    // How far the island slides at a full lean. Big enough that tipping the
+    // phone visibly carries it, small enough that it cannot be tipped off the
+    // screen — and it is only ever applied while the island is the island, so
+    // an open window never wanders.
+    constexpr float kTiltRange = 70.0f;
     constexpr float kDotD      = 56.0f;
     constexpr float kDotGap    = 12.0f;
     constexpr float kDotMerge  = 30.0f;
@@ -980,9 +994,45 @@ void DrawUi(UiState* state, bool* keep_running) {
     // is gone by the time the card is open.
     const float dot_t = lt < 0.22f ? 1.0f - lt / 0.22f : 0.0f;
     const float pair_shift = (kDotD + kDotGap) * 0.5f * dot_t;
-    const ImVec2 island_pos = l2d_active
-        ? ImVec2(state->ball_pos.x - kIslandW * 0.5f, state->ball_pos.y - kIslandH * 0.5f)
+
+    // Lean carries the island. Faded out well before the window opens, and run
+    // through a spring so it arrives with some weight rather than tracking the
+    // sensor. Because this moves win_pos, the frame-to-frame velocity it
+    // produces feeds the same lag the drag does — so the companion dot swings
+    // behind the tilt too, with no extra machinery.
+    const float tilt_w = 1.0f - (lt < 0.55f ? lt / 0.55f : 1.0f);
+    UpdateSpring(&state->island_tilt.x, &state->island_tilt_vel.x,
+                 state->tilt_x * kTiltRange * tilt_w, dt);
+    UpdateSpring(&state->island_tilt.y, &state->island_tilt_vel.y,
+                 state->tilt_y * kTiltRange * tilt_w, dt);
+
+    const ImVec2 island_base = l2d_active
+        ? ImVec2(state->ball_pos.x - kIslandW * 0.5f,
+                 state->ball_pos.y - kIslandH * 0.5f)
         : ImVec2(dw * 0.5f - kIslandW * 0.5f - pair_shift, kIslandTop);
+
+    // Hold the lean inside the screen, dot included, and drop the spring's
+    // velocity at the stop so it does not wind up against the edge and fire
+    // the island across the display the moment the phone comes back level.
+    // The island rests near the top, so in practice only upward travel is
+    // limited — which is what a thing already resting against a wall does.
+    {
+        const float dh_ = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
+        const float margin = 12.0f;
+        const float pair_w = kIslandW + (kDotGap + kDotD) * dot_t;
+        auto hold = [](float* v, float* vel, float lo, float hi) {
+            if (lo > hi) { *v = 0.0f; *vel = 0.0f; return; }
+            if (*v < lo) { *v = lo; if (*vel < 0.0f) *vel = 0.0f; }
+            if (*v > hi) { *v = hi; if (*vel > 0.0f) *vel = 0.0f; }
+        };
+        hold(&state->island_tilt.x, &state->island_tilt_vel.x,
+             margin - island_base.x, dw - margin - pair_w - island_base.x);
+        hold(&state->island_tilt.y, &state->island_tilt_vel.y,
+             margin - island_base.y, dh_ - margin - kIslandH - island_base.y);
+    }
+
+    const ImVec2 island_pos(island_base.x + state->island_tilt.x,
+                            island_base.y + state->island_tilt.y);
     const ImVec2 island_size(kIslandW, kIslandH);
 
     // The card: big enough to read, small enough to still feel like the island
@@ -1218,10 +1268,10 @@ void DrawUi(UiState* state, bool* keep_running) {
             // its widgets by the same offset, so the labels ride along and the
             // throw can be as far in one direction as the other.
             const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
-            a.x = win_pos.x + lag.x;
+            a.x = win_pos.x + kNavInset + lag.x;
             a.y = nav_y0 + lag.y;
-            a.w = (divide - gap * 0.5f) - win_pos.x;
-            a.h = win_b - nav_y0;
+            a.w = (divide - gap * 0.5f) - (win_pos.x + kNavInset);
+            a.h = (win_b - kNavInset) - nav_y0;
 
             // The strand is what is left of the join once the bodies are too
             // far apart for the merge alone. It necks down as the slot opens

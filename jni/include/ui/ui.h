@@ -98,6 +98,19 @@ struct UiState {
     // the slot between parted panes — so the default here absorbs it.
     float glass_clarity = 0.11f;
 
+    // Device lean from the accelerometer, roughly -1..1 per axis. Both zero
+    // when the panel is flat, and when no sensor is reachable at all — so
+    // everything reading these degrades to standing still rather than to a
+    // special case.
+    float  tilt_x = 0.0f;
+    float  tilt_y = 0.0f;
+    // Where the lean has carried the island, and the spring chasing it. The
+    // spring is what gives the island weight: the accelerometer is already
+    // low-passed, but a value that merely follows the lean reads as a readout
+    // rather than as something being tipped around.
+    ImVec2 island_tilt     = ImVec2(0, 0);
+    ImVec2 island_tilt_vel = ImVec2(0, 0);
+
     // Key-light direction for the glass, in screen space. Steered by the
     // accelerometer so the rim highlight sweeps as the panel leans; stays at
     // the fixed up-and-left default wherever no sensor is reachable.

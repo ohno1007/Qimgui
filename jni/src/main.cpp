@@ -160,6 +160,10 @@ int main() {
         if (tilt.Available()) {
             st.glass_light_x = -0.6f + tilt.x() * 0.9f;
             st.glass_light_y = -0.8f + tilt.y() * 0.9f;
+            // Same reading drives the island itself, which slides downhill as
+            // the panel leans.
+            st.tilt_x = tilt.x();
+            st.tilt_y = tilt.y();
         }
 
         if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();
