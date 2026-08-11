@@ -252,6 +252,27 @@ void DrawWindow(UiState* state) {
         u8"luma > 0.6 阈值参与抽亮、双 pass 高斯模糊后回叠到画面上。");
 
     ImGui::Spacing();
+    ImGui::SeparatorText(u8"毛玻璃背景");
+    if (state->backdrop_blur_supported) {
+        if (ImGui::Checkbox(u8"背景高斯模糊", &state->backdrop_blur)) {}
+        ripple::TouchLastItem();
+        if (state->backdrop_blur) {
+            SliderFloatGrabValue(u8"模糊半径", &state->backdrop_blur_radius,
+                                 4.0f, 120.0f, "%.0f");
+        }
+        ImGui::TextWrapped(
+            u8"由 SurfaceFlinger 在合成阶段模糊窗口背后的画面，"
+            u8"本进程每帧零开销，实时跟随屏幕刷新率。");
+    } else {
+        ImGui::TextDisabled(u8"本机不支持");
+        ImGui::TextWrapped(
+            u8"需要 Android 12+ 且 SurfaceFlinger 编译时开启了背景模糊"
+            u8"（ro.surface_flinger.supports_background_blur）。"
+            u8"低版本系统的合成器没有这个能力，只能靠自己截屏再模糊，"
+            u8"那样一次要上百毫秒，做不了实时背景。");
+    }
+
+    ImGui::Spacing();
     ImGui::SeparatorText(u8"主题");
     static int theme = 0;
     if (ImGui::Combo(u8"##theme", &theme, u8"深色\0浅色\0经典\0")) {

@@ -55,6 +55,15 @@ struct UiState {
     // Post-process bloom intensity, applied at composite. 0 = bloom off.
     float bloom_intensity = 0.75f;
 
+    // Frosted-glass backdrop. SurfaceFlinger blurs what it composites behind
+    // the window, so this costs nothing per frame — but it needs Android 12+
+    // and a compositor built with blur support. `supported` is refreshed by
+    // DrawUi each frame; when false the toggle has no effect and the UI says
+    // so, because there is no cheap way to fake it below Android 12.
+    bool  backdrop_blur           = false;
+    float backdrop_blur_radius    = 40.0f;
+    bool  backdrop_blur_supported = false;
+
     // Exit fragmentation animation: when the 退出 button is pressed, the
     // UI shatters into falling chips and the process keeps running until
     // the animation has played out (~1.2 s). DrawUi owns these.

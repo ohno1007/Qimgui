@@ -2,6 +2,7 @@
 #include "ui/main_ui.h"
 
 #include "imgui.h"
+#include "platform/ANativeWindowCreator.h"
 
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
@@ -586,6 +587,25 @@ void DrawUi(UiState* state, bool* keep_running) {
 
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
+
+    // Frosted-glass backdrop: hand SurfaceFlinger the window's current rect
+    // and let the compositor blur what is behind it. Follows the collapse /
+    // drag / resize animation for free because win_pos/win_size are already
+    // the animated values. Costs nothing per frame when unchanged — the
+    // helper only sends a transaction when the rect or radius moves.
+    state->backdrop_blur_supported = android::ANativeWindowCreator::BlurAvailable();
+    if (state->backdrop_blur_supported) {
+        const int radius = state->backdrop_blur ? (int)state->backdrop_blur_radius : 0;
+        android::detail::ui::Rect r{
+            (int32_t)win_pos.x,
+            (int32_t)win_pos.y,
+            (int32_t)(win_pos.x + win_size.x),
+            (int32_t)(win_pos.y + win_size.y),
+        };
+        android::ANativeWindowCreator::SetBackdropBlur(state->display_w > state->display_h
+                                                           ? state->display_w : state->display_h,
+                                                       radius, r);
+    }
 
     // With the Live2D character as the collapsed visual, fade the window
     // background + border in as it expands so only the character shows when

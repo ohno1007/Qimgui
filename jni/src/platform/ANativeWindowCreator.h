@@ -1492,6 +1492,66 @@ namespace android {
             return cachedMirrors.find(layerStack) != cachedMirrors.end();
         }
 
+        // ── Frosted-glass backdrop ──────────────────────────────────────
+        //
+        // A dedicated effect layer sitting one Z-step below the UI layer,
+        // cropped to the UI window's rectangle. SurfaceFlinger blurs whatever
+        // it composites behind that layer, so the cost lands in the compositor
+        // rather than this process — no capture, no readback, and the result
+        // tracks the screen at full refresh rate.
+        //
+        // Requires Android 12+ *and* a SurfaceFlinger built with blur support
+        // (ro.surface_flinger.supports_background_blur). Available() reports
+        // whether the symbols resolved; the caller is expected to fall back to
+        // a plain translucent fill when they didn't, because there is no cheap
+        // way to reproduce this below Android 12.
+        static bool BlurAvailable() {
+            return detail::Functionals::GetInstance().systemVersion >= 12 &&
+                   detail::SurfaceComposerClientTransaction::BackgroundBlurSupported();
+        }
+
+        // Applies a blur behind `rect` (in surface coordinates). radius <= 0
+        // hides the layer. Cheap to call every frame: the layer is created
+        // once, and a transaction is only sent when something actually
+        // changed.
+        static void SetBackdropBlur(int32_t surfaceSide, int32_t radius,
+                                    const detail::ui::Rect& rect) {
+            if (!BlurAvailable()) return;
+
+            static detail::SurfaceControl blurLayer;
+            static int32_t lastRadius = -1;
+            static detail::ui::Rect lastRect{-1, -1, -1, -1};
+
+            if (nullptr == blurLayer.data) {
+                if (radius <= 0) return; // don't pay for a layer nobody asked for
+                // eFXSurfaceEffect: no buffer of its own; its bounds come from
+                // the crop, which is exactly what the blur needs.
+                constexpr uint32_t kFXSurfaceEffect = 0x00020000;
+                blurLayer = GetComposerInstance().CreateSurface(
+                    "AImGuiBlur", surfaceSide, surfaceSide, kFXSurfaceEffect);
+                if (nullptr == blurLayer.data) return;
+            }
+
+            const bool sameRect = rect.left == lastRect.left && rect.top == lastRect.top &&
+                                  rect.right == lastRect.right && rect.bottom == lastRect.bottom;
+            if (radius == lastRadius && sameRect) return;
+
+            static detail::SurfaceComposerClientTransaction transaction;
+            detail::StrongPointer<void> ptr{blurLayer.data};
+
+            // One below the UI layer (created at INT_MAX) so the UI still
+            // draws on top of its own frosted backdrop.
+            transaction.SetLayer(ptr, INT_MAX - 1);
+            transaction.SetCrop(ptr, rect);
+            transaction.SetBackgroundBlurRadius(ptr, radius > 0 ? radius : 0);
+            if (radius > 0) transaction.Show(ptr);
+            else            transaction.Hide(ptr);
+            transaction.Apply(false, true);
+
+            lastRadius = radius;
+            lastRect   = rect;
+        }
+
         // Complete cleanup when application exits
         static void Cleanup() {
             SURFACE_LOG_INFO("Performing complete cleanup...");
