@@ -164,17 +164,20 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         if (composer.GetDisplayInfo(&ds)) layerStack = ds.layerStack.id;
     }
 
-    MIRROR_STEP("5/6 transaction: setDisplaySurface / LayerStack=%u / Projection", layerStack);
     android::detail::SurfaceComposerClientTransaction t;
-    t.SetDisplaySurface(token, producer);
-    t.SetDisplayLayerStack(token, layerStack);
+    const bool okSurf = t.SetDisplaySurface(token, producer);
+    const bool okStack = t.SetDisplayLayerStack(token, layerStack);
     const android::detail::ui::Rect src{0, 0, srcWidth, srcHeight};
     const android::detail::ui::Rect dst{0, 0, width, height};
-    t.SetDisplayProjection(token, /*orientation=*/0, src, dst);
+    const bool okProj = t.SetDisplayProjection(token, /*orientation=*/0, src, dst);
     // Not one-way: this transaction brings a display into existence, and a
     // fire-and-forget binder call gives SurfaceFlinger no way to report that
-    // it rejected any of it.
-    t.Apply(false, false);
+    // it rejected any of it. The status was being discarded, which is why a
+    // rejected transaction has looked identical to an accepted one all along.
+    const int32_t applyRc = t.Apply(false, false);
+    MIRROR_STEP("5/6 transaction: surface=%d stack=%d(%u) proj=%d src=%dx%d dst=%dx%d -> apply rc=%d",
+                okSurf, okStack, layerStack, okProj,
+                srcWidth, srcHeight, width, height, applyRc);
 
     MIRROR_STEP("6/6 running");
     DumpSurfaceFlingerDisplays();
