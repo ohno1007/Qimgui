@@ -1,6 +1,7 @@
 #include "ui/ui.h"
 #include "ui/main_ui.h"
 #include "ui/icons.h"
+#include "core/haptics.h"
 
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -38,6 +39,9 @@ std::vector<Entry> g_ripples;
 
 void TouchLastItem() {
     if (!ImGui::IsItemActivated()) return;
+    // Every rippling control is also every pressable control, so this is the
+    // one place a tap pulse belongs — adding it per widget would miss some.
+    haptic::Tap();
     Entry e;
     e.id       = ImGui::GetItemID();
     e.origin   = ImGui::GetIO().MousePos;
@@ -467,8 +471,8 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // itself out instead.
     constexpr float kRowPadX       = 24.0f;
     constexpr float kRowIconGap    = 16.0f;
-    constexpr float kFooterH       = 150.0f;
-    constexpr float kBottomMargin  = 16.0f;
+    constexpr float kFooterH       = 168.0f;
+    constexpr float kBottomMargin  = 34.0f;
 
     // The selected entry is drawn below as a capsule, so ImGui's own Header
     // fills stay out of it entirely — a slab of flat blue was the single most
@@ -577,6 +581,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             const ImGuiIO& io2 = ImGui::GetIO();
             dissolve::Begin(state->last_full_pos, state->last_full_size,
                            io2.DisplaySize.x, io2.DisplaySize.y);
+            haptic::Heavy();
             state->exit_anim_active      = true;
             state->exit_anim_first_frame = true;
             state->exit_anim_start       = (float)ImGui::GetTime();
@@ -990,6 +995,12 @@ void DrawUi(UiState* state, bool* keep_running) {
     }
 
     state->collapsed = (state->stage == UiState::StageIsland);
+    // One pulse per rest state actually changing, not per frame it is animating
+    // towards one.
+    if (state->stage != state->haptic_last_stage) {
+        state->haptic_last_stage = state->stage;
+        haptic::Step();
+    }
     const float target = (float)state->stage * 0.5f;
     UpdateSpring(&state->expand, &state->expand_vel, target, dt);
     const float t = state->expand;
@@ -1309,6 +1320,16 @@ void DrawUi(UiState* state, bool* keep_running) {
             const float u     = (slot - kBridgeHold) / (kBridgeSnap - kBridgeHold);
             const float uc    = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
             const float neck  = 1.0f - uc * uc * (3.0f - 2.0f * uc);
+            // The thread letting go and finding its way back are the two
+            // moments the sheet does something the eye can miss, so they are
+            // exactly what wants a nudge. Edge-triggered off a hysteresis band
+            // — comparing against a single threshold would chatter while the
+            // spring settles right on it.
+            const bool joined = state->strand_joined ? neck > 0.06f : neck > 0.35f;
+            if (joined != state->strand_joined) {
+                state->strand_joined = joined;
+                haptic::Snap();
+            }
             strand.w = slot + kStrandGrip * neck;
             strand.h = kGlassStrandH * neck;
             strand.x = nav_r - kStrandGrip * neck * 0.5f;
@@ -1447,12 +1468,15 @@ void DrawUi(UiState* state, bool* keep_running) {
         if (full_alpha > 0.01f) {
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, full_alpha);
 
-            static Page page = Page::Dashboard;
+            // Held in UiState rather than a static, so the choice survives a
+            // restart along with everything else.
+            Page page = (Page)state->nav_page;
             // No SameLine: DrawSidebar hands the cursor back itself, and
             // SameLine would recompute it from the child's own advance —
             // which carries the column's lag and would drag the content
             // along with it.
             DrawSidebar(page, keep_running, state);
+            state->nav_page = (int)page;
             DrawContent(state, page);
 
             ImGui::PopStyleVar();

@@ -22,6 +22,14 @@ struct UiState {
     // Frame-rate cap. 0 = vsync (panel refresh).
     int target_fps = 0;
 
+    // Which nav entry is showing. Lives here rather than as a static inside
+    // DrawSidebar so it can be persisted with everything else.
+    int nav_page = 0;
+
+    // Vibration on taps and stage changes. Off is a legitimate preference, and
+    // it is also what a device with no reachable vibrator ends up looking like.
+    bool haptics_enabled = true;
+
     // Current visible display size in ImGui coordinates, so the Dynamic
     // Island can re-center itself on portrait↔landscape rotation.
     int display_w = 0;
@@ -131,6 +139,10 @@ struct UiState {
     ImVec2 glass_nav_offset  = ImVec2(0, 0);
     ImVec2 glass_prev_pos    = ImVec2(0, 0);
     bool   glass_pos_valid   = false;
+    // Edge detection for the feedback pulses: the last rest state a pulse was
+    // fired for, and whether the strand was joined when we last looked.
+    int    haptic_last_stage = StageWindow;
+    bool   strand_joined     = true;
 
     // Live screen mirror: SurfaceFlinger composites the screen into buffers
     // we own, giving sampleable pixels for a refracting backdrop. The frame

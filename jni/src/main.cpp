@@ -2,6 +2,8 @@
 #include "core/font.h"
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
+#include "core/config.h"
+#include "core/haptics.h"
 #include "core/screen_mirror.h"
 #include "core/sensor_tilt.h"
 
@@ -52,6 +54,14 @@ int main() {
 
     aimgui::UiState st;
     st.display_w = info.width; st.display_h = info.height;
+    // Before the window is built: permeate_record decides how the surface is
+    // created, so it has to be known by then rather than applied afterwards
+    // through the rebuild path.
+    aimgui::config::Load(&st);
+
+    aimgui::Haptics haptics;
+    haptics.Init();
+    aimgui::haptic::Install(&haptics, &st.haptics_enabled);
     // Defaults for the three rest states. All optional — null on any of these
     // falls back to what the UI showed before there was a way to set them.
     st.island_icon = ICON_FA_BOLT;
@@ -89,6 +99,11 @@ int main() {
     tilt.Init();
     aimgui::FramePacer pacer;
     auto last = clock::now();
+    // Settings are written a beat after they stop changing, not on every frame
+    // a slider is being dragged — the file would otherwise be rewritten 120
+    // times a second for the length of the drag.
+    auto        cfg_dirty_since = clock::now();
+    bool        cfg_dirty       = false;
     auto last_display_poll = last;
     uint32_t orient = info.orientation;
     bool running = true;
@@ -194,6 +209,14 @@ int main() {
         ws.renderer()->EndFrame();
         pacer.Wait();
 
+        if (aimgui::config::Dirty(&st)) {
+            if (!cfg_dirty) { cfg_dirty = true; cfg_dirty_since = now; }
+        }
+        if (cfg_dirty && now - cfg_dirty_since >= std::chrono::milliseconds(1200)) {
+            aimgui::config::Save(&st);
+            cfg_dirty = false;
+        }
+
         if (st.request_permeate_toggle) {
             st.request_permeate_toggle = false;
             st.permeate_record = !st.permeate_record;
@@ -221,6 +244,10 @@ int main() {
 #ifdef AIMGUI_LIVE2D
     aimgui::live2d::Shutdown();
 #endif
+    // The exit animation runs for over a second after the button is pressed, so
+    // there is always time to get this out before the process goes.
+    aimgui::config::Save(&st);
+    haptics.Shutdown();
     tilt.Shutdown();
     aimgui::kbd_input::Shutdown();
     ws.Destroy();

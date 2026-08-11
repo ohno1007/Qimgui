@@ -14,6 +14,8 @@
 #include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
+#include "core/config.h"
+#include "core/haptics.h"
 #include "core/screen_mirror.h"
 
 #ifdef AIMGUI_LIVE2D
@@ -314,6 +316,34 @@ void DrawWindow(UiState* state) {
             ImGui::TextDisabled(u8"本机不可用：缺少 %s", missing.c_str());
         }
     }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText(u8"触感");
+    {
+        // Probed once: the answer cannot change while the process is up, and
+        // the check walks every /dev/input node.
+        static bool has_vibrator = false;
+        static bool probed        = false;
+        if (!probed) {
+            probed = true;
+            Haptics probe;
+            // Ask before closing it: Shutdown resets the mode, so reading
+            // Available() afterwards would report false on every device.
+            has_vibrator = probe.Init();
+            probe.Shutdown();
+        }
+
+        ImGui::Checkbox(u8"震动反馈", &state->haptics_enabled);
+        chrome::LastItemFrame(u8"震动反馈");
+        ripple::TouchLastItem();
+        if (!has_vibrator && state->haptics_enabled) {
+            ImGui::TextDisabled(u8"本机没有可用的振动器");
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText(u8"设置");
+    ImGui::TextDisabled("%s", config::Path());
 
     ImGui::Spacing();
     ImGui::SeparatorText(u8"主题");

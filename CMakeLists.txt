@@ -71,6 +71,8 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/screen_mirror.cpp
     ${JNI}/src/core/sensor_tilt.cpp
     ${JNI}/src/core/text_outline.cpp
+    ${JNI}/src/core/haptics.cpp
+    ${JNI}/src/core/config.cpp
     ${JNI}/src/core/glass_gl.cpp
     ${JNI}/src/core/glass_vk.cpp)
 target_compile_definitions(aimgui_core PRIVATE
