@@ -49,6 +49,7 @@ private:
     void*    m_Window   = nullptr;   // ANativeWindow*, owned by the reader
     void*    m_Image    = nullptr;   // AImage*, held while its buffer is in use
     void*    m_Token    = nullptr;   // display token (StrongPointer payload)
+    void*    m_MirrorLayer = nullptr; // SurfaceControl mirroring the real display
     bool     m_Running  = false;
     int      m_Width    = 0;
     int      m_Height   = 0;

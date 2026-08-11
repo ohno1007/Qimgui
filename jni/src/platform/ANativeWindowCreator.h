@@ -383,6 +383,11 @@ namespace android {
             // A display that is configured but powered off composites nothing,
             // which looks exactly like a layer-stack mismatch from outside.
             void (*SurfaceComposerClient__SetDisplayPowerMode)(StrongPointer<void> &display, int32_t mode) = nullptr;
+            // Android 13+. Returns a SurfaceControl that mirrors a display's
+            // contents, to be parented onto whichever layer stack should show
+            // it. This is how modern SurfaceFlinger mirrors, having moved away
+            // from two displays simply sharing one layer stack.
+            StrongPointer<void> (*SurfaceComposerClient__MirrorDisplay)(ui::PhysicalDisplayId displayId) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Show)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Hide)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
@@ -590,6 +595,9 @@ namespace android {
                     SurfaceComposerClient__SetDisplayPowerMode =
                         reinterpret_cast<decltype(SurfaceComposerClient__SetDisplayPowerMode)>(
                             bind("21SurfaceComposerClient19setDisplayPowerMode", nullptr));
+                    SurfaceComposerClient__MirrorDisplay =
+                        reinterpret_cast<decltype(SurfaceComposerClient__MirrorDisplay)>(
+                            bind("21SurfaceComposerClient13mirrorDisplay", nullptr));
                 }
 
                 // Display related methods - version specific selection
@@ -1016,6 +1024,18 @@ namespace android {
             // Same query, but for a caller-supplied display token instead of
             // the built-in one — lets a virtual display's stored state be read
             // back and compared against what was sent.
+            // Mirrors the given physical display into a fresh layer. Empty if
+            // the symbol is absent (pre-Android 13).
+            SurfaceControl MirrorDisplay(ui::PhysicalDisplayId id) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__MirrorDisplay;
+                if (nullptr == fn) return {};
+                return SurfaceControl{fn(id).get()};
+            }
+
+            static bool MirrorDisplaySupported() {
+                return nullptr != Functionals::GetInstance().SurfaceComposerClient__MirrorDisplay;
+            }
+
             // mode: 0 = off, 1 = doze, 2 = on.
             bool SetDisplayPowerMode(StrongPointer<void> &token, int32_t mode) {
                 auto fn = Functionals::GetInstance().SurfaceComposerClient__SetDisplayPowerMode;
@@ -1690,6 +1710,16 @@ namespace android {
         // `missing` receives a comma-separated list of whichever failed, so a
         // device that can't do it says which piece is absent instead of just
         // silently doing nothing.
+        // First physical display id, for mirrorDisplay().
+        static bool GetPrimaryPhysicalDisplayId(detail::ui::PhysicalDisplayId* out) {
+            auto fn = detail::Functionals::GetInstance().SurfaceComposerClient__GetPhysicalDisplayIds;
+            if (nullptr == fn) return false;
+            auto ids = fn();
+            if (ids.empty()) return false;
+            *out = ids[0];
+            return true;
+        }
+
         static bool ScreenCaptureSupported(std::string* missing = nullptr) {
             const auto& f = detail::Functionals::GetInstance();
             struct { const char* name; const void* fn; } syms[] = {

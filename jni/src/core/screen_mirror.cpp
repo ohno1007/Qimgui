@@ -164,19 +164,15 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // Read the primary display's actual layer stack rather than assuming 0.
     // Mirroring the wrong stack yields a display that composites nothing, and
     // reports success at every step while doing it.
-    // Distinguish "the display really is on stack 0" from "the query failed
-    // and we defaulted to 0" — both look identical in the log otherwise, and
-    // SurfaceFlinger listing no layers for our display means whatever we sent
-    // matched nothing.
-    uint32_t layerStack = 0;
-    {
-        android::detail::ui::DisplayState ds{};
-        const bool got = composer.GetDisplayInfo(&ds);
-        MIRROR_STEP("displayState: query=%d layerStack=%u orientation=%d rect=%dx%d",
-                    got, ds.layerStack.id, (int)ds.orientation,
-                    ds.layerStackSpaceRect.width, ds.layerStackSpaceRect.height);
-        if (got) layerStack = ds.layerStack.id;
-    }
+    // Give the mirror its own layer stack rather than sharing the physical
+    // display's. Sharing one stack between two displays used to be how
+    // mirroring worked, and it is what screenrecord still looks like it does,
+    // but on this build SurfaceFlinger stores the shared stack faithfully
+    // (readback confirms layerStack=0) and then assigns no layers to the
+    // second display. Modern SurfaceFlinger mirrors by way of a mirror layer
+    // instead, so make a stack that only this display sees and put one there.
+    constexpr uint32_t kMirrorLayerStack = 0x41493344;  // arbitrary, ours alone
+    const uint32_t layerStack = kMirrorLayerStack;
 
     android::detail::SurfaceComposerClientTransaction t;
     const bool okSurf = t.SetDisplaySurface(token, producer);
@@ -197,8 +193,32 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // matching layers exist, yet it assigns none of them to this display —
     // the signature of a display that is configured but not powered on. That
     // normally happens automatically for virtual displays; do it explicitly.
+    // Powering on is what finally made SurfaceFlinger attach to our producer
+    // (the self-test's ANativeWindow_lock started failing with EINVAL once the
+    // queue was connected elsewhere). It does not do this on its own here.
     const bool poweredOn = composer.SetDisplayPowerMode(token, /*ON=*/2);
-    MIRROR_STEP("power on: %d", poweredOn);
+
+    // Mirror the physical display into a layer and park it on our stack, which
+    // gives this display something to composite.
+    android::detail::ui::PhysicalDisplayId pid{};
+    bool mirrored = false;
+    if (android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid)) {
+        m_MirrorLayer = composer.MirrorDisplay(pid).data;
+        if (m_MirrorLayer) {
+            android::detail::SurfaceComposerClientTransaction mt;
+            android::detail::StrongPointer<void> mp{};
+            mp.pointer = m_MirrorLayer;
+            mt.SetLayerStack(mp, layerStack);
+            mt.Show(mp);
+            mt.Apply(false, false);
+            mirrored = true;
+        }
+    }
+    MIRROR_STEP("power on: %d, mirrorDisplay supported=%d layer=%p -> stack %u",
+                poweredOn,
+                android::detail::SurfaceComposerClient::MirrorDisplaySupported(),
+                m_MirrorLayer, layerStack);
+    (void)mirrored;
 
     MIRROR_STEP("6/6 running");
     m_Window = window;
