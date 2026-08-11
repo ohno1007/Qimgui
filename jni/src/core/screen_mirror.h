@@ -52,6 +52,7 @@ private:
     int      m_Width    = 0;
     int      m_Height   = 0;
     uint64_t m_Frames   = 0;
+    uint64_t m_AcquireMisses = 0;
 };
 
 } // namespace aimgui

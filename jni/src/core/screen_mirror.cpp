@@ -136,15 +136,26 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         return false;
     }
 
-    MIRROR_STEP("5/6 transaction: setDisplaySurface / LayerStack / Projection");
+    // Read the primary display's actual layer stack rather than assuming 0.
+    // Mirroring the wrong stack yields a display that composites nothing, and
+    // reports success at every step while doing it.
+    uint32_t layerStack = 0;
+    {
+        android::detail::ui::DisplayState ds{};
+        if (composer.GetDisplayInfo(&ds)) layerStack = ds.layerStack.id;
+    }
+
+    MIRROR_STEP("5/6 transaction: setDisplaySurface / LayerStack=%u / Projection", layerStack);
     android::detail::SurfaceComposerClientTransaction t;
     t.SetDisplaySurface(token, producer);
-    // Layer stack 0 is the built-in display's — everything the user sees.
-    t.SetDisplayLayerStack(token, 0);
+    t.SetDisplayLayerStack(token, layerStack);
     const android::detail::ui::Rect src{0, 0, srcWidth, srcHeight};
     const android::detail::ui::Rect dst{0, 0, width, height};
     t.SetDisplayProjection(token, /*orientation=*/0, src, dst);
-    t.Apply(false, true);
+    // Not one-way: this transaction brings a display into existence, and a
+    // fire-and-forget binder call gives SurfaceFlinger no way to report that
+    // it rejected any of it.
+    t.Apply(false, false);
 
     MIRROR_STEP("6/6 running");
     m_Reader  = reader;
@@ -180,8 +191,15 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
     if (!media.ok) return nullptr;
 
     void* image = nullptr;
-    if (media.ReaderAcquireLatest(m_Reader, &image) != kMediaOk || !image) {
-        return nullptr;   // nothing new since last call
+    const int32_t rc = media.ReaderAcquireLatest(m_Reader, &image);
+    if (rc != kMediaOk || !image) {
+        // Report the code periodically. NO_BUFFER_AVAILABLE means the
+        // compositor simply hasn't produced anything yet; any other code is a
+        // different failure and would otherwise look identical from the UI.
+        if (m_Frames == 0 && ++m_AcquireMisses % 240 == 0)
+            MIRROR_STEP("acquire still empty after %llu tries, rc=%d",
+                        (unsigned long long)m_AcquireMisses, rc);
+        return nullptr;
     }
 
     // The previous image's buffer may still be referenced by the frame in
