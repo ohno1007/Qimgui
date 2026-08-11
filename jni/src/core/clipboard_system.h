@@ -33,6 +33,22 @@ bool Available();
 bool ReadText(std::string* out);
 bool WriteText(const char* text);
 
+// Re-entry point for the helper process. main() must call this before anything
+// else and return its value when it is not -1.
+//
+// The transaction cannot be sent from the UI process. ClipboardService resolves
+// the caller from Binder.getCallingUid() and then requires that uid to own the
+// package it was handed — root naming com.android.shell fails that test, and
+// the failure is not a refusal but a catch block that wipes the clipboard and
+// returns null. So it goes from a process that really is shell.
+//
+// fork alone does not work: libbinder's atfork handler poisons ProcessState in
+// the child and the UI process has already initialised it through libgui. exec
+// replaces the address space, which is what makes the child's binder usable —
+// and the privilege drop happens here, after the exec, because /data is not
+// readable by shell and a child that dropped first could not exec at all.
+int RunHelperMain(int argc, char** argv);
+
 // Why the last call failed, for the UI to show rather than leaving the user
 // guessing. Empty when the last call succeeded.
 const char* LastError();

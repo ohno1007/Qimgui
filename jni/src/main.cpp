@@ -3,6 +3,7 @@
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
 #include "core/clipboard.h"
+#include "core/clipboard_system.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -33,7 +34,12 @@ static void Live2DScenePreDraw() { aimgui::live2d::Draw(); }
 // which step it stopped at instead of leaving it to guesswork.
 #define BOOT(step) __android_log_print(ANDROID_LOG_INFO, "AImGui", "[boot] " step)
 
-int main() {
+int main(int argc, char** argv) {
+    // Before anything else. When this process was spawned to run a clipboard
+    // transaction as shell it must not build a UI, take a surface, or touch
+    // SurfaceFlinger — it exists for one binder call and then exits.
+    if (const int rc = aimgui::sysclip::RunHelperMain(argc, argv); rc != -1) return rc;
+
     using namespace android;
     using clock = std::chrono::steady_clock;
 

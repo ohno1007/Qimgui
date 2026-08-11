@@ -5,6 +5,8 @@
 #include <cstring>
 #include <string>
 #include <dlfcn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "AImGui", __VA_ARGS__)
@@ -347,53 +349,129 @@ bool DoWrite(const char* text) {
     return ok;
 }
 
-// ─── No child process ────────────────────────────────────────────────────
-// This ran in a forked child at first, to drop to shell's uid for the access
-// check and to contain a parcel walk that might not match. Both reasons turned
-// out to be wrong, the first fatally: libbinder installs an atfork handler that
-// poisons ProcessState in the child, and this process has already initialised
-// it through libgui, so the first transaction after the fork aborted with
-// "libbinder ProcessState can not be used after fork".
+// ─── Which process sends it ──────────────────────────────────────────────
 //
-// It was also unnecessary. AppOpsService.verifyAndGetBypass opens with
+// Not this one. AppOpsService lets root name any package, which is what I first
+// took to mean root could pass as shell. It cannot: ClipboardService resolves
+// the caller separately, from Binder.getCallingUid(), and getPrimaryClip then
+// calls addActiveOwnerLocked, which requires that uid to own the package it was
+// handed. Root naming com.android.shell fails that — and the failure is not a
+// refusal. It is caught, and the catch block does this:
 //
-//     if (uid == Process.ROOT_UID) {
-//         // For backwards compatibility, don't check package name for root UID.
+//     Slog.i(TAG, "Could not grant permission to primary clip. Clearing clipboard.");
+//     setPrimaryClipInternalLocked(null, intendingUid, intendingDeviceId, pkg);
+//     return null;
 //
-// so root may name any package, and the permission that unlocks background
-// reads is checked against the *package* — com.android.shell genuinely holds
-// READ_CLIPBOARD_IN_BACKGROUND. Root claiming to be shell passes both.
+// It wipes the user's clipboard and returns null, which is indistinguishable
+// from an empty one. Every read after the first was then honestly reporting
+// nothing there, because the first had destroyed it.
 //
-// The containment the child gave up is replaced by the caps above and by
-// checking every AParcel status: AParcel is bounds-checked and returns an
-// error rather than running off the end, so a layout that does not match now
-// fails the read instead of the process.
+// So the transaction goes from a process that really is shell. fork alone
+// cannot do it — libbinder's atfork handler poisons ProcessState in the child
+// and the UI process has already initialised it through libgui — but exec
+// replaces the address space, and the binder in the new image is clean.
+constexpr uid_t kShellUid = 2000;
+constexpr gid_t kShellGid = 2000;
+constexpr const char* kFlagGet = "--aimgui-clip-get";
+constexpr const char* kFlagSet = "--aimgui-clip-set";
+
+// Distinct from failure. An empty clipboard is a legitimate answer and must not
+// send the caller to the file fallback.
+constexpr int kExitEmpty = 3;
+
+bool Spawn(bool write, const char* text, std::string* out) {
+    int to_child[2]   = {-1, -1};
+    int from_child[2] = {-1, -1};
+    if (pipe(to_child) != 0) { g_error = "pipe failed"; return false; }
+    if (pipe(from_child) != 0) {
+        close(to_child[0]); close(to_child[1]);
+        g_error = "pipe failed";
+        return false;
+    }
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        close(to_child[0]); close(to_child[1]);
+        close(from_child[0]); close(from_child[1]);
+        g_error = "fork failed";
+        return false;
+    }
+
+    if (pid == 0) {
+        dup2(to_child[0], STDIN_FILENO);
+        dup2(from_child[1], STDOUT_FILENO);
+        close(to_child[0]); close(to_child[1]);
+        close(from_child[0]); close(from_child[1]);
+        // Still root here on purpose: /data is not readable by shell, so a
+        // child that dropped privileges first could not exec itself.
+        execl("/proc/self/exe", "AImGui", write ? kFlagSet : kFlagGet, (char*)nullptr);
+        _exit(127);
+    }
+
+    close(to_child[0]);
+    close(from_child[1]);
+    if (write && text) {
+        const size_t n = std::strlen(text);
+        // Through a pipe rather than argv: the clipboard is the user's text,
+        // and argv is readable by anything that can list processes.
+        if (n) (void)!::write(to_child[1], text, n);
+    }
+    close(to_child[1]);
+
+    std::string got;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(from_child[0], buf, sizeof(buf))) > 0) got.append(buf, (size_t)n);
+    close(from_child[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    if (!WIFEXITED(status)) { g_error = "clipboard helper crashed"; return false; }
+    const int code = WEXITSTATUS(status);
+    if (code == kExitEmpty) { if (out) out->clear(); g_error.clear(); return true; }
+    if (code == 127)        { g_error = "helper could not start"; return false; }
+    if (code != 0)          { g_error = "clipboard refused"; return false; }
+    g_error.clear();
+    if (out) *out = std::move(got);
+    return true;
+}
 
 } // namespace
 
 bool Available() { return LoadNdk(); }
 const char* LastError() { return g_error.c_str(); }
 
-bool ReadText(std::string* out) {
-    if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
-    g_error.clear();
-    if (!DoRead(out)) {
-        if (g_error.empty()) g_error = "read failed";
-        return false;
-    }
-    g_error.clear();
-    return true;
-}
+bool ReadText(std::string* out) { return Spawn(false, nullptr, out); }
+bool WriteText(const char* text) { return Spawn(true, text ? text : "", nullptr); }
 
-bool WriteText(const char* text) {
-    if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
-    g_error.clear();
-    if (!DoWrite(text ? text : "")) {
-        if (g_error.empty()) g_error = "write failed";
-        return false;
+int RunHelperMain(int argc, char** argv) {
+    if (argc < 2) return -1;
+    const bool get = std::strcmp(argv[1], kFlagGet) == 0;
+    const bool set = std::strcmp(argv[1], kFlagSet) == 0;
+    if (!get && !set) return -1;
+
+    // Group before user: once the uid is dropped the gid can no longer be
+    // changed. From here on this process genuinely is shell, which is the
+    // entire point of it existing.
+    setgroups(0, nullptr);
+    if (setgid(kShellGid) != 0) return 1;
+    if (setuid(kShellUid) != 0) return 1;
+
+    if (!LoadNdk()) return 1;
+
+    if (get) {
+        std::string text;
+        if (!DoRead(&text)) return 1;
+        if (text.empty()) return kExitEmpty;
+        (void)!::write(STDOUT_FILENO, text.data(), text.size());
+        return 0;
     }
-    g_error.clear();
-    return true;
+
+    std::string text;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(STDIN_FILENO, buf, sizeof(buf))) > 0) text.append(buf, (size_t)n);
+    return DoWrite(text.c_str()) ? 0 : 1;
 }
 
 } // namespace aimgui::sysclip
