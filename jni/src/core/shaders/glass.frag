@@ -60,9 +60,9 @@ void main() {
     float bend  = bevel * edgeW * bendK;
 
     // Sample from further out along the normal: the rim drags in and compresses
-    // what lies just outside the pane. Thick glass also magnifies slightly
-    // throughout, so pull everything a touch towards the centre as well.
-    vec2 base = posPx + n * bend - rel * 0.018;
+    // what lies just outside the pane. No overall magnification — the middle of
+    // the pane shows what is actually behind it, undistorted.
+    vec2 base = posPx + n * bend;
 
     // Dispersion: glass bends short wavelengths more than long ones, so each
     // channel is sampled at its own bend. The split is only perceptible at the
@@ -89,7 +89,16 @@ void main() {
     float spec = max(dot(n, lightDir), 0.0);
     col += pow(spec, 3.0) * bevel * 0.42;
 
-    // A whisper of wash for legibility, never enough to read as a tinted panel.
+
+    // Legibility, per pixel. Rather than flipping the whole palette from an
+    // average — which is the wrong granularity, and leaves text unreadable on
+    // whichever half of the window disagrees with the average — squeeze bright
+    // areas down locally. Dark regions are left alone, so the material stays
+    // clear over them, and one text colour then works everywhere.
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
+
+    // A whisper of wash, never enough to read as a tinted panel.
     col = mix(col, pc.tint.rgb, pc.tint.a);
 
     // Feather the last pixel so the rounded border stays smooth.

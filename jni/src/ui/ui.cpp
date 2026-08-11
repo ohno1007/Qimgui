@@ -597,7 +597,18 @@ void DrawUi(UiState* state, bool* keep_running) {
         ImGui::SetNextWindowSizeConstraints(ImVec2(700, 560), ImVec2(FLT_MAX, FLT_MAX));
     }
 
+    // ImGui fills the title bar and the sidebar child with its own colours,
+    // which sit directly on top of the panes drawn for them and hide the glass
+    // completely. Clear those fills while the glass is up — the pane is the
+    // background now.
     int pushed_glass_text = 0;
+    if (state->screen_texture_id) {
+        ImGui::PushStyleColor(ImGuiCol_TitleBg,        ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,  ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,        ImVec4(0, 0, 0, 0));
+        pushed_glass_text = 4;
+    }
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
 
@@ -664,17 +675,6 @@ void DrawUi(UiState* state, bool* keep_running) {
     if (l2d_hidden_chrome) {
         ImGui::SetNextWindowBgAlpha(lt);
     } else if (state->screen_texture_id) {
-        // Over a bright background dark text reads far better than white, so
-        // flip the palette rather than leaning on the wash to rescue it. The
-        // threshold sits above 0.5 because the glass itself darkens slightly.
-        const bool light_bg = state->screen_luma > 0.62f;
-        const ImVec4 fg = light_bg ? ImVec4(0.08f, 0.09f, 0.11f, 1.0f)
-                                   : ImVec4(0.94f, 0.95f, 0.97f, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, fg);
-        ImGui::PushStyleColor(ImGuiCol_TextDisabled,
-                              light_bg ? ImVec4(0.30f, 0.32f, 0.36f, 1.0f)
-                                       : ImVec4(0.62f, 0.65f, 0.70f, 1.0f));
-        pushed_glass_text = 2;
         // The refracted screen is drawn on the background draw list, which
         // renders before any window, so the window's own fill sits on top of
         // it. Keep that fill to a whisper: this material is meant to be clear

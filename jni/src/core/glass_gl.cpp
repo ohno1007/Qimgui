@@ -60,7 +60,7 @@ void main() {
     float bevel = t * t * (3.0 - 2.0 * t) * t;
     float bend  = bevel * edgeW * bendK;
 
-    vec2 base = posPx + n * bend - rel * 0.018;
+    vec2 base = posPx + n * bend;
 
     float disp = bevel * bend * 0.16;
     vec3 col = vec3(
@@ -74,6 +74,15 @@ void main() {
     vec2  lightDir = normalize(vec2(-0.6, -0.8));
     float spec = max(dot(n, lightDir), 0.0);
     col += pow(spec, 3.0) * bevel * 0.42;
+
+
+    // Legibility, per pixel. Rather than flipping the whole palette from an
+    // average — which is the wrong granularity, and leaves text unreadable on
+    // whichever half of the window disagrees with the average — squeeze bright
+    // areas down locally. Dark regions are left alone, so the material stays
+    // clear over them, and one text colour then works everywhere.
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col *= mix(1.0, 0.40, smoothstep(0.30, 0.80, luma));
 
     col = mix(col, uTint.rgb, uTint.a);
 
