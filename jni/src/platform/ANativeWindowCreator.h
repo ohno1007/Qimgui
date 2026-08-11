@@ -522,39 +522,49 @@ namespace android {
                         return m.empty() ? nullptr : symbolMethod.Find(libgui, m.c_str());
                     };
 
+                    // Tokens carry the Itanium length prefixes for both the
+                    // class and the method, e.g. "7Surface25getIGraphic...".
+                    // A bare method-name substring is not enough: several
+                    // classes in libgui expose getIGraphicBufferProducer, and
+                    // a plain search returns whichever the symbol table hits
+                    // first. Binding SurfaceControl's and then calling it with
+                    // a Surface* as `this` segfaults — which is exactly what
+                    // happened. The prefixes pin the class while still leaving
+                    // the parameter mangling (the fragile part) unwritten.
+
                     // Android 14+: createVirtualDisplay(const std::string&,
                     // bool, const std::string&, float) — mangling ends in 'f'.
                     SurfaceComposerClient__CreateVirtualDisplay =
                         reinterpret_cast<decltype(SurfaceComposerClient__CreateVirtualDisplay)>(
-                            bind("createVirtualDisplay", "f"));
+                            bind("21SurfaceComposerClient20createVirtualDisplay", "f"));
                     // Legacy: createDisplay(const String8&, bool) — ends in 'b'.
                     if (nullptr == SurfaceComposerClient__CreateVirtualDisplay) {
                         SurfaceComposerClient__CreateDisplay =
                             reinterpret_cast<decltype(SurfaceComposerClient__CreateDisplay)>(
-                                bind("createDisplay", "b"));
+                                bind("21SurfaceComposerClient13createDisplay", "b"));
                     }
 
                     SurfaceComposerClient__DestroyDisplay =
                         reinterpret_cast<decltype(SurfaceComposerClient__DestroyDisplay)>(
-                            bind("destroyVirtualDisplay", nullptr));
+                            bind("21SurfaceComposerClient21destroyVirtualDisplay", nullptr));
                     if (nullptr == SurfaceComposerClient__DestroyDisplay) {
                         SurfaceComposerClient__DestroyDisplay =
                             reinterpret_cast<decltype(SurfaceComposerClient__DestroyDisplay)>(
-                                bind("destroyDisplay", nullptr));
+                                bind("21SurfaceComposerClient14destroyDisplay", nullptr));
                     }
 
                     SurfaceComposerClient__Transaction__SetDisplaySurface =
                         reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplaySurface)>(
-                            bind("setDisplaySurface", nullptr));
+                            bind("11Transaction17setDisplaySurface", nullptr));
                     SurfaceComposerClient__Transaction__SetDisplayLayerStack =
                         reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplayLayerStack)>(
-                            bind("setDisplayLayerStack", nullptr));
+                            bind("11Transaction20setDisplayLayerStack", nullptr));
                     SurfaceComposerClient__Transaction__SetDisplayProjection =
                         reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetDisplayProjection)>(
-                            bind("setDisplayProjection", nullptr));
+                            bind("11Transaction20setDisplayProjection", nullptr));
                     Surface__GetIGraphicBufferProducer =
                         reinterpret_cast<decltype(Surface__GetIGraphicBufferProducer)>(
-                            bind("getIGraphicBufferProducer", nullptr));
+                            bind("7Surface25getIGraphicBufferProducer", nullptr));
                 }
 
                 // Display related methods - version specific selection

@@ -2,21 +2,26 @@
 
 #include "platform/ANativeWindowCreator.h"
 
+#include <android/log.h>
 #include <dlfcn.h>
 
 namespace aimgui {
 namespace {
 
-// AImageReader is loaded at first use rather than linked.
-//
-// Linking libmediandk would put a DT_NEEDED on this binary, dragging
-// libmedia/libbinder and friends into every launch — and this is a bare root
-// executable, not an app, which is exactly the situation this project has
-// already been bitten by once (see the clns-1 linker-namespace commit).
-// Linking it crashed the process at startup before main did anything. Loading
-// it lazily keeps startup untouched, keeps the build at API 24 instead of
-// forcing 26 on everyone, and turns "this device can't do it" into a disabled
-// feature rather than a dead process.
+// Each risky step is logged before it runs, deliberately not gated behind
+// SURFACE_LOG_ENABLE. Every call below goes through a symbol resolved out of
+// libgui by name, so a wrong binding takes the process down with it — and when
+// that happens the last line in logcat is the only thing that says which one.
+#define MIRROR_STEP(fmt, ...) \
+    __android_log_print(ANDROID_LOG_INFO, "AImGuiMirror", fmt __VA_OPT__(,) __VA_ARGS__)
+
+
+// AImageReader is loaded at first use rather than linked. Linking libmediandk
+// would put a DT_NEEDED on this binary, dragging libmedia/libbinder into every
+// launch of what is a bare root executable rather than an app — the situation
+// this project already hit with linker namespaces. Loading it lazily also
+// keeps the build at API 24 instead of forcing 26 on everyone, and turns "this
+// device can't do it" into a disabled feature rather than a failure.
 constexpr int32_t  kMediaOk            = 0;
 constexpr int32_t  kFormatPrivate      = 0x22;      // AIMAGE_FORMAT_PRIVATE
 constexpr uint64_t kUsageGpuSampled    = 1ULL << 8; // GPU_SAMPLED_IMAGE
@@ -68,12 +73,14 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // PRIVATE format keeps the buffers in whatever layout the GPU prefers — we
     // only ever sample them, never touch them from the CPU, so there is no
     // reason to make the compositor convert into a linear layout.
+    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d", width, height);
     void* reader = nullptr;
     if (media.ReaderNewWithUsage(width, height, kFormatPrivate, kUsageGpuSampled,
                                  /*maxImages=*/3, &reader) != kMediaOk || !reader) {
         return false;
     }
 
+    MIRROR_STEP("2/6 AImageReader_getWindow");
     ANativeWindow* window = nullptr;
     if (media.ReaderGetWindow(reader, &window) != kMediaOk || !window) {
         media.ReaderDelete(reader);
@@ -87,6 +94,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         media.ReaderDelete(reader);
         return false;
     }
+    MIRROR_STEP("3/6 Surface::getIGraphicBufferProducer(%p)", (void*)window);
     android::detail::StrongPointer<void> producer =
         fns.Surface__GetIGraphicBufferProducer(window);
     if (!producer.get()) {
@@ -97,6 +105,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     auto& composer = android::ANativeWindowCreator::GetComposerInstance();
     // Non-secure: a secure display refuses to mirror protected content, and
     // showing that blurred beats failing outright.
+    MIRROR_STEP("4/6 createVirtualDisplay");
     android::detail::StrongPointer<void> token =
         composer.CreateVirtualDisplay("AImGuiMirror", /*secure=*/false);
     if (!token.get()) {
@@ -104,6 +113,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         return false;
     }
 
+    MIRROR_STEP("5/6 transaction: setDisplaySurface / LayerStack / Projection");
     android::detail::SurfaceComposerClientTransaction t;
     t.SetDisplaySurface(token, producer);
     // Layer stack 0 is the built-in display's — everything the user sees.
@@ -113,6 +123,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     t.SetDisplayProjection(token, /*orientation=*/0, src, dst);
     t.Apply(false, true);
 
+    MIRROR_STEP("6/6 running");
     m_Reader  = reader;
     m_Token   = token.get();
     m_Width   = width;
