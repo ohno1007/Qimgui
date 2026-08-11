@@ -727,10 +727,15 @@ void DrawUi(UiState* state, bool* keep_running) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, l2d_hidden_chrome ? 0.0f : 1.0f);
     if (l2d_hidden_chrome) {
         ImGui::SetNextWindowBgAlpha(lt);
+    } else if (state->screen_texture_id) {
+        // The refracted screen is drawn on the background draw list, which
+        // renders before any window — so the window's own fill sits on top of
+        // it. At the dark theme's 94% opaque WindowBg that hides the glass
+        // completely, which just looks black. Let most of it through and keep
+        // a thin wash for legibility.
+        ImGui::SetNextWindowBgAlpha(0.18f);
     } else if (state->backdrop_blur && state->backdrop_blur_supported) {
-        // The frosted backdrop sits *behind* this window, so it only shows if
-        // the window itself lets it through. The dark theme's WindowBg is 94%
-        // opaque, which would hide the blur almost entirely.
+        // Same reasoning for SurfaceFlinger's own blur, which is also behind us.
         ImGui::SetNextWindowBgAlpha(0.45f);
     }
 
