@@ -1005,6 +1005,15 @@ namespace android {
                 return {result.get()};
             }
 
+            // Same query, but for a caller-supplied display token instead of
+            // the built-in one — lets a virtual display's stored state be read
+            // back and compared against what was sent.
+            bool GetDisplayStateOf(StrongPointer<void> &token, ui::DisplayState *out) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__GetDisplayState;
+                if (nullptr == fn) return false;
+                return 0 == fn(token, out);
+            }
+
             bool GetDisplayInfo(ui::DisplayState *displayInfo) {
                 static StrongPointer<void> defaultDisplay;
 

@@ -193,6 +193,19 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
                 okSurf, okStack, layerStack, okProj,
                 srcWidth, srcHeight, width, height, applyRc);
 
+    // Read our own display's state back. getDisplayState works on any display
+    // token, so it reports what SurfaceFlinger actually stored rather than what
+    // we believe we sent. SF listing no layers for this display points at the
+    // layer stack never taking effect — if it stayed at the UINT32_MAX default
+    // it would match nothing, which is exactly the symptom.
+    {
+        android::detail::ui::DisplayState vs{};
+        const bool got = composer.GetDisplayStateOf(token, &vs);
+        MIRROR_STEP("readback: query=%d layerStack=%u (want %u) orientation=%d rect=%dx%d",
+                    got, vs.layerStack.id, layerStack, (int)vs.orientation,
+                    vs.layerStackSpaceRect.width, vs.layerStackSpaceRect.height);
+    }
+
     MIRROR_STEP("6/6 running");
     m_Window = window;
 
