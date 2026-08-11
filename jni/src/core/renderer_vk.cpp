@@ -1,6 +1,8 @@
 #include "renderer.h"
 
 #include "bloom_vk.h"
+
+#include <android/hardware_buffer.h>
 #include "vulkan_wrapper.h"
 #include <vulkan/vulkan_android.h>
 #ifdef AIMGUI_LIVE2D
@@ -135,6 +137,105 @@ public:
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
 
+    // Imports one of the screen mirror's AHardwareBuffers as a sampled image
+    // and returns an ImTextureID for it. No copy: the VkImage is backed by the
+    // very memory SurfaceFlinger composited into.
+    //
+    // AImageReader hands the same handful of buffers back round-robin, so
+    // imports are cached by buffer pointer — re-importing per frame would mean
+    // creating and destroying an image, a memory allocation and a descriptor
+    // set 120 times a second.
+    unsigned long long ImportHardwareBuffer(AHardwareBuffer* ahb, int w, int h) override {
+        if (!ahb || m_Device == VK_NULL_HANDLE) return 0;
+        for (const auto& e : m_AhbCache)
+            if (e.ahb == ahb) return (unsigned long long)(uintptr_t)e.ds;
+        if (m_AhbCache.size() >= 8) return 0;   // reader cycles far fewer than this
+
+        auto getProps = (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
+            vkGetDeviceProcAddr(m_Device, "vkGetAndroidHardwareBufferPropertiesANDROID");
+        if (!getProps) return 0;
+
+        VkAndroidHardwareBufferFormatPropertiesANDROID fmtProps{};
+        fmtProps.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID;
+        VkAndroidHardwareBufferPropertiesANDROID props{};
+        props.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
+        props.pNext = &fmtProps;
+        if (getProps(m_Device, ahb, &props) != VK_SUCCESS) return 0;
+
+        // The mirror allocates RGBA_8888, so Vulkan reports a real format and
+        // no external-format/ycbcr sampler is needed. Bail rather than guess if
+        // that ever stops being true.
+        if (fmtProps.format == VK_FORMAT_UNDEFINED) return 0;
+
+        VkExternalMemoryImageCreateInfo extImg{};
+        extImg.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+        extImg.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+
+        VkImageCreateInfo ic{};
+        ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ic.pNext = &extImg;
+        ic.imageType = VK_IMAGE_TYPE_2D;
+        ic.format = fmtProps.format;
+        ic.extent = { (uint32_t)w, (uint32_t)h, 1 };
+        ic.mipLevels = 1;
+        ic.arrayLayers = 1;
+        ic.samples = VK_SAMPLE_COUNT_1_BIT;
+        ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ic.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+        ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        AhbEntry e{};
+        e.ahb = ahb;
+        if (vkCreateImage(m_Device, &ic, nullptr, &e.image) != VK_SUCCESS) return 0;
+
+        VkImportAndroidHardwareBufferInfoANDROID importInfo{};
+        importInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
+        importInfo.buffer = ahb;
+
+        VkMemoryDedicatedAllocateInfo dedicated{};
+        dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+        dedicated.image = e.image;
+        dedicated.pNext = &importInfo;
+
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.pNext = &dedicated;
+        mai.allocationSize = props.allocationSize;
+        mai.memoryTypeIndex = UINT32_MAX;
+        for (uint32_t i = 0; i < 32; ++i) {
+            if (props.memoryTypeBits & (1u << i)) { mai.memoryTypeIndex = i; break; }
+        }
+        if (mai.memoryTypeIndex == UINT32_MAX ||
+            vkAllocateMemory(m_Device, &mai, nullptr, &e.mem) != VK_SUCCESS) {
+            vkDestroyImage(m_Device, e.image, nullptr);
+            return 0;
+        }
+        vkBindImageMemory(m_Device, e.image, e.mem, 0);
+
+        VkImageViewCreateInfo vci{};
+        vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vci.image = e.image;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format = fmtProps.format;
+        vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        if (vkCreateImageView(m_Device, &vci, nullptr, &e.view) != VK_SUCCESS) {
+            vkFreeMemory(m_Device, e.mem, nullptr);
+            vkDestroyImage(m_Device, e.image, nullptr);
+            return 0;
+        }
+
+        e.ds = ImGui_ImplVulkan_AddTexture(e.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (!e.ds) {
+            vkDestroyImageView(m_Device, e.view, nullptr);
+            vkFreeMemory(m_Device, e.mem, nullptr);
+            vkDestroyImage(m_Device, e.image, nullptr);
+            return 0;
+        }
+        m_AhbCache.push_back(e);
+        return (unsigned long long)(uintptr_t)e.ds;
+    }
+
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
 
 #ifdef AIMGUI_LIVE2D
@@ -145,7 +246,9 @@ public:
 
 private:
     bool CreateInstance() {
-        const char* exts[] = { "VK_KHR_surface", "VK_KHR_android_surface" };
+        const char* exts[] = { "VK_KHR_surface", "VK_KHR_android_surface",
+                               "VK_KHR_get_physical_device_properties2",
+                               "VK_KHR_external_memory_capabilities" };
         VkApplicationInfo ai{};
         ai.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         ai.pApplicationName = "AImGui";
@@ -160,7 +263,7 @@ private:
         VkInstanceCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         ci.pApplicationInfo = &ai;
-        ci.enabledExtensionCount = 2;
+        ci.enabledExtensionCount = (uint32_t)IM_ARRAYSIZE(exts);
         ci.ppEnabledExtensionNames = exts;
         return vkCreateInstance(&ci, nullptr, &m_Instance) == VK_SUCCESS;
     }
@@ -215,8 +318,20 @@ private:
             "VK_KHR_swapchain",
             "VK_KHR_dynamic_rendering",
             "VK_EXT_extended_dynamic_state",
+            // Importing the screen mirror's AHardwareBuffers as textures.
+            // VK_ANDROID_external_memory_android_hardware_buffer pulls in
+            // external-memory and ycbcr-conversion as dependencies, so they
+            // have to be listed even though the mirror's RGBA_8888 buffers
+            // never need a ycbcr sampler.
+            "VK_KHR_external_memory",
+            "VK_ANDROID_external_memory_android_hardware_buffer",
+            "VK_EXT_queue_family_foreign",
+            "VK_KHR_sampler_ycbcr_conversion",
+            "VK_KHR_maintenance1",
+            "VK_KHR_bind_memory2",
+            "VK_KHR_get_memory_requirements2",
         };
-        dci.enabledExtensionCount = 3;
+        dci.enabledExtensionCount = (uint32_t)IM_ARRAYSIZE(dext);
         dci.ppEnabledExtensionNames = dext;
 
         VkPhysicalDeviceExtendedDynamicStateFeaturesEXT eds{};
@@ -235,8 +350,22 @@ private:
         feats2.pNext = &v13;
         dci.pNext = &feats2;
 #else
-        const char* dext[] = { "VK_KHR_swapchain" };
-        dci.enabledExtensionCount = 1;
+        const char* dext[] = {
+            "VK_KHR_swapchain",
+            // Importing the screen mirror's AHardwareBuffers as textures.
+            // VK_ANDROID_external_memory_android_hardware_buffer pulls in
+            // external-memory and ycbcr-conversion as dependencies, so they
+            // have to be listed even though the mirror's RGBA_8888 buffers
+            // never need a ycbcr sampler.
+            "VK_KHR_external_memory",
+            "VK_ANDROID_external_memory_android_hardware_buffer",
+            "VK_EXT_queue_family_foreign",
+            "VK_KHR_sampler_ycbcr_conversion",
+            "VK_KHR_maintenance1",
+            "VK_KHR_bind_memory2",
+            "VK_KHR_get_memory_requirements2",
+        };
+        dci.enabledExtensionCount = (uint32_t)IM_ARRAYSIZE(dext);
         dci.ppEnabledExtensionNames = dext;
 #endif
         if (vkCreateDevice(m_PhysicalDevice, &dci, nullptr, &m_Device) != VK_SUCCESS) return false;
@@ -600,6 +729,17 @@ private:
     VkFormat       m_DepthFormat = VK_FORMAT_UNDEFINED;
     Live2DVkContext m_L2DCtx;
 #endif
+
+    // One imported mirror buffer: the VkImage aliases SurfaceFlinger's memory,
+    // so nothing here owns pixels — only the Vulkan objects wrapping them.
+    struct AhbEntry {
+        AHardwareBuffer* ahb   = nullptr;
+        VkImage          image = VK_NULL_HANDLE;
+        VkDeviceMemory   mem   = VK_NULL_HANDLE;
+        VkImageView      view  = VK_NULL_HANDLE;
+        VkDescriptorSet  ds    = VK_NULL_HANDLE;
+    };
+    std::vector<AhbEntry> m_AhbCache;
 
     ANativeWindow* m_Window = nullptr;
     VkInstance m_Instance = VK_NULL_HANDLE;

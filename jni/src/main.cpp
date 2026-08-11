@@ -3,6 +3,8 @@
 #include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
 #include "core/screen_mirror.h"
+
+#include <android/hardware_buffer.h>
 #include "core/window_session.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -99,10 +101,20 @@ int main() {
             mirror.Stop();
         }
         if (mirror.running()) {
-            mirror.AcquireLatest();   // take delivery; texture import comes next
+            // Import straight to a texture — no copy, the image aliases the
+            // memory SurfaceFlinger composited into. Keep the previous handle
+            // on a frame where nothing new arrived so the backdrop holds
+            // rather than blinking.
+            if (AHardwareBuffer* ahb = mirror.AcquireLatest()) {
+                const unsigned long long id = ws.renderer()->ImportHardwareBuffer(
+                    ahb, mirror.width(), mirror.height());
+                if (id) st.screen_texture_id = id;
+            }
             st.screen_mirror_frames = mirror.frames();
             st.screen_mirror_w      = mirror.width();
             st.screen_mirror_h      = mirror.height();
+        } else {
+            st.screen_texture_id = 0;
         }
         st.screen_mirror_running = mirror.running();
         if (!st.permeate_record) ANativeWindowCreator::ProcessMirrorDisplay();

@@ -53,6 +53,17 @@ public:
         return 0;
     }
 
+    // Imports a screen-mirror AHardwareBuffer as a sampled texture and returns
+    // an ImTextureID-compatible handle, or 0 if the backend can't. No copy is
+    // made — the texture aliases the memory SurfaceFlinger composited into.
+    // Dimensions come from the caller because AHardwareBuffer_describe is
+    // API 26 and this builds against 24.
+    virtual unsigned long long ImportHardwareBuffer(struct AHardwareBuffer* ahb,
+                                                    int width, int height) {
+        (void)ahb; (void)width; (void)height;
+        return 0;
+    }
+
 #ifdef AIMGUI_LIVE2D
     // Vulkan objects the Live2D Cubism renderer needs, or nullptr if this
     // backend can't host Live2D (e.g. the GL renderer). Valid after Init().

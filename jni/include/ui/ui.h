@@ -66,6 +66,9 @@ struct UiState {
     uint64_t screen_mirror_frames  = 0;
     int      screen_mirror_w       = 0;
     int      screen_mirror_h       = 0;
+    // ImTextureID for the newest mirrored frame, 0 when unavailable. Sampling
+    // this is what makes a refracting backdrop possible at all.
+    unsigned long long screen_texture_id = 0;
 
     // Frosted-glass backdrop. SurfaceFlinger blurs what it composites behind
     // the window, so this costs nothing per frame — but it needs Android 12+

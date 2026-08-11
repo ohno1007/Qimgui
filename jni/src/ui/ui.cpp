@@ -588,6 +588,20 @@ void DrawUi(UiState* state, bool* keep_running) {
     const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
 
+    // Live screen behind the window. Drawn into the window's own draw list
+    // beneath its contents, sampling the region of the mirror that sits behind
+    // where the window actually is, so it reads as glass rather than a picture.
+    if (state->screen_texture_id && lt > 0.01f) {
+        const ImVec2 lo(win_pos.x / (float)(state->display_w > 0 ? state->display_w : 1),
+                        win_pos.y / (float)(state->display_h > 0 ? state->display_h : 1));
+        const ImVec2 hi((win_pos.x + win_size.x) / (float)(state->display_w > 0 ? state->display_w : 1),
+                        (win_pos.y + win_size.y) / (float)(state->display_h > 0 ? state->display_h : 1));
+        ImGui::GetBackgroundDrawList()->AddImageRounded(
+            (ImTextureID)(uintptr_t)state->screen_texture_id,
+            win_pos, ImVec2(win_pos.x + win_size.x, win_pos.y + win_size.y),
+            lo, hi, IM_COL32(255, 255, 255, 255), rounding);
+    }
+
     // Frosted-glass backdrop: hand SurfaceFlinger the window's current rect
     // and let the compositor blur what is behind it. Follows the collapse /
     // drag / resize animation for free because win_pos/win_size are already
