@@ -101,6 +101,7 @@ public:
 
     void Shutdown() override {
         m_Bloom.Shutdown();
+        if (m_BackdropTex) { glDeleteTextures(1, &m_BackdropTex); m_BackdropTex = 0; }
         ImGui_ImplOpenGL3_Shutdown();
         if (m_Display != EGL_NO_DISPLAY) {
             eglMakeCurrent(m_Display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -123,6 +124,33 @@ public:
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
 
+    unsigned long long SetBackdropImage(const void* rgba, int w, int h) override {
+        if (!rgba || w <= 0 || h <= 0) return 0;
+        if (m_BackdropTex == 0) {
+            glGenTextures(1, &m_BackdropTex);
+            glBindTexture(GL_TEXTURE_2D, m_BackdropTex);
+            // Linear + clamp: the capture is deliberately tiny and gets
+            // stretched over the window, so the bilinear filter is doing a
+            // lot of the smoothing for us.
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            m_BackdropW = m_BackdropH = 0;
+        } else {
+            glBindTexture(GL_TEXTURE_2D, m_BackdropTex);
+        }
+
+        if (w == m_BackdropW && h == m_BackdropH) {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            m_BackdropW = w; m_BackdropH = h;
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return (unsigned long long)m_BackdropTex;
+    }
+
 private:
     ANativeWindow* m_Window = nullptr;
     EGLDisplay m_Display = EGL_NO_DISPLAY;
@@ -130,6 +158,8 @@ private:
     EGLContext m_Context = EGL_NO_CONTEXT;
     int m_Width = 0;
     int m_Height = 0;
+    GLuint m_BackdropTex = 0;
+    int    m_BackdropW = 0, m_BackdropH = 0;
     BloomGL m_Bloom;
     void (*m_ScenePreDraw)() = nullptr;
 };

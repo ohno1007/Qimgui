@@ -7,10 +7,12 @@
 // Page bodies render straight into the content child (caller already
 // pushed it), so they can use ImGui::* layout APIs freely.
 
+#include <string>
 #include "ui/main_ui.h"
 
 #include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
 #include "imgui.h"
+#include "platform/ANativeWindowCreator.h"
 
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
@@ -270,6 +272,30 @@ void DrawWindow(UiState* state) {
             u8"（ro.surface_flinger.supports_background_blur）。"
             u8"低版本系统的合成器没有这个能力，只能靠自己截屏再模糊，"
             u8"那样一次要上百毫秒，做不了实时背景。");
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText(u8"实时取屏能力检测");
+    {
+        // Probe for the virtual-display capture path — the only way to get
+        // live screen pixels we can sample (needed for refraction / liquid
+        // glass, and it works on Android versions the blur API doesn't).
+        static std::string missing;
+        static bool        probed = false;
+        static bool        ok     = false;
+        if (!probed) {
+            probed = true;
+            ok = android::ANativeWindowCreator::ScreenCaptureSupported(&missing);
+        }
+        if (ok) {
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), u8"全部符号可用");
+            ImGui::TextWrapped(
+                u8"可以让 SurfaceFlinger 把屏幕实时合成到我们自己的 Surface，"
+                u8"再作为纹理采样 —— 液体玻璃需要的就是这个。");
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), u8"不可用");
+            ImGui::TextWrapped(u8"缺失符号：%s", missing.c_str());
+        }
     }
 
     ImGui::Spacing();

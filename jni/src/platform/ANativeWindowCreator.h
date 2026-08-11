@@ -356,6 +356,21 @@ namespace android {
             // Restricts a layer to a sub-rectangle, so a full-surface blur
             // layer can be confined to just the UI window's bounds.
             void *(*SurfaceComposerClient__Transaction__SetCrop)(void *thiz, StrongPointer<void> &surfaceControl, const ui::Rect *crop) = nullptr;
+
+            // ── Virtual-display capture ──────────────────────────────────
+            // Asking SurfaceFlinger to composite a layer stack into a Surface
+            // we own is the only way to get the live screen as pixels we can
+            // sample: GPU to GPU, no readback, at display refresh rate. These
+            // are far older APIs than the blur path (they predate Android 5),
+            // which is what makes this viable on old versions too.
+            StrongPointer<void> (*SurfaceComposerClient__CreateDisplay)(void *name, bool secure) = nullptr;
+            void (*SurfaceComposerClient__DestroyDisplay)(StrongPointer<void> &display) = nullptr;
+            void *(*SurfaceComposerClient__Transaction__SetDisplaySurface)(void *thiz, StrongPointer<void> &token, StrongPointer<void> &bufferProducer) = nullptr;
+            void *(*SurfaceComposerClient__Transaction__SetDisplayLayerStack)(void *thiz, StrongPointer<void> &token, uint32_t layerStack) = nullptr;
+            void *(*SurfaceComposerClient__Transaction__SetDisplayProjection)(void *thiz, StrongPointer<void> &token, int32_t orientation, const ui::Rect *layerStackRect, const ui::Rect *displayRect) = nullptr;
+            // ANativeWindow is an android::Surface; this hands back the
+            // producer end to attach to the virtual display.
+            StrongPointer<void> (*Surface__GetIGraphicBufferProducer)(void *thiz) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Show)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Hide)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
@@ -479,6 +494,29 @@ namespace android {
                     }
                 }
                 
+                // Virtual-display capture. Probed on every version — the point
+                // of this path is that it works where the blur API doesn't.
+                // setDisplayLayerStack / setDisplayProjection changed their
+                // parameter types around Android 13 (uint32_t -> ui::LayerStack,
+                // int32_t -> ui::Rotation), so try the modern mangling first
+                // and fall back to the legacy one.
+                ResolveMethod(SurfaceComposerClient, CreateDisplay, libgui, "_ZN7android21SurfaceComposerClient13createDisplayERKNS_7String8Eb");
+                ResolveMethod(SurfaceComposerClient, DestroyDisplay, libgui, "_ZN7android21SurfaceComposerClient14destroyDisplayERKNS_2spINS_7IBinderEEE");
+                ResolveMethod(SurfaceComposerClient__Transaction, SetDisplaySurface, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setDisplaySurfaceERKNS_2spINS_7IBinderEEERKNS2_INS_22IGraphicBufferProducerEEE");
+                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayLayerStack) {
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayLayerStack, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayLayerStackERKNS_2spINS_7IBinderEEENS_2ui10LayerStackE");
+                }
+                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayLayerStack) {
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayLayerStack, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayLayerStackERKNS_2spINS_7IBinderEEEj");
+                }
+                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayProjection) {
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayProjection, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayProjectionERKNS_2spINS_7IBinderEEENS_2ui8RotationERKNS_4RectESA_");
+                }
+                if (nullptr == SurfaceComposerClient__Transaction__SetDisplayProjection) {
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetDisplayProjection, libgui, "_ZN7android21SurfaceComposerClient11Transaction20setDisplayProjectionERKNS_2spINS_7IBinderEEEiRKNS_4RectES8_");
+                }
+                ResolveMethod(Surface, GetIGraphicBufferProducer, libgui, "_ZNK7android7Surface25getIGraphicBufferProducerEv");
+
                 // Display related methods - version specific selection
                 if (5 <= systemVersion && 9 >= systemVersion) {
                     // Android 5-9 uses GetBuiltInDisplay
@@ -1490,6 +1528,40 @@ namespace android {
         static bool HasMirrorForLayerStack(const std::string& layerStack) {
             auto& cachedMirrors = GetLayerStackMirrorSurfaces();
             return cachedMirrors.find(layerStack) != cachedMirrors.end();
+        }
+
+        // ── Virtual-display capture probe ───────────────────────────────
+        //
+        // Whether the symbols needed to have SurfaceFlinger composite the
+        // screen into a Surface we own all resolved. That is the only route
+        // to live screen pixels we can sample (for refraction-style glass),
+        // and unlike the blur API it is old enough to exist on early Android
+        // — but only if this ROM's libgui exports it under the manglings we
+        // probe for, which mirrorSurface already proved is not a given.
+        //
+        // `missing` receives a comma-separated list of whichever failed, so a
+        // device that can't do it says which piece is absent instead of just
+        // silently doing nothing.
+        static bool ScreenCaptureSupported(std::string* missing = nullptr) {
+            const auto& f = detail::Functionals::GetInstance();
+            struct { const char* name; const void* fn; } syms[] = {
+                {"createDisplay",        (const void*)f.SurfaceComposerClient__CreateDisplay},
+                {"destroyDisplay",       (const void*)f.SurfaceComposerClient__DestroyDisplay},
+                {"setDisplaySurface",    (const void*)f.SurfaceComposerClient__Transaction__SetDisplaySurface},
+                {"setDisplayLayerStack", (const void*)f.SurfaceComposerClient__Transaction__SetDisplayLayerStack},
+                {"setDisplayProjection", (const void*)f.SurfaceComposerClient__Transaction__SetDisplayProjection},
+                {"getIGraphicBufferProducer", (const void*)f.Surface__GetIGraphicBufferProducer},
+            };
+            bool ok = true;
+            for (const auto& s : syms) {
+                if (s.fn) continue;
+                ok = false;
+                if (missing) {
+                    if (!missing->empty()) *missing += ", ";
+                    *missing += s.name;
+                }
+            }
+            return ok;
         }
 
         // ── Frosted-glass backdrop ──────────────────────────────────────

@@ -38,6 +38,21 @@ public:
     // that the UI then composites on top of. Default: no-op.
     virtual void SetScenePreDraw(void (*fn)()) { (void)fn; }
 
+    // Uploads a small RGBA8 image and returns a handle castable to
+    // ImTextureID, for drawing as the window's glass backdrop. Replaces any
+    // previous one — a single slot, so the caller never frees. Returns 0 if
+    // the backend can't provide one.
+    //
+    // Sized for a downscaled screen capture (a few hundred px on the long
+    // side), so an upload is tens of KB. This is not a general texture API:
+    // no batching, no mipmaps, and re-uploading at the same size reuses the
+    // existing allocation.
+    virtual unsigned long long SetBackdropImage(const void* rgba,
+                                                int width, int height) {
+        (void)rgba; (void)width; (void)height;
+        return 0;
+    }
+
 #ifdef AIMGUI_LIVE2D
     // Vulkan objects the Live2D Cubism renderer needs, or nullptr if this
     // backend can't host Live2D (e.g. the GL renderer). Valid after Init().
