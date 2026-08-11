@@ -1054,7 +1054,11 @@ namespace android {
                 const auto &f = Functionals::GetInstance();
                 if (f.SurfaceComposerClient__CreateVirtualDisplay) {
                     const std::string n(name);
-                    const std::string uniqueId;
+                    // Non-empty: SurfaceFlinger keys displays by uniqueId, and
+                    // AOSP's own screenrecord always passes one. An empty id
+                    // still yields a display that shows up in dumpsys, so this
+                    // is not something the setup calls report on.
+                    const std::string uniqueId(name);
                     // (name, isSecure, optimizeForPower, uniqueId, requestedRefreshRate)
                     return f.SurfaceComposerClient__CreateVirtualDisplay(&n, secure, false, &uniqueId, 0.0f);
                 }
