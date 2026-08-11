@@ -79,7 +79,7 @@ public:
     void RecordCompositeDraw(VkCommandBuffer cmd);
 
     // Copy scene image → prev-scene image at the very end of the command
-    // buffer, so next frame's shatter chips have a fresh snapshot.
+    // buffer, so the next frame's dissolve particles have a fresh snapshot.
     void RecordSnapshotCopy(VkCommandBuffer cmd);
 
 private:
@@ -107,7 +107,7 @@ private:
     VkFramebuffer    m_SceneFB    = VK_NULL_HANDLE;
 
     // Snapshot of the previous frame's scene, sampled by ImGui-issued
-    // shatter chip draws. Owned VkImage + view, plus a VkDescriptorSet
+    // dissolve particle draws. Owned VkImage + view, plus a VkDescriptorSet
     // borrowed from imgui's pool so we can hand its handle out as an
     // ImTextureID.
     VkImage          m_PrevSceneImage    = VK_NULL_HANDLE;

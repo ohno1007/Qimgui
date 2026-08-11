@@ -148,7 +148,7 @@ bool BloomGL::Init(int width, int height) {
     }
 
     // Snapshot texture (no FBO needed — it's only ever a copy target +
-    // sample source for the shatter chips).
+    // sample source for the dissolve particles).
     glGenTextures(1, &m_PrevSceneTex);
     glBindTexture(GL_TEXTURE_2D, m_PrevSceneTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_Width, m_Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
