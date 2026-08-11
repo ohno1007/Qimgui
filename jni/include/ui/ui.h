@@ -92,6 +92,10 @@ struct UiState {
     // way it reads as proximity rather than as a scripted effect.
     ImVec2 glass_nav_lag     = ImVec2(0, 0);
     ImVec2 glass_nav_lag_vel = ImVec2(0, 0);
+    // The lag actually applied this frame — faded in with the stage. Both the
+    // pane and the widgets standing on it read this one value, or they would
+    // drift apart during the island-to-window transition.
+    ImVec2 glass_nav_offset  = ImVec2(0, 0);
     ImVec2 glass_prev_pos    = ImVec2(0, 0);
     bool   glass_pos_valid   = false;
 

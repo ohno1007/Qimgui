@@ -314,30 +314,28 @@ constexpr float kBridgeSnap = 31.0f;   // reachable: max retreat opens the slot 
 
 // The nav column is its own body, so it does not follow the window instantly:
 // this is the fraction of each frame's motion it fails to keep up with, and
-// the spring in UpdateSpring is what brings it back. Only the two edges facing
-// a slot move — the ones anchored to the window's outside stay put, which is
-// both what a stretching body does and what keeps the labels on their pane.
+// the spring in UpdateSpring is what brings it back.
 //
-// The caps are set by the padding on each side: an edge may not retreat past
-// the text nearest to it. Retreating widens the slot, advancing narrows it, and
-// advancing is the safe direction, so the two are not symmetric.
-constexpr float kNavFollow    = 0.85f;
-constexpr float kNavRetreatX  = -14.0f;
-constexpr float kNavAdvanceX  =  26.0f;
-constexpr float kNavRaiseY    = -26.0f;
-constexpr float kNavLowerY    =  10.0f;
+// The whole column moves — pane and labels together — which is what lets the
+// travel be symmetric. An earlier version moved only the pane's two inner
+// edges, so retreating slid the pane out from under its own labels and the
+// outward throw had to be capped at half the inward one. Carrying the widgets
+// along removes that constraint entirely: the column is a slab that lags and
+// springs back, and nothing it holds can come off it.
+constexpr float kNavFollow = 0.85f;
+constexpr float kNavLagMax = 34.0f;
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────
 void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // Wide enough that the labels clear the lensed band on both sides. The
-    // right edge is the tighter of the two — the slot eats half its width out
-    // of this column and that edge also retreats when the window is dragged —
-    // so the padding is set by that side and the left simply inherits it.
-    constexpr float kInnerPadX     = 38.0f;
-    // The nav column's pane now starts below the title bar with a slot between
-    // them, so its top edge is lensed too and the first entry has to clear it —
-    // and that edge moves, so the clearance has to cover the lag as well.
-    constexpr float kInnerPadY     = 40.0f;
+    // right edge is the tighter of the two now that the slot eats half its
+    // width out of this column, so the padding is set by that side and the
+    // left simply inherits it.
+    constexpr float kInnerPadX     = 30.0f;
+    // The nav column's pane starts below the title bar with a slot between
+    // them, so its top edge is lensed too and the first entry has to clear it.
+    // The lag needs no allowance here: the labels move with the pane.
+    constexpr float kInnerPadY     = 30.0f;
     constexpr float kSelectableH   = 44.0f;
     constexpr float kAccentInset   = 10.0f;
     constexpr float kAccentW       = 4.0f;
@@ -364,6 +362,13 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // selected (blue) background's left edge.
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.08f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,        ImVec2(0, 6));
+
+    // Ride the column's lag, so the labels stay put on the pane while the whole
+    // slab trails the window and springs back. Without this the pane would slide
+    // out from under them and the outward throw would have to be capped short.
+    const ImVec2 nav_origin = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(ImVec2(nav_origin.x + state->glass_nav_offset.x,
+                                     nav_origin.y + state->glass_nav_offset.y));
 
     // The border is a rectangle around the child, which cuts across the pane
     // and re-draws the seam the parting just removed.
@@ -419,6 +424,11 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::Dummy(ImVec2(0, kBottomMargin));
 
     ImGui::EndChild();
+
+    // Hand the cursor back where the content expects it. The lag is this
+    // column's alone, so leaving it in the cursor would drag the content pane
+    // along with it and there would be no relative motion at all.
+    ImGui::SetCursorScreenPos(ImVec2(nav_origin.x + kSidebarW, nav_origin.y));
 
     ImGui::PopStyleVar(4);
     ImGui::PopStyleColor(4);
@@ -976,15 +986,16 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->glass_pos_valid = true;
             UpdateSpring(&state->glass_nav_lag.x, &state->glass_nav_lag_vel.x, 0.0f, dt);
             UpdateSpring(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, 0.0f, dt);
-            // Held inside what the padding allows. The velocity is dropped at
-            // the stop too, or the spring winds up against the cap and fires
-            // the body across the slot the moment the drag ends.
-            auto hold = [](float* v, float* vel, float lo, float hi) {
-                if (*v < lo) { *v = lo; if (*vel < 0.0f) *vel = 0.0f; }
-                if (*v > hi) { *v = hi; if (*vel > 0.0f) *vel = 0.0f; }
+            // Bounded so a fling cannot throw the column clean off the window.
+            // The velocity is dropped at the stop too, or the spring winds up
+            // against the cap and fires the body across the slot the moment the
+            // drag ends.
+            auto hold = [](float* v, float* vel, float lim) {
+                if (*v < -lim) { *v = -lim; if (*vel < 0.0f) *vel = 0.0f; }
+                if (*v >  lim) { *v =  lim; if (*vel > 0.0f) *vel = 0.0f; }
             };
-            hold(&state->glass_nav_lag.x, &state->glass_nav_lag_vel.x, kNavRetreatX, kNavAdvanceX);
-            hold(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, kNavRaiseY, kNavLowerY);
+            hold(&state->glass_nav_lag.x, &state->glass_nav_lag_vel.x, kNavLagMax);
+            hold(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, kNavLagMax);
         }
 
         const float split = lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f;
@@ -1008,7 +1019,10 @@ void DrawUi(UiState* state, bool* keep_running) {
             const float gap     = kGlassGap * split;
             const float win_r   = win_pos.x + win_size.x;
             const float win_b   = win_pos.y + win_size.y;
+            // Faded in with the stage and published for DrawSidebar, so the
+            // widgets and the pane they sit on move by exactly one value.
             const ImVec2 lag(state->glass_nav_lag.x * split, state->glass_nav_lag.y * split);
+            state->glass_nav_offset = lag;
 
             // A little past the title bar so it overlaps the content and the
             // two are unambiguously one body. Kept small: the nav column's slot
@@ -1025,13 +1039,15 @@ void DrawUi(UiState* state, bool* keep_running) {
             b.w = win_r - b.x;
             b.h = win_b - b.y;
 
-            // Only the two edges facing a slot carry the lag. The left edge and
-            // the bottom belong to the window's outside and stay with it, so
-            // the body stretches rather than sliding out of the frame.
-            a.x = win_pos.x;
-            a.y = win_pos.y + title_h + kTitleOverlap + gap + lag.y;
-            a.w = (divide - gap * 0.5f) - a.x + lag.x;
-            a.h = win_b - a.y;
+            // The whole column carries the lag, size fixed — it is a slab that
+            // trails the window, not a shape that stretches. DrawSidebar moves
+            // its widgets by the same offset, so the labels ride along and the
+            // throw can be as far in one direction as the other.
+            const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
+            a.x = win_pos.x + lag.x;
+            a.y = nav_y0 + lag.y;
+            a.w = (divide - gap * 0.5f) - win_pos.x;
+            a.h = win_b - nav_y0;
 
             // The strand is what is left of the join once the bodies are too
             // far apart for the merge alone. It necks down as the slot opens
@@ -1057,6 +1073,7 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->glass_rects[state->glass_count++] = a;
             state->glass_rects[state->glass_count++] = strand;
         } else {
+            state->glass_nav_offset = ImVec2(0, 0);
             GlassRect r = base;
             r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
             state->glass_rects[state->glass_count++] = r;
@@ -1160,8 +1177,11 @@ void DrawUi(UiState* state, bool* keep_running) {
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, full_alpha);
 
             static Page page = Page::Dashboard;
+            // No SameLine: DrawSidebar hands the cursor back itself, and
+            // SameLine would recompute it from the child's own advance —
+            // which carries the column's lag and would drag the content
+            // along with it.
             DrawSidebar(page, keep_running, state);
-            ImGui::SameLine(0, 0);
             DrawContent(state, page);
 
             ImGui::PopStyleVar();
