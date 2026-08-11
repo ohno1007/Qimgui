@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "AImGui", __VA_ARGS__)
@@ -84,9 +82,15 @@ bool LoadNdk() {
 
 int32_t Align4(int32_t n) { return (n + 3) & ~3; }
 
+// Nothing on a clipboard is this big, and a length that says otherwise means
+// the cursor is somewhere the layout did not predict. Refusing to allocate on
+// it is what keeps a wrong guess about the parcel from becoming an allocation
+// the size of whatever four bytes happened to be sitting there.
+constexpr int32_t kMaxField = 1 << 20;
+
 std::vector<int8_t>* g_sink = nullptr;
 bool ByteArrayAllocator(void* /*data*/, int32_t length, int8_t** outBuffer) {
-    if (length < 0) { *outBuffer = nullptr; return true; }
+    if (length < 0 || length > kMaxField) { *outBuffer = nullptr; return length < 0; }
     g_sink->assign((size_t)length, 0);
     *outBuffer = g_sink->data();
     return true;
@@ -97,6 +101,7 @@ bool ReadString8(void* p, std::string* out) {
     int32_t n = 0;
     if (g.readInt32(p, &n) != 0) return false;
     if (n < 0) { out->clear(); g.setDataPos(p, pos + 4); return true; }
+    if (n > kMaxField) return false;
     g.setDataPos(p, pos);
     std::vector<int8_t> bytes;
     g_sink = &bytes;
@@ -215,6 +220,7 @@ bool DoRead(std::string* out) {
             struct A { static bool Alloc(void* d, int32_t len, char** buf) {
                 auto* s = (std::string*)d;
                 if (len < 0) { *buf = nullptr; return true; }
+                if (len > kMaxField) { *buf = nullptr; return false; }
                 s->assign((size_t)len, '\0');
                 *buf = s->data();
                 return true;
@@ -278,67 +284,46 @@ bool DoWrite(const char* text) {
     return ok;
 }
 
-// ─── The child ───────────────────────────────────────────────────────────
-// Everything above runs here and nowhere else. Two reasons, and both matter:
-// the uid has to be shell's for the access check to pass, and a parcel layout
-// that turns out not to match the source it was written from should cost a
-// process nobody will miss rather than the UI.
-constexpr uid_t kShellUid = 2000;
-constexpr gid_t kShellGid = 2000;
-
+// ─── No child process ────────────────────────────────────────────────────
+// This ran in a forked child at first, to drop to shell's uid for the access
+// check and to contain a parcel walk that might not match. Both reasons turned
+// out to be wrong, the first fatally: libbinder installs an atfork handler that
+// poisons ProcessState in the child, and this process has already initialised
+// it through libgui, so the first transaction after the fork aborted with
+// "libbinder ProcessState can not be used after fork".
+//
+// It was also unnecessary. AppOpsService.verifyAndGetBypass opens with
+//
+//     if (uid == Process.ROOT_UID) {
+//         // For backwards compatibility, don't check package name for root UID.
+//
+// so root may name any package, and the permission that unlocks background
+// reads is checked against the *package* — com.android.shell genuinely holds
+// READ_CLIPBOARD_IN_BACKGROUND. Root claiming to be shell passes both.
+//
+// The containment the child gave up is replaced by the caps above and by
+// checking every AParcel status: AParcel is bounds-checked and returns an
+// error rather than running off the end, so a layout that does not match now
+// fails the read instead of the process.
 std::string g_error;
-
-bool RunInShell(bool write, const char* text, std::string* out) {
-    if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
-
-    int fds[2];
-    if (pipe(fds) != 0) { g_error = "pipe failed"; return false; }
-
-    const pid_t pid = fork();
-    if (pid < 0) { close(fds[0]); close(fds[1]); g_error = "fork failed"; return false; }
-
-    if (pid == 0) {
-        close(fds[0]);
-        // Group before user: once the uid is dropped the gid can no longer be
-        // changed, and a mismatched pair is worse than either alone.
-        setgroups(0, nullptr);
-        setgid(kShellGid);
-        if (setuid(kShellUid) != 0) _exit(2);
-        std::string got;
-        const bool ok = write ? DoWrite(text) : DoRead(&got);
-        if (ok && !write && !got.empty())
-            (void)!::write(fds[1], got.data(), got.size());
-        close(fds[1]);
-        _exit(ok ? 0 : 1);
-    }
-
-    close(fds[1]);
-    std::string got;
-    char buf[4096];
-    ssize_t n;
-    while ((n = read(fds[0], buf, sizeof(buf))) > 0) got.append(buf, (size_t)n);
-    close(fds[0]);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-    const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    if (!exited_ok) {
-        if (WIFSIGNALED(status)) g_error = "clipboard helper crashed";
-        else if (WIFEXITED(status) && WEXITSTATUS(status) == 2) g_error = "cannot drop to shell";
-        else g_error = "clipboard refused";
-        return false;
-    }
-    g_error.clear();
-    if (out) *out = std::move(got);
-    return true;
-}
 
 } // namespace
 
 bool Available() { return LoadNdk(); }
 const char* LastError() { return g_error.c_str(); }
 
-bool ReadText(std::string* out)     { return RunInShell(false, nullptr, out); }
-bool WriteText(const char* text)    { return RunInShell(true, text ? text : "", nullptr); }
+bool ReadText(std::string* out) {
+    if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
+    if (!DoRead(out)) { g_error = "clipboard read refused"; return false; }
+    g_error.clear();
+    return true;
+}
+
+bool WriteText(const char* text) {
+    if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
+    if (!DoWrite(text ? text : "")) { g_error = "clipboard write refused"; return false; }
+    g_error.clear();
+    return true;
+}
 
 } // namespace aimgui::sysclip

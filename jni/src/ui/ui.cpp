@@ -626,11 +626,26 @@ void DrawResizeGrip(const UiState* state);
 void ContentGesture(const char* id, UiState* state) {
     enum class Mode { Undecided, Scroll, Move, Widget };
 
+    // The throw speed is measured over a short window of the most recent
+    // motion, not accumulated into a running average.
+    //
+    // An average has to include the last frames before the finger lifts, and
+    // those are exactly the frames that lie about the gesture: a finger that
+    // stops before letting go leaves a real throw reading as nearly nothing,
+    // and one that drifts back a pixel or two on the way up — which is most of
+    // them — flips the sign and sends the page the other way. That backwards
+    // twitch is the whole of the "it springs back" feeling.
+    constexpr int   kVelSamples = 8;
+    constexpr float kVelWindow  = 0.09f;   // seconds of history that count
     struct Drag {
         bool   active   = false;
         Mode   mode     = Mode::Undecided;
         ImVec2 start    = ImVec2(0, 0);
         float  velocity = 0.0f;   // scroll momentum, px/s
+        float  dy[kVelSamples] = {};
+        float  dt[kVelSamples] = {};
+        int    head  = 0;
+        int    count = 0;
     };
     // Keyed by id: the sidebar and the content pane both scroll and must not
     // share momentum or a decision.
@@ -648,6 +663,9 @@ void ContentGesture(const char* id, UiState* state) {
         if (!d->active) {
             d->active = true;
             d->start  = io.MousePos;
+            d->count  = 0;
+            d->head   = 0;
+            d->velocity = 0.0f;
             // A press that lands on a widget belongs to that widget for the
             // whole gesture; taking it back partway would need ClearActiveID,
             // which is not in the vendored public headers, and stealing a
@@ -666,8 +684,10 @@ void ContentGesture(const char* id, UiState* state) {
 
         if (d->mode == Mode::Scroll) {
             ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
-            // Smoothed, so one jittery frame cannot define the throw.
-            d->velocity = d->velocity * 0.65f + (-io.MouseDelta.y / dt) * 0.35f;
+            d->dy[d->head] = -io.MouseDelta.y;
+            d->dt[d->head] = dt;
+            d->head = (d->head + 1) % kVelSamples;
+            if (d->count < kVelSamples) ++d->count;
         } else if (d->mode == Mode::Move) {
             state->last_full_pos.x += io.MouseDelta.x;
             state->last_full_pos.y += io.MouseDelta.y;
@@ -676,9 +696,24 @@ void ContentGesture(const char* id, UiState* state) {
     } else {
         state->content_moving = false;
         if (d->active && d->mode == Mode::Scroll) {
-            // Released: glide on, shedding speed exponentially, coming to rest
-            // in about a second so it reads as friction rather than the list
-            // being yanked away.
+            // On the frame of release, work the throw out from the window of
+            // recent samples: total distance over total time. Frames where the
+            // finger had already stopped contribute their duration but no
+            // distance, so a pause before letting go damps the throw towards
+            // zero on its own instead of needing a rule.
+            if (d->count > 0) {
+                float sum_dy = 0.0f, sum_dt = 0.0f;
+                for (int i = 0; i < d->count && sum_dt < kVelWindow; ++i) {
+                    const int k = (d->head - 1 - i + kVelSamples * 2) % kVelSamples;
+                    sum_dy += d->dy[k];
+                    sum_dt += d->dt[k];
+                }
+                d->velocity = sum_dt > 1e-4f ? sum_dy / sum_dt : 0.0f;
+                d->count = 0;
+            }
+            // Then glide on, shedding speed exponentially, coming to rest in
+            // about a second so it reads as friction rather than the list being
+            // yanked away.
             d->velocity *= std::exp(-4.5f * dt);
             if (std::fabs(d->velocity) > 8.0f) {
                 ImGui::SetScrollY(ImGui::GetScrollY() + d->velocity * dt);
