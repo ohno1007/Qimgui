@@ -151,7 +151,8 @@ int main() {
         aimgui::live2d::SetBallScale(st.ball_scale);
         aimgui::live2d::SetView(st.expand);
 #endif
-        ws.renderer()->SetGlassRects(st.glass_rects, st.glass_count);
+        ws.renderer()->SetGlassRects(st.glass_rects, st.glass_count,
+                                     st.display_w, st.display_h);
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);
         ws.renderer()->SetSnapshotFrozen(st.exit_anim_active);
         ws.renderer()->EndFrame();

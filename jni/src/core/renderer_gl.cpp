@@ -103,14 +103,16 @@ public:
 
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
 
-    void SetGlassRects(const GlassRect* rects, int count) override {
+    void SetGlassRects(const GlassRect* rects, int count,
+                       int displayW, int displayH) override {
         m_GlassRects = rects;
         m_GlassCount = count;
+        m_GlassW = displayW; m_GlassH = displayH;
     }
 
     void DrawGlass() {
         if (m_GlassCount > 0 && m_BackdropTex)
-            m_Glass.Draw(m_BackdropTex, m_Width, m_Height, m_GlassRects, m_GlassCount);
+            m_Glass.Draw(m_BackdropTex, m_GlassW, m_GlassH, m_GlassRects, m_GlassCount);
     }
 
     void Shutdown() override {
@@ -179,6 +181,7 @@ private:
     GlassGL m_Glass;
     const GlassRect* m_GlassRects = nullptr;
     int              m_GlassCount = 0;
+    int              m_GlassW = 0, m_GlassH = 0;
     void (*m_ScenePreDraw)() = nullptr;
 };
 

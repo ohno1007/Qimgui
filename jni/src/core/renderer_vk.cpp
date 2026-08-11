@@ -150,9 +150,11 @@ public:
     // imports are cached by buffer pointer — re-importing per frame would mean
     // creating and destroying an image, a memory allocation and a descriptor
     // set 120 times a second.
-    void SetGlassRects(const GlassRect* rects, int count) override {
+    void SetGlassRects(const GlassRect* rects, int count,
+                       int displayW, int displayH) override {
         m_GlassRects = rects;
         m_GlassCount = count;
+        m_GlassW = displayW; m_GlassH = displayH;
     }
 
     unsigned long long ImportHardwareBuffer(AHardwareBuffer* ahb, int w, int h) override {
@@ -497,7 +499,7 @@ private:
         VkRect2D   sc{ {0, 0}, { (uint32_t)m_Width, (uint32_t)m_Height } };
         vkCmdSetViewport(cmd, 0, 1, &vp);
         vkCmdSetScissor(cmd, 0, 1, &sc);
-        m_Glass.Record(cmd, m_Width, m_Height, m_GlassRects, m_GlassCount);
+        m_Glass.Record(cmd, m_GlassW, m_GlassH, m_GlassRects, m_GlassCount);
     }
 
     void Submit(ImDrawData* draw) {
@@ -767,6 +769,7 @@ private:
     GlassVK               m_Glass;
     const GlassRect*      m_GlassRects = nullptr;
     int                   m_GlassCount = 0;
+    int                   m_GlassW = 0, m_GlassH = 0;
 
     ANativeWindow* m_Window = nullptr;
     VkInstance m_Instance = VK_NULL_HANDLE;

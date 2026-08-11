@@ -59,8 +59,14 @@ public:
     // before ImGui's draw data so widgets composite on top. Submitted per
     // frame; an empty list draws nothing. The source is whatever was last
     // handed to ImportHardwareBuffer.
-    virtual void SetGlassRects(const GlassRect* rects, int count) {
-        (void)rects; (void)count;
+    // `displayW/H` is the visible screen, which is NOT the surface size: the
+    // surface is square (max(w,h) on a side) so it survives rotation without
+    // being rebuilt, while the mirrored screen texture covers the display. The
+    // shader converts pixel positions to texture coordinates, so it needs the
+    // display's dimensions or the image lands scaled and offset.
+    virtual void SetGlassRects(const GlassRect* rects, int count,
+                               int displayW, int displayH) {
+        (void)rects; (void)count; (void)displayW; (void)displayH;
     }
 
     // Imports a screen-mirror AHardwareBuffer as a sampled texture and returns
