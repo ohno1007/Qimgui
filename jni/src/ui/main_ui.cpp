@@ -11,6 +11,7 @@
 #include "ui/main_ui.h"
 
 #include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
+#include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
 #include "core/screen_mirror.h"
@@ -29,11 +30,11 @@ namespace aimgui {
 
 // ─── Nav entries ─────────────────────────────────────────────────────────
 const PageItem kPages[] = {
-    { Page::Dashboard,   u8"概览" },
-    { Page::Widgets,     u8"控件" },
-    { Page::Window,      u8"窗口" },
-    { Page::Performance, u8"性能" },
-    { Page::About,       u8"关于" },
+    { Page::Dashboard,   ICON_FA_GAUGE       u8"   概览" },
+    { Page::Widgets,     ICON_FA_SLIDERS     u8"   控件" },
+    { Page::Window,      ICON_FA_WINDOW      u8"   窗口" },
+    { Page::Performance, ICON_FA_BOLT        u8"   性能" },
+    { Page::About,       ICON_FA_CIRCLE_INFO u8"   关于" },
 };
 const int kPagesCount = (int)(sizeof(kPages) / sizeof(kPages[0]));
 
@@ -138,7 +139,7 @@ void DrawWidgets() {
     static bool   toggle  = false;
     static ImVec4 tint(0.40f, 0.70f, 1.00f, 1.0f);
 
-    const bool hit = ImGui::Button(u8"点我");
+    const bool hit = ImGui::Button(ICON_FA_WAND u8"  点我");
     chrome::LastItem();
     if (hit) counter++;
     ripple::TouchLastItem();
@@ -332,7 +333,7 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"Live2D 小人");
     SliderFloatGrabValue(u8"小人大小", &state->ball_scale, 0.4f, 3.0f, "%.2f");
-    const bool speak = ImGui::Button(u8"让他说话", ImVec2(-FLT_MIN, 0));
+    const bool speak = ImGui::Button(ICON_FA_COMMENT u8"  让他说话", ImVec2(-FLT_MIN, 0));
     chrome::LastItem();
     if (speak) {
         live2d::Speak();

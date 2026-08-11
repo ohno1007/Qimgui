@@ -1,5 +1,6 @@
 #include "ui/ui.h"
 #include "ui/main_ui.h"
+#include "ui/icons.h"
 
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -530,7 +531,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::Spacing();
 
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 12));
-    const bool exit_pressed = ImGui::Button(u8"退出", ImVec2(-1, 0));
+    const bool exit_pressed = ImGui::Button(ICON_FA_POWER u8"  退出", ImVec2(-1, 0));
     chrome::LastItem();
     if (exit_pressed) {
         if (!state->exit_anim_active) {
@@ -685,9 +686,21 @@ void DrawCardContent(const UiState* state) {
     ImGui::Indent(kCardPadX);
     ImGui::Dummy(ImVec2(0, kCardPadY));
     ImGui::PushFont(nullptr, 34.0f);
-    ImGui::Text("AImGui");
+    if (state->card_icon) { ImGui::TextUnformatted(state->card_icon); ImGui::SameLine(0, 14); }
+    ImGui::TextUnformatted(state->card_title ? state->card_title : "AImGui");
     ImGui::PopFont();
     ImGui::Spacing();
+
+    // A caller-supplied body replaces the status block outright rather than
+    // adding to it — the card is small, and a card showing both would overflow
+    // rather than look full.
+    if (state->card_body) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextUnformatted(state->card_body);
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(kCardPadX);
+        return;
+    }
 
     ImGui::Text(u8"%.0f FPS   ·   %.2f ms", io.Framerate, 1000.0f / io.Framerate);
     ImGui::TextDisabled("%s", state->renderer_name ? state->renderer_name : "?");
@@ -709,16 +722,37 @@ void DrawCardContent(const UiState* state) {
     ImGui::Unindent(kCardPadX);
 }
 
-void DrawIslandContent() {
-    ImGuiIO& io = ImGui::GetIO();
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.0f FPS", io.Framerate);
+void DrawIslandContent(const UiState* state) {
+    char buf[96];
+    if (state->island_text) {
+        std::snprintf(buf, sizeof(buf), "%s%s%s",
+                      state->island_icon ? state->island_icon : "",
+                      state->island_icon ? "  " : "",
+                      state->island_text);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%s%s%.0f FPS",
+                      state->island_icon ? state->island_icon : "",
+                      state->island_icon ? "  " : "",
+                      ImGui::GetIO().Framerate);
+    }
 
-    ImVec2 ts = ImGui::CalcTextSize(buf);
-    ImVec2 ws = ImGui::GetWindowSize();
-    ImGui::SetCursorPos(ImVec2((ws.x - ts.x) * 0.5f,
-                               (ws.y - ts.y) * 0.5f));
+    const ImVec2 ts = ImGui::CalcTextSize(buf);
+    const ImVec2 ws = ImGui::GetWindowSize();
+    ImGui::SetCursorPos(ImVec2((ws.x - ts.x) * 0.5f, (ws.y - ts.y) * 0.5f));
     ImGui::TextUnformatted(buf);
+}
+
+// The dot sits outside the ImGui window, so its content goes on the foreground
+// list rather than through the layout.
+void DrawDotContent(const UiState* state, float alpha) {
+    if (state->dot_radius < 6.0f || alpha <= 0.01f) return;
+    const char* txt = state->dot_text ? state->dot_text : state->island_icon;
+    if (!txt || !*txt) return;
+    const ImVec2 ts = ImGui::CalcTextSize(txt);
+    ImGui::GetForegroundDrawList()->AddText(
+        ImVec2(state->dot_center.x - ts.x * 0.5f,
+               state->dot_center.y - ts.y * 0.5f),
+        ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)), txt);
 }
 
 // Bottom-right grip rect (in screen coords) anchored to the main window.
@@ -929,14 +963,26 @@ void DrawUi(UiState* state, bool* keep_running) {
     constexpr float kIslandW   = 280.0f;
     constexpr float kIslandH   = 56.0f;
     constexpr float kIslandTop = 28.0f;
+    // The companion circle. The gap is deliberately under half the merge
+    // radius, because a smooth union closes at the midline only past 2*gap —
+    // so at rest the two are joined by a thread rather than being separate,
+    // and it is the drag pulling them apart that breaks it.
+    constexpr float kDotD      = 56.0f;
+    constexpr float kDotGap    = 12.0f;
+    constexpr float kDotMerge  = 30.0f;
 
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
     // With the Live2D ball active the window springs from wherever the ball
     // sits (so collapsing returns to the ball's dragged position); otherwise
     // it uses the fixed top-centre island spot.
+    // The dot hangs off the capsule's right, so what should sit centred on
+    // screen is the pair. The offset fades out with the stage, since the dot
+    // is gone by the time the card is open.
+    const float dot_t = lt < 0.22f ? 1.0f - lt / 0.22f : 0.0f;
+    const float pair_shift = (kDotD + kDotGap) * 0.5f * dot_t;
     const ImVec2 island_pos = l2d_active
         ? ImVec2(state->ball_pos.x - kIslandW * 0.5f, state->ball_pos.y - kIslandH * 0.5f)
-        : ImVec2(dw * 0.5f - kIslandW * 0.5f, kIslandTop);
+        : ImVec2(dw * 0.5f - kIslandW * 0.5f - pair_shift, kIslandTop);
     const ImVec2 island_size(kIslandW, kIslandH);
 
     // The card: big enough to read, small enough to still feel like the island
@@ -1204,7 +1250,27 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->glass_nav_offset = ImVec2(0, 0);
             GlassRect r = base;
             r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
-            state->glass_rects[state->glass_count++] = r;
+            if (dot_t > 0.02f) {
+                // Its own body, and it lags the way the nav column does — so
+                // the thread between the two stretches when the island is
+                // thrown one way and the two run together when it is thrown
+                // the other. Nothing about the join is animated; only where
+                // the dot is.
+                GlassRect dot = base;
+                dot.w = dot.h = kDotD * dot_t;
+                dot.x = win_pos.x + win_size.x + kDotGap
+                        + state->glass_nav_lag.x * dot_t;
+                dot.y = win_pos.y + win_size.y * 0.5f - dot.h * 0.5f
+                        + state->glass_nav_lag.y * dot_t;
+                r.merge = dot.merge = kDotMerge;
+                state->dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
+                state->dot_radius = dot.w * 0.5f;
+                state->glass_rects[state->glass_count++] = r;
+                state->glass_rects[state->glass_count++] = dot;
+            } else {
+                state->dot_radius = 0.0f;
+                state->glass_rects[state->glass_count++] = r;
+            }
         }
     }
 
@@ -1253,7 +1319,8 @@ void DrawUi(UiState* state, bool* keep_running) {
         const float island_alpha = 1.0f - (lt < 0.30f ? lt / 0.30f : 1.0f);
         if (!l2d_active && island_alpha > 0.01f) {
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, island_alpha);
-            DrawIslandContent();
+            DrawIslandContent(state);
+            DrawDotContent(state, island_alpha);
             ImGui::PopStyleVar();
 
             if (!show_chrome && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {

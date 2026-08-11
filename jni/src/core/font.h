@@ -9,7 +9,10 @@ namespace ImGui {
 // HwChinese / HarmonyOS_Sans / DroidSansFallback ...) as the primary ImGui
 // font, with glyph ranges covering Latin + CJK Unified Ideographs +
 // Hiragana/Katakana + half-/full-width forms. Returns true on success.
-bool My_Android_LoadSystemFont(float SizePixels);
+// `merge` folds it into the previous font rather than starting a new one,
+// which is how it ends up supplying only the codepoints the embedded Latin
+// face lacks.
+bool My_Android_LoadSystemFont(float SizePixels, bool merge = false);
 
 } // namespace ImGui
 

@@ -42,6 +42,26 @@ struct UiState {
     float expand      = 1.0f;
     float expand_vel  = 0.0f;
 
+    // What the three rest states show. Every one of these is optional; leave it
+    // null and the built-in default is used. Icons come from ui/icons.h and are
+    // just strings, so they concatenate with text: ICON_FA_BOLT "  就绪".
+    //
+    // These are borrowed pointers read during DrawUi, so whatever they point at
+    // has to outlive the frame — a literal, or a buffer the caller keeps.
+    const char* island_text = nullptr;   // null → live frame rate
+    const char* island_icon = nullptr;   // drawn ahead of the text
+    const char* dot_text    = nullptr;   // the companion circle; null → island_icon
+    const char* card_title  = nullptr;   // null → "AImGui"
+    const char* card_icon   = nullptr;
+    const char* card_body   = nullptr;   // null → the built-in status block
+
+    // Where the companion circle ended up this frame, published by DrawUi so
+    // its content can be drawn on the foreground list — it sits outside the
+    // ImGui window and so is not reachable through the layout. radius 0 = gone.
+    ImVec2 dot_center = ImVec2(0, 0);
+    float  dot_radius = 0.0f;
+
+
     // Live2D floating "ball": when collapsed the character is the visual and
     // can be dragged anywhere; this is its centre in screen px. Re-clamped to
     // the display each frame. (-1,-1) = uninitialised → placed on first use.

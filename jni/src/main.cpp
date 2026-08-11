@@ -11,6 +11,7 @@
 #include "platform/ANativeWindowCreator.h"
 #include "platform/TouchHelperA.h"
 #include "ui/ui.h"
+#include "ui/icons.h"
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
 #endif
@@ -51,6 +52,11 @@ int main() {
 
     aimgui::UiState st;
     st.display_w = info.width; st.display_h = info.height;
+    // Defaults for the three rest states. All optional — null on any of these
+    // falls back to what the UI showed before there was a way to set them.
+    st.island_icon = ICON_FA_BOLT;
+    st.dot_text    = ICON_FA_ROBOT;
+    st.card_icon   = ICON_FA_CUBE;
 
     aimgui::WindowSession ws;
     if (!ws.Build(W, st.permeate_record)) { ImGui::DestroyContext(); return 1; }
