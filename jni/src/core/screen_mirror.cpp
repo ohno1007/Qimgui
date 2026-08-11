@@ -11,12 +11,9 @@
 namespace aimgui {
 namespace {
 
-// Each risky step is reported before it runs. Every call below goes through a
-// symbol resolved out of libgui by name, so a wrong binding takes the process
-// down with it, and the last line printed is then the only thing that says
-// which one. stderr because it is unbuffered — a buffered stdout would lose
-// the very line that matters when the process dies.
-#define MIRROR_STEP(fmt, ...) \
+// Only failures are reported, and only once each — this path is quiet when it
+// works. stderr because the binary is run from a shell.
+#define MIRROR_FAIL(fmt, ...) \
     std::fprintf(stderr, "[mirror] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 
 
@@ -42,42 +39,7 @@ constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour 
 // therefore needs them usable as a render target. Requesting only SAMPLED
 // leaves the compositor with nothing it can draw to, and the display sits
 // there producing no frames at all rather than reporting an error.
-constexpr uint64_t kUsageCpuWriteOften  = 3ULL << 4;  // for the self-test below
-constexpr uint64_t kUsageCpuReadOften   = 3ULL;       // for the luminance probe
-constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer |
-                                 kUsageCpuWriteOften | kUsageCpuReadOften;
-
-// AHardwareBuffer_lock/unlock are API 26, and this builds against 24, so they
-// are resolved at runtime like the AImageReader entry points.
-struct AhbNdk {
-    int  (*Lock)(AHardwareBuffer*, uint64_t usage, int32_t fence, const void* rect, void** out) = nullptr;
-    int  (*Unlock)(AHardwareBuffer*, int32_t* fence)                                            = nullptr;
-    void (*Describe)(const AHardwareBuffer*, void* desc)                                        = nullptr;
-    bool ok = false;
-};
-
-const AhbNdk& Ahb() {
-    static AhbNdk a = [] {
-        AhbNdk r;
-        void* lib = ::dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
-        if (!lib) return r;
-        r.Lock     = (decltype(r.Lock))     ::dlsym(lib, "AHardwareBuffer_lock");
-        r.Unlock   = (decltype(r.Unlock))   ::dlsym(lib, "AHardwareBuffer_unlock");
-        r.Describe = (decltype(r.Describe)) ::dlsym(lib, "AHardwareBuffer_describe");
-        r.ok = r.Lock && r.Unlock && r.Describe;
-        return r;
-    }();
-    return a;
-}
-
-// Only the leading fields are read, and this prefix has been stable across
-// every version that has AHardwareBuffer at all.
-struct AhbDescPrefix {
-    uint32_t width, height, layers, format;
-    uint64_t usage;
-    uint32_t stride, rfu0;
-    uint64_t rfu1;
-};
+constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer;
 
 struct MediaNdk {
     int32_t (*ReaderNewWithUsage)(int32_t w, int32_t h, int32_t fmt,
@@ -109,25 +71,6 @@ const MediaNdk& Media() {
     return m;
 }
 
-// Print SurfaceFlinger's own view of the displays it knows about. When every
-// setup call reports success but nothing is ever composited, the question that
-// actually matters is whether SF created the display at all — and only SF can
-// answer that.
-void DumpSurfaceFlingerDisplays() {
-    // The full state of *our* display, not just its id. screenrecord drives
-    // this same path successfully, so the answer is in whatever SurfaceFlinger
-    // records differently for ours — power mode, attached surface, layer stack.
-    FILE* pipe = ::popen("dumpsys SurfaceFlinger 2>/dev/null | grep -i -B10 -A6 'AImGuiMirror'", "r");
-    if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
-    char line[512];
-    int printed = 0;
-    while (std::fgets(line, sizeof(line), pipe) && printed < 24) {
-        std::fprintf(stderr, "[sf] %s", line);
-        ++printed;
-    }
-    ::pclose(pipe);
-}
-
 } // namespace
 
 bool ScreenMirror::Available() {
@@ -142,15 +85,13 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     if (!media.ok) return false;
     if (!android::ANativeWindowCreator::ScreenCaptureSupported()) return false;
 
-    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d fmt=RGBA_8888 usage=0x%llx",
-                width, height, (unsigned long long)kMirrorUsage);
     void* reader = nullptr;
     if (media.ReaderNewWithUsage(width, height, kFormatRgba8888, kMirrorUsage,
                                  /*maxImages=*/3, &reader) != kMediaOk || !reader) {
+        MIRROR_FAIL("AImageReader_newWithUsage failed (%dx%d)", width, height);
         return false;
     }
 
-    MIRROR_STEP("2/6 AImageReader_getWindow");
     ANativeWindow* window = nullptr;
     if (media.ReaderGetWindow(reader, &window) != kMediaOk || !window) {
         media.ReaderDelete(reader);
@@ -176,8 +117,6 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // there, which is the segfault.
     constexpr size_t kSurfaceToWindow = sizeof(std::max_align_t) / 2;
     void* surface = reinterpret_cast<char*>(window) - kSurfaceToWindow;
-    MIRROR_STEP("3/6 Surface::getIGraphicBufferProducer(window=%p surface=%p)",
-                (void*)window, surface);
     android::detail::StrongPointer<void> producer =
         fns.Surface__GetIGraphicBufferProducer(surface);
     if (!producer.get()) {
@@ -188,10 +127,10 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     auto& composer = android::ANativeWindowCreator::GetComposerInstance();
     // Non-secure: a secure display refuses to mirror protected content, and
     // showing that blurred beats failing outright.
-    MIRROR_STEP("4/6 createVirtualDisplay");
     android::detail::StrongPointer<void> token =
         composer.CreateVirtualDisplay("AImGuiMirror", /*secure=*/false);
     if (!token.get()) {
+        MIRROR_FAIL("createVirtualDisplay returned no token");
         media.ReaderDelete(reader);
         return false;
     }
@@ -220,82 +159,36 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     // it rejected any of it. The status was being discarded, which is why a
     // rejected transaction has looked identical to an accepted one all along.
     const int32_t applyRc = t.Apply(false, false);
-    MIRROR_STEP("5/6 transaction: surface=%d stack=%d(%u) proj=%d src=%dx%d dst=%dx%d -> apply rc=%d",
-                okSurf, okStack, layerStack, okProj,
-                srcWidth, srcHeight, width, height, applyRc);
 
-    // SurfaceFlinger stores our layer stack and projection correctly and the
-    // matching layers exist, yet it assigns none of them to this display —
-    // the signature of a display that is configured but not powered on. That
-    // normally happens automatically for virtual displays; do it explicitly.
-    // Powering on is what finally made SurfaceFlinger attach to our producer
-    // (the self-test's ANativeWindow_lock started failing with EINVAL once the
-    // queue was connected elsewhere). It does not do this on its own here.
-    MIRROR_STEP("5a power on");
-    const bool poweredOn = composer.SetDisplayPowerMode(token, /*ON=*/2);
+    // A virtual display that is configured but not powered on composites
+    // nothing, which from outside looks exactly like a layer-stack mismatch.
+    // SurfaceFlinger does not turn these on by itself here, and it only
+    // attaches to our producer once one is on.
+    composer.SetDisplayPowerMode(token, /*ON=*/2);
 
     // Mirror the physical display into a layer parked on our stack, so this
-    // display has exactly one thing to composite and it is the screen.
-    MIRROR_STEP("5b power=%d, mirrorDisplay symbol=%d; querying display id",
-                poweredOn,
-                android::detail::SurfaceComposerClient::MirrorDisplaySupported());
+    // display has exactly one thing to composite and it is the screen. Two
+    // displays sharing a layer stack used to be enough to mirror; this
+    // SurfaceFlinger stores the shared stack faithfully and then assigns no
+    // layers to the second display, so it needs a mirror layer instead.
     android::detail::ui::PhysicalDisplayId pid{};
-    const bool gotPid = android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid);
-    MIRROR_STEP("5c display id: got=%d value=%llu", gotPid,
-                (unsigned long long)pid.value);
-
-    if (gotPid && android::detail::SurfaceComposerClient::MirrorDisplaySupported()) {
-        MIRROR_STEP("5d calling mirrorDisplay");
+    if (android::ANativeWindowCreator::GetPrimaryPhysicalDisplayId(&pid) &&
+        android::detail::SurfaceComposerClient::MirrorDisplaySupported()) {
         m_MirrorLayer = composer.MirrorDisplay(pid).data;
-        MIRROR_STEP("5e mirrorDisplay -> %p", m_MirrorLayer);
         if (m_MirrorLayer) {
             android::detail::SurfaceComposerClientTransaction mt;
             android::detail::StrongPointer<void> mp{};
             mp.pointer = m_MirrorLayer;
             mt.SetLayerStack(mp, layerStack);
             mt.Show(mp);
-            const int32_t mrc = mt.Apply(false, false);
-            MIRROR_STEP("5f mirror layer -> stack %u, apply rc=%d", layerStack, mrc);
+            mt.Apply(false, false);
+        } else {
+            MIRROR_FAIL("mirrorDisplay returned no layer; nothing to composite");
         }
     }
 
-    MIRROR_STEP("6/6 running");
     m_Window = window;
 
-    // Self-test: post one frame into the reader ourselves, exactly as a
-    // producer would, and see whether the consumer side hands it back. This
-    // needs no extra symbols — ANativeWindow_lock/unlockAndPost are public
-    // NDK — and it splits the two remaining possibilities cleanly. If our own
-    // frame comes back, the queue, the reader and the window are all sound and
-    // the only party not producing is SurfaceFlinger. If it does not, the
-    // fault is on our side and no amount of display plumbing will help.
-    {
-        ANativeWindow_Buffer buf{};
-        const int lockRc = ANativeWindow_lock(window, &buf, nullptr);
-        if (lockRc != 0) {
-            MIRROR_STEP("self-test: lock failed rc=%d (usage may forbid CPU write)", lockRc);
-        } else {
-            uint8_t* p = static_cast<uint8_t*>(buf.bits);
-            for (int y = 0; y < buf.height; ++y) {
-                uint8_t* row = p + (size_t)y * buf.stride * 4;
-                for (int x = 0; x < buf.width; ++x) {
-                    row[x * 4 + 0] = 255; row[x * 4 + 1] = 0;
-                    row[x * 4 + 2] = 255; row[x * 4 + 3] = 255;
-                }
-            }
-            const int postRc = ANativeWindow_unlockAndPost(window);
-            void* img = nullptr;
-            const int32_t acqRc = media.ReaderAcquireLatest(reader, &img);
-            MIRROR_STEP("self-test: posted rc=%d -> acquire rc=%d img=%p  => %s",
-                        postRc, acqRc, img,
-                        (acqRc == kMediaOk && img)
-                            ? "QUEUE OK, so SurfaceFlinger is the one not producing"
-                            : "QUEUE BROKEN on our side");
-            if (img) media.ImageDelete(img);
-        }
-    }
-
-    DumpSurfaceFlingerDisplays();
     m_Reader  = reader;
     m_Token   = token.get();
     m_Width   = width;
@@ -323,55 +216,6 @@ void ScreenMirror::Stop() {
     m_Running = false;
 }
 
-float ScreenMirror::AverageLuma(float fx, float fy, float fw, float fh) {
-    // Mean brightness of the mirrored screen under a rectangle, so the UI can
-    // pick text that stays legible over whatever happens to be behind it.
-    //
-    // Read on the CPU rather than on the GPU because the answer is needed by
-    // ImGui while building the frame, and getting a GPU reduction back would
-    // cost a readback and a stall. The buffer is small, only a sparse grid is
-    // sampled, and it is throttled — this is a few thousand reads a second.
-    const AhbNdk& ahb = Ahb();
-    if (!ahb.ok || !m_Image || !m_LastBuffer) return m_Luma;
-
-    const auto now = std::chrono::steady_clock::now();
-    if (now - m_LastLuma < std::chrono::milliseconds(150)) return m_Luma;
-    m_LastLuma = now;
-
-    AhbDescPrefix d{};
-    ahb.Describe(m_LastBuffer, &d);
-    if (d.width == 0 || d.height == 0 || d.stride == 0) return m_Luma;
-
-    void* bits = nullptr;
-    if (ahb.Lock(m_LastBuffer, kUsageCpuReadOften, -1, nullptr, &bits) != 0 || !bits)
-        return m_Luma;
-
-    const int x0 = (int)(fx * (float)d.width),  x1 = (int)((fx + fw) * (float)d.width);
-    const int y0 = (int)(fy * (float)d.height), y1 = (int)((fy + fh) * (float)d.height);
-    const int cx0 = x0 < 0 ? 0 : x0, cy0 = y0 < 0 ? 0 : y0;
-    const int cx1 = x1 > (int)d.width  ? (int)d.width  : x1;
-    const int cy1 = y1 > (int)d.height ? (int)d.height : y1;
-
-    double sum = 0.0;
-    int    n   = 0;
-    const int stepX = (cx1 - cx0) / 24 + 1;
-    const int stepY = (cy1 - cy0) / 24 + 1;
-    const uint8_t* base = static_cast<const uint8_t*>(bits);
-    for (int y = cy0; y < cy1; y += stepY) {
-        const uint8_t* row = base + (size_t)y * d.stride * 4;
-        for (int x = cx0; x < cx1; x += stepX) {
-            const uint8_t* px = row + (size_t)x * 4;
-            sum += 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
-            ++n;
-        }
-    }
-    int32_t fence = -1;
-    ahb.Unlock(m_LastBuffer, &fence);
-
-    if (n > 0) m_Luma = (float)(sum / n / 255.0);
-    return m_Luma;
-}
-
 AHardwareBuffer* ScreenMirror::AcquireLatest() {
     if (!m_Running || !m_Reader) return nullptr;
     const MediaNdk& media = Media();
@@ -383,32 +227,7 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
         // Report the code periodically. NO_BUFFER_AVAILABLE means the
         // compositor simply hasn't produced anything yet; any other code is a
         // different failure and would otherwise look identical from the UI.
-        if (m_Frames == 0 && ++m_AcquireMisses % 240 == 0) {
-            // The queue's negotiated state answers whether SurfaceFlinger ever
-            // connected as a producer at all. If it had connected and dequeued,
-            // these would reflect what it asked for; unchanged values mean the
-            // display exists and the transaction was accepted, but nothing on
-            // SF's side ever touched our buffer queue.
-            // Now that SurfaceFlinger has long since processed the
-            // transaction, ask what it actually stored for our display.
-            // Immediately after apply() this raced: apply is asynchronous, so
-            // the display did not exist yet and the query simply failed.
-            android::detail::ui::DisplayState vs{};
-            android::detail::StrongPointer<void> tok{};
-            tok.pointer = m_Token;
-            const bool got =
-                android::ANativeWindowCreator::GetComposerInstance().GetDisplayStateOf(tok, &vs);
-            MIRROR_STEP("readback: query=%d layerStack=%u orientation=%d rect=%dx%d",
-                        got, vs.layerStack.id, (int)vs.orientation,
-                        vs.layerStackSpaceRect.width, vs.layerStackSpaceRect.height);
-
-            ANativeWindow* w = static_cast<ANativeWindow*>(m_Window);
-            MIRROR_STEP("acquire still empty after %llu tries, rc=%d; queue now %dx%d fmt=%d",
-                        (unsigned long long)m_AcquireMisses, rc,
-                        w ? ANativeWindow_getWidth(w) : -1,
-                        w ? ANativeWindow_getHeight(w) : -1,
-                        w ? ANativeWindow_getFormat(w) : -1);
-        }
+        // Nothing new since the last call — normal between frames.
         return nullptr;
     }
 
@@ -416,12 +235,10 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
     // flight, so it is only released once a newer one has arrived.
     if (m_Image) media.ImageDelete(m_Image);
     m_Image = image;
-    if (m_Frames == 0) MIRROR_STEP("first frame acquired");
     ++m_Frames;
 
     AHardwareBuffer* buffer = nullptr;
     if (media.ImageGetHardwareBuffer(image, &buffer) != kMediaOk) return nullptr;
-    m_LastBuffer = buffer;
     return buffer;
 }
 

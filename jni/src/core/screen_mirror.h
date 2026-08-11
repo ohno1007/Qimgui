@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 
 struct AHardwareBuffer;
@@ -40,11 +39,6 @@ public:
     // The returned buffer stays valid until the following AcquireLatest().
     AHardwareBuffer* AcquireLatest();
 
-    // Mean brightness (0..1) of the mirrored screen under a rectangle given in
-    // 0..1 screen coordinates, for choosing text that stays legible over it.
-    // Throttled internally and safe to call every frame.
-    float AverageLuma(float x, float y, float w, float h);
-
     int  width()  const { return m_Width; }
     int  height() const { return m_Height; }
     // Frames taken delivery of so far — a cheap liveness signal for the UI.
@@ -60,10 +54,6 @@ private:
     int      m_Width    = 0;
     int      m_Height   = 0;
     uint64_t m_Frames   = 0;
-    uint64_t m_AcquireMisses = 0;
-    AHardwareBuffer* m_LastBuffer = nullptr;
-    float    m_Luma     = 0.5f;
-    std::chrono::steady_clock::time_point m_LastLuma{};
 };
 
 } // namespace aimgui

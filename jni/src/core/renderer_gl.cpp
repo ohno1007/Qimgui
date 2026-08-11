@@ -4,7 +4,12 @@
 #include "glass_gl.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
+#include <android/hardware_buffer.h>
+
+#include <vector>
 #include <cstdint>
 
 #include "imgui.h"
@@ -103,12 +108,6 @@ public:
 
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
 
-    void SetGlassRects(const GlassRect* rects, int count,
-                       int displayW, int displayH) override {
-        m_GlassRects = rects;
-        m_GlassCount = count;
-        m_GlassW = displayW; m_GlassH = displayH;
-    }
 
     void DrawGlass() {
         if (m_GlassCount > 0 && m_BackdropTex)
@@ -119,7 +118,13 @@ public:
     void Shutdown() override {
         m_Bloom.Shutdown();
         m_Glass.Shutdown();
-        if (m_BackdropTex) { glDeleteTextures(1, &m_BackdropTex); m_BackdropTex = 0; }
+        static auto destroyImg = (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
+        for (auto& e : m_AhbCache) {
+            if (e.tex) glDeleteTextures(1, &e.tex);
+            if (destroyImg && e.img != EGL_NO_IMAGE_KHR) destroyImg(m_Display, e.img);
+        }
+        m_AhbCache.clear();
+        m_BackdropTex = 0;
         ImGui_ImplOpenGL3_Shutdown();
         if (m_Display != EGL_NO_DISPLAY) {
             eglMakeCurrent(m_Display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -141,6 +146,59 @@ public:
     }
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
+
+    void SetGlassRects(const GlassRect* rects, int count,
+                       int displayW, int displayH) override {
+        m_GlassRects = rects;
+        m_GlassCount = count;
+        m_GlassW = displayW; m_GlassH = displayH;
+    }
+
+    // Wraps one of the screen mirror's AHardwareBuffers as a texture via
+    // EGLImage. As on Vulkan there is no copy: the texture aliases the memory
+    // SurfaceFlinger composited into.
+    //
+    // Cached by buffer pointer — AImageReader cycles the same few buffers
+    // round-robin, and rebuilding an EGLImage per frame would mean creating and
+    // destroying one 120 times a second.
+    unsigned long long ImportHardwareBuffer(AHardwareBuffer* ahb, int w, int h) override {
+        (void)w; (void)h;
+        if (!ahb) return 0;
+        for (const auto& e : m_AhbCache)
+            if (e.ahb == ahb) { m_BackdropTex = e.tex; return (unsigned long long)e.tex; }
+        if (m_AhbCache.size() >= 8) return 0;
+
+        static auto getBuf = (PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC)
+            eglGetProcAddress("eglGetNativeClientBufferANDROID");
+        static auto createImg = (PFNEGLCREATEIMAGEKHRPROC)
+            eglGetProcAddress("eglCreateImageKHR");
+        static auto imgTarget = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+            eglGetProcAddress("glEGLImageTargetTexture2DOES");
+        if (!getBuf || !createImg || !imgTarget) return 0;
+
+        EGLClientBuffer cb = getBuf(ahb);
+        if (!cb) return 0;
+        const EGLint attrs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+        EGLImageKHR img = createImg(m_Display, EGL_NO_CONTEXT,
+                                    EGL_NATIVE_BUFFER_ANDROID, cb, attrs);
+        if (img == EGL_NO_IMAGE_KHR) return 0;
+
+        AhbEntry e{};
+        e.ahb = ahb;
+        e.img = img;
+        glGenTextures(1, &e.tex);
+        glBindTexture(GL_TEXTURE_2D, e.tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        imgTarget(GL_TEXTURE_2D, (GLeglImageOES)img);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        m_AhbCache.push_back(e);
+        m_BackdropTex = e.tex;
+        return (unsigned long long)e.tex;
+    }
 
     unsigned long long SetBackdropImage(const void* rgba, int w, int h) override {
         if (!rgba || w <= 0 || h <= 0) return 0;
@@ -176,6 +234,14 @@ private:
     EGLContext m_Context = EGL_NO_CONTEXT;
     int m_Width = 0;
     int m_Height = 0;
+    // One imported mirror buffer. Nothing here owns pixels — only the GL and
+    // EGL objects wrapping SurfaceFlinger's memory.
+    struct AhbEntry {
+        AHardwareBuffer* ahb = nullptr;
+        EGLImageKHR      img = EGL_NO_IMAGE_KHR;
+        GLuint           tex = 0;
+    };
+    std::vector<AhbEntry> m_AhbCache;
     GLuint m_BackdropTex = 0;
     int    m_BackdropW = 0, m_BackdropH = 0;
     BloomGL m_Bloom;

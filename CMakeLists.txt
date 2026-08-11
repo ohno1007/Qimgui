@@ -68,7 +68,6 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/font.cpp
     ${JNI}/src/core/keyboard_input.cpp
     ${JNI}/src/core/window_session.cpp
-    ${JNI}/src/core/screen_capture.cpp
     ${JNI}/src/core/screen_mirror.cpp
     ${JNI}/src/core/glass_gl.cpp
     ${JNI}/src/core/glass_vk.cpp)
