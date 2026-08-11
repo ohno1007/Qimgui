@@ -349,15 +349,81 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
 // Forward decl — body lives further down, but DrawContent invokes it.
 void DrawResizeGrip(const UiState* state);
 
+// ─── Touch scrolling ─────────────────────────────────────────────────────
+// Drag anywhere in the content to scroll it, with the throw-and-glide the
+// gesture implies. Call once inside the child, after its contents.
+//
+// A scrollbar is a mouse affordance: it asks for a precise grab on a 26 px
+// target, which is the wrong thing to hand a finger on a surface this size.
+// Dragging the content itself is how every touch UI does this.
+void TouchScroll(const char* id) {
+    // Per-child state, keyed by id — the sidebar and the content pane both
+    // scroll and must not share momentum.
+    struct Scroll {
+        bool  dragging   = false;
+        bool  cancelled  = false;   // gesture claimed by a widget
+        float start_y    = 0.0f;
+        float velocity   = 0.0f;
+    };
+    static std::vector<std::pair<const char*, Scroll>> states;
+    Scroll* st = nullptr;
+    for (auto& e : states) if (e.first == id) { st = &e.second; break; }
+    if (!st) { states.push_back({id, Scroll{}}); st = &states.back().second; }
+
+    ImGuiIO&   io = ImGui::GetIO();
+    const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
+
+    const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                                                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+
+    if (io.MouseDown[0] && hovered && !st->cancelled) {
+        if (!st->dragging) {
+            st->dragging = true;
+            st->start_y  = io.MousePos.y;
+            // A press that lands on a widget belongs to that widget for the
+            // whole gesture. Taking it back partway would need ClearActiveID,
+            // which lives in imgui_internal.h and is not vendored here — and
+            // handing a slider's drag to the scroller halfway through would be
+            // worse than not scrolling. Pressing anywhere else scrolls.
+            st->cancelled = ImGui::IsAnyItemActive();
+        }
+        if (!st->cancelled && std::fabs(io.MousePos.y - st->start_y) > 2.0f) {
+            const float d = io.MouseDelta.y;
+            ImGui::SetScrollY(ImGui::GetScrollY() - d);
+            // Smoothed so a jittery last frame doesn't define the throw.
+            st->velocity = st->velocity * 0.65f + (-d / dt) * 0.35f;
+        }
+    } else {
+        if (st->dragging && !st->cancelled) {
+            // Released: glide on, shedding speed exponentially. 4.5/s reaches a
+            // stop in roughly a second, which reads as friction rather than as
+            // the list being yanked away.
+            st->velocity *= std::exp(-4.5f * dt);
+            if (std::fabs(st->velocity) > 8.0f) {
+                ImGui::SetScrollY(ImGui::GetScrollY() + st->velocity * dt);
+            } else {
+                st->velocity = 0.0f;
+                st->dragging = false;
+            }
+        } else {
+            st->dragging  = false;
+            st->cancelled = false;
+            st->velocity  = 0.0f;
+        }
+    }
+}
+
 void DrawContent(UiState* state, Page page) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 18));
 
     ImGui::BeginChild("##content", ImVec2(0, 0),
-                      ImGuiChildFlags_AlwaysUseWindowPadding);
+                      ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NoScrollbar);
     // Per-page body lives in main_ui.cpp.
     DrawPage(state, page);
     // Pips + preview frame only (input handled before Begin in DrawUi).
     DrawResizeGrip(state);
+    TouchScroll("##content");
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
