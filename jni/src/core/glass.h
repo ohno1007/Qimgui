@@ -36,14 +36,15 @@ struct GlassRect {
 constexpr int kMaxGlassRects = 8;
 
 // The shader merges at most this many panes in one pass. The limit is Vulkan's
-// guaranteed 128 bytes of push constants, which is exactly what five vec4s of
-// shared state plus three shapes come to.
-constexpr int kMaxMergedShapes = 3;
+// guaranteed 128 bytes of push constants: four vec4s of shared state plus four
+// shapes come to exactly that. The quad's bounds used to take a fifth vec4 of
+// shared state; the vertex shader derives them from the shapes instead, which
+// is what bought the fourth shape.
+constexpr int kMaxMergedShapes = 4;
 
-// A group of panes packed the way both backends upload it: one quad over the
-// lot, and the shapes that its distance field is the smooth union of.
+// A group of panes packed the way both backends upload it: the shapes whose
+// smooth union the distance field is.
 struct GlassGroup {
-    float bx = 0, by = 0, bw = 0, bh = 0;        // quad bounds, screen px
     float shapes[kMaxMergedShapes * 4] = {};     // xy = centre, zw = half size
 };
 
@@ -51,8 +52,7 @@ struct GlassGroup {
 // nothing to draw. Panes past kMaxMergedShapes are dropped; a slot with a
 // non-positive half-width is how the shader knows where the list ends.
 inline bool BuildGlassGroup(const GlassRect* rects, int count, GlassGroup* out) {
-    int   n = 0;
-    float minx = 0, miny = 0, maxx = 0, maxy = 0, merge = 0.0f;
+    int n = 0;
     for (int i = 0; i < count && n < kMaxMergedShapes; ++i) {
         const GlassRect& r = rects[i];
         if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
@@ -61,27 +61,12 @@ inline bool BuildGlassGroup(const GlassRect* rects, int count, GlassGroup* out) 
         out->shapes[n * 4 + 1] = r.y + hh;
         out->shapes[n * 4 + 2] = hw;
         out->shapes[n * 4 + 3] = hh;
-        if (r.merge > merge) merge = r.merge;
-        if (n == 0) {
-            minx = r.x; miny = r.y; maxx = r.x + r.w; maxy = r.y + r.h;
-        } else {
-            if (r.x < minx) minx = r.x;
-            if (r.y < miny) miny = r.y;
-            if (r.x + r.w > maxx) maxx = r.x + r.w;
-            if (r.y + r.h > maxy) maxy = r.y + r.h;
-        }
         ++n;
     }
     if (n == 0) return false;
     for (int i = n; i < kMaxMergedShapes; ++i)
         out->shapes[i * 4 + 0] = out->shapes[i * 4 + 1] =
         out->shapes[i * 4 + 2] = out->shapes[i * 4 + 3] = 0.0f;
-    // The smooth union bulges outside the plain union near a join, so the quad
-    // gets the merge radius on every side too.
-    out->bx = minx - merge;
-    out->by = miny - merge;
-    out->bw = (maxx - minx) + merge * 2.0f;
-    out->bh = (maxy - miny) + merge * 2.0f;
     return true;
 }
 

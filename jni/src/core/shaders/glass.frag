@@ -20,12 +20,11 @@ layout(location = 0) out vec4 fragColor;
 layout(set = 0, binding = 0) uniform sampler2D uScreen;
 
 layout(push_constant) uniform Push {
-    vec4 bounds;    // quad bounds in screen px: xy = min, zw = size
     vec4 screen;    // xy = display size px (UV), zw = surface size px (NDC)
     vec4 params;    // x = rounding px, y = edge width px, z = bend, w = alpha
     vec4 tint;      // rgb = wash colour, a = wash strength
     vec4 params2;   // x = blur px, yz = key light direction, w = merge radius px
-    vec4 shapes[3]; // xy = centre px, zw = half size px; z <= 0 means unused
+    vec4 shapes[4]; // xy = centre px, zw = half size px; z <= 0 means unused
 } pc;
 
 // Shadow. Whatever these add up to must stay inside glass.vert's kPad, or the
@@ -65,7 +64,7 @@ float smin(float a, float b, float k) {
 // like any other part of the surface instead of being a seam between two.
 float sceneSDF(vec2 p) {
     float d = sdRoundedBox(p - pc.shapes[0].xy, pc.shapes[0].zw, pc.params.x);
-    for (int i = 1; i < 3; ++i) {
+    for (int i = 1; i < 4; ++i) {
         if (pc.shapes[i].z <= 0.0) continue;
         d = smin(d, sdRoundedBox(p - pc.shapes[i].xy, pc.shapes[i].zw, pc.params.x),
                  pc.params2.w);

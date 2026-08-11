@@ -303,6 +303,23 @@ constexpr float kGlassStrandW  = 26.0f;   // added to the gap, so it overlaps
 constexpr float kGlassStrandH  = 96.0f;
 constexpr float kGlassStrandAt = 0.46f;   // down the window, 0..1
 
+// Dragging pulls the parted bodies back towards each other. kGlassDragFull is
+// the speed, px/s, that counts as a full pull; kGlassMergeGain is how much
+// merge radius that adds. At full pull the radius passes 2*gap and the slot
+// closes over — shove the window hard and the glass runs back together, let go
+// and it parts again with the spring's wobble.
+constexpr float kGlassDragFull   = 2400.0f;
+constexpr float kGlassMergeGain  = 14.0f;
+constexpr float kGlassGapSqueeze = 0.28f;  // fraction of the gap the pull eats
+// The spring is under-damped, so on release it swings past rest. Letting the
+// pull go negative there widens the gaps and thins the merge for a moment —
+// the recoil after the bodies snap back apart. Bounded so it stays a wobble.
+constexpr float kGlassRecoil     = -0.35f;
+// The strand is not under any widget, so unlike the panes it is free to trail
+// behind the drag. Seconds of lag, and the furthest it may fall back.
+constexpr float kGlassStrandLag    = 0.030f;
+constexpr float kGlassStrandLagMax = 34.0f;
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────
 void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // Wide enough that the labels clear the lensed band on both sides. The
@@ -310,7 +327,9 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // width out of this column, so the padding is set by that side and the
     // left simply inherits it.
     constexpr float kInnerPadX     = 30.0f;
-    constexpr float kInnerPadY     = 14.0f;
+    // The nav column's pane now starts below the title bar with a slot between
+    // them, so its top edge is lensed too and the first entry has to clear it.
+    constexpr float kInnerPadY     = 30.0f;
     constexpr float kSelectableH   = 44.0f;
     constexpr float kAccentInset   = 10.0f;
     constexpr float kAccentW       = 4.0f;
@@ -933,41 +952,94 @@ void DrawUi(UiState* state, bool* keep_running) {
         // Below the full-window stage there is nothing to part: the island and
         // the card are a single body, and win_pos/win_size already interpolate
         // all the way down to the pill.
+        // How hard the drag is pulling the bodies together. The velocity is
+        // low-passed first: a single jittery frame of finger input would
+        // otherwise snap the whole thing, and what is wanted is the feel of
+        // mass, which is exactly what a lag gives.
+        {
+            const float dt = ImGui::GetIO().DeltaTime;
+            ImVec2 inst(0, 0);
+            if (state->glass_pos_valid && dt > 1e-5f) {
+                inst.x = (win_pos.x - state->glass_prev_pos.x) / dt;
+                inst.y = (win_pos.y - state->glass_prev_pos.y) / dt;
+            }
+            state->glass_prev_pos  = win_pos;
+            state->glass_pos_valid = true;
+            const float k = 1.0f - std::exp(-12.0f * dt);
+            state->glass_drag_vel.x += (inst.x - state->glass_drag_vel.x) * k;
+            state->glass_drag_vel.y += (inst.y - state->glass_drag_vel.y) * k;
+            const float speed = std::sqrt(state->glass_drag_vel.x * state->glass_drag_vel.x +
+                                          state->glass_drag_vel.y * state->glass_drag_vel.y);
+            const float target = std::min(speed / kGlassDragFull, 1.0f);
+            UpdateSpring(&state->glass_cohesion, &state->glass_cohesion_vel, target, dt);
+        }
+        const float coh = state->glass_cohesion < kGlassRecoil ? kGlassRecoil
+                                                               : state->glass_cohesion;
+
         const float split = lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f;
-        GlassRect a = base, b = base, strand = base;
+        GlassRect a = base, b = base, strand = base, title = base;
         bool parted = false;
         if (split > 0.01f) {
-            // Two bodies rather than one, parted along the nav column's edge,
-            // with a strand left across the middle. The gap opens from zero
-            // with the stage, so the parting grows out of the single pane
-            // rather than appearing on top of it; at zero the two shapes meet
-            // exactly and the smoothing fills the notches their rounded corners
-            // would otherwise leave along the seam.
+            // The title bar belongs to the content, not to the nav column: it
+            // is its own full-width shape butted against the content's top edge
+            // so the two are one body, and the nav column is the thing that
+            // comes away. Making the nav column full height instead put the
+            // window's title on it, which read as the title belonging to the
+            // menu — the opposite of what the split is for.
+            //
+            // The gaps open from zero with the stage, so the parting grows out
+            // of the single pane rather than appearing on top of it; at zero
+            // every shape meets its neighbour exactly and the smoothing fills
+            // the notches their rounded corners would leave along the seams.
             const ImGuiStyle& stl = ImGui::GetStyle();
-            const float divide = win_pos.x + stl.WindowPadding.x + kSidebarW;
-            const float gap    = kGlassGap * split;
+            const float divide  = win_pos.x + stl.WindowPadding.x + kSidebarW;
+            const float title_h = ImGui::GetFontSize() + stl.FramePadding.y * 2.0f;
+            // Dragging squeezes the gaps shut and widens the merge at the same
+            // time; between them the slot passes the 2*gap threshold and heals.
+            const float pull  = coh < 1.0f ? coh : 1.0f;
+            const float gap   = kGlassGap * split * (1.0f - kGlassGapSqueeze * pull);
+            const float merge = kGlassMerge + kGlassMergeGain * coh;
 
-            a.x = win_pos.x;
-            a.y = win_pos.y;
-            a.w = (divide - gap * 0.5f) - a.x;
-            a.h = win_size.y;
+            // A little past the title bar so it overlaps the content and the
+            // two are unambiguously one body. Kept small: the nav column's slot
+            // is measured from this edge, not from the title bar's, and every
+            // pixel of overlap is a pixel the slot loses.
+            constexpr float kTitleOverlap = 4.0f;
+            title.x = win_pos.x;
+            title.y = win_pos.y;
+            title.w = win_size.x;
+            title.h = title_h + kTitleOverlap;
 
             b.x = divide + gap * 0.5f;
-            b.y = win_pos.y;
+            b.y = win_pos.y + title_h;
             b.w = (win_pos.x + win_size.x) - b.x;
-            b.h = win_size.y;
+            b.h = (win_pos.y + win_size.y) - b.y;
 
+            a.x = win_pos.x;
+            a.y = win_pos.y + title_h + kTitleOverlap + gap;
+            a.w = (divide - gap * 0.5f) - a.x;
+            a.h = (win_pos.y + win_size.y) - a.y;
+
+            // The strand carries no widgets, so unlike the panes it is free to
+            // trail the drag — the one part of the sheet that can show the lag
+            // without sliding out from under what is drawn on it. Along the
+            // slot only: pushed across it, it would come off one side and the
+            // join would simply break.
+            float lag = -state->glass_drag_vel.y * kGlassStrandLag;
+            lag = lag < -kGlassStrandLagMax ? -kGlassStrandLagMax
+                                            : (lag > kGlassStrandLagMax ? kGlassStrandLagMax : lag);
             strand.w = gap + kGlassStrandW;
-            strand.h = kGlassStrandH;
+            strand.h = kGlassStrandH * (1.0f + 0.7f * coh);   // pulled thin and long
             strand.x = divide - strand.w * 0.5f;
-            strand.y = win_pos.y + win_size.y * kGlassStrandAt - strand.h * 0.5f;
+            strand.y = win_pos.y + win_size.y * kGlassStrandAt - strand.h * 0.5f + lag;
 
-            a.merge = b.merge = strand.merge = kGlassMerge;
-            parted = a.w > 2.0f && b.w > 2.0f;
+            a.merge = b.merge = strand.merge = title.merge = merge;
+            parted = a.w > 2.0f && b.w > 2.0f && a.h > 2.0f;
         }
         if (parted) {
-            state->glass_rects[state->glass_count++] = a;
+            state->glass_rects[state->glass_count++] = title;
             state->glass_rects[state->glass_count++] = b;
+            state->glass_rects[state->glass_count++] = a;
             state->glass_rects[state->glass_count++] = strand;
         } else {
             GlassRect r = base;

@@ -33,7 +33,6 @@ private:
     GLuint m_Prog    = 0;
     GLuint m_VAO     = 0;
     GLint  m_LocScreenTex = -1;
-    GLint  m_LocBounds    = -1;
     GLint  m_LocShapes    = -1;
     GLint  m_LocScreen    = -1;
     GLint  m_LocSurface   = -1;

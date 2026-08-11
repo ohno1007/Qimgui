@@ -84,6 +84,18 @@ struct UiState {
     float glass_light_x = -0.6f;
     float glass_light_y = -0.8f;
 
+    // How strongly the parted panes are pulling towards each other. Driven by
+    // how fast the window is being dragged: shove a body of liquid around and
+    // its parts draw together, then wobble apart again once it settles. The
+    // spring behind it is under-damped, so it overshoots on the way in and past
+    // rest on the way back — that overshoot is the whole feeling.
+    float  glass_cohesion     = 0.0f;
+    float  glass_cohesion_vel = 0.0f;
+    // Smoothed drag velocity in px/s, and the position it is differenced from.
+    ImVec2 glass_drag_vel  = ImVec2(0, 0);
+    ImVec2 glass_prev_pos  = ImVec2(0, 0);
+    bool   glass_pos_valid = false;
+
     // Live screen mirror: SurfaceFlinger composites the screen into buffers
     // we own, giving sampleable pixels for a refracting backdrop. The frame
     // counter is a liveness signal — if it stops rising, frames stopped

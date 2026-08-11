@@ -10,16 +10,30 @@ namespace {
 // Four corners straight from gl_VertexID — no vertex buffer. One quad covers
 // the whole group, because the fragment stage merges the panes' distance fields
 // and has to see all of them at once. kPad must cover the shadow's offset plus
-// its softness; the merge radius is already in uBounds.
+// its softness; the merge radius is added on top of it here.
 const char* kVS = R"(#version 300 es
 precision highp float;
-out vec2 vPx;          // this vertex in screen px
-uniform vec4 uBounds;  // xy = group min px, zw = group size px
-uniform vec2 uSurface; // render target size px
+out vec2 vPx;            // this vertex in screen px
+uniform vec2 uSurface;   // render target size px
+uniform vec4 uShapes[4]; // xy = centre px, zw = half size px
+uniform vec4 uParams2;   // w = merge radius px
 const float kPad = 48.0;
 void main() {
+    // Bounds are derived here rather than uploaded, matching the Vulkan side
+    // where the vec4 they used to occupy is what pays for the fourth shape.
+    vec2 lo = uShapes[0].xy - uShapes[0].zw;
+    vec2 hi = uShapes[0].xy + uShapes[0].zw;
+    for (int i = 1; i < 4; ++i) {
+        if (uShapes[i].z <= 0.0) continue;
+        lo = min(lo, uShapes[i].xy - uShapes[i].zw);
+        hi = max(hi, uShapes[i].xy + uShapes[i].zw);
+    }
+    // The smooth union bulges outside the plain union near a join, so the merge
+    // radius is added on every side as well as the shadow's padding.
+    float grow = kPad + max(uParams2.w, 0.0);
+    lo -= grow; hi += grow;
     vec2 uv = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
-    vPx = uBounds.xy - kPad + uv * (uBounds.zw + 2.0 * kPad);
+    vPx = mix(lo, hi, uv);
     // NDC is relative to the render target — the square surface — not the
     // visible display, which is what the fragment stage samples against.
     vec2 ndc = vPx / uSurface * 2.0 - 1.0;
@@ -34,12 +48,11 @@ precision highp float;
 in  vec2 vPx;          // this pixel in screen px
 out vec4 fragColor;
 uniform sampler2D uScreenTex;
-uniform vec4 uBounds;  // xy = group min px, zw = group size px
 uniform vec2 uScreen;
 uniform vec4 uParams;  // x = rounding, y = edge width, z = bend, w = alpha
 uniform vec4 uTint;    // rgb = wash colour, a = wash strength
 uniform vec4 uParams2; // x = blur px, yz = key light dir, w = merge radius px
-uniform vec4 uShapes[3]; // xy = centre px, zw = half size px; z <= 0 = unused
+uniform vec4 uShapes[4]; // xy = centre px, zw = half size px; z <= 0 = unused
 
 // Shadow. Must stay inside the vertex stage's kPad or it gets clipped.
 const vec2  kShadowOffset = vec2(0.0, 12.0);
@@ -72,7 +85,7 @@ float smin(float a, float b, float k) {
 // of the surface rather than being a seam between two panes.
 float sceneSDF(vec2 p) {
     float d = sdRoundedBox(p - uShapes[0].xy, uShapes[0].zw, uParams.x);
-    for (int i = 1; i < 3; ++i) {
+    for (int i = 1; i < 4; ++i) {
         if (uShapes[i].z <= 0.0) continue;
         d = smin(d, sdRoundedBox(p - uShapes[i].xy, uShapes[i].zw, uParams.x),
                  uParams2.w);
@@ -274,7 +287,6 @@ bool GlassGL::Init() {
     }
 
     m_LocScreenTex = glGetUniformLocation(m_Prog, "uScreenTex");
-    m_LocBounds    = glGetUniformLocation(m_Prog, "uBounds");
     // GLSL ES guarantees an array's elements take consecutive locations, so one
     // location plus a count uploads the whole thing. Drivers disagree on which
     // spelling of the name they answer to, and getting -1 here would upload
@@ -326,7 +338,6 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
     GlassGroup g;
     if (BuildGlassGroup(rects, count, &g)) {
         const GlassRect& r = rects[0];
-        glUniform4f(m_LocBounds, g.bx, g.by, g.bw, g.bh);
         glUniform4f(m_LocParams, r.rounding, r.edgeWidth, r.bend, r.alpha);
         glUniform4f(m_LocTint, r.tintR, r.tintG, r.tintB, r.tintA);
         glUniform4f(m_LocParams2, r.blur, r.lightX, r.lightY, r.merge);

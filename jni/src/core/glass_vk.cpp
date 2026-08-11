@@ -13,7 +13,6 @@ namespace {
 // Exactly 128 bytes, which is the smallest maxPushConstantsSize Vulkan
 // guarantees — kMaxMergedShapes is sized to land on it, so this must not grow.
 struct Push {
-    float bounds[4];  // xy = group min px, zw = group size px
     float screen[4];  // xy = display size px (UV), zw = surface size px (NDC)
     float params[4];  // rounding, edge width, bend, alpha
     float tint[4];    // rgb = wash colour, a = wash strength
@@ -193,7 +192,6 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
 
     const GlassRect& r = rects[0];   // shared material settings
     Push p{};
-    p.bounds[0] = g.bx; p.bounds[1] = g.by; p.bounds[2] = g.bw; p.bounds[3] = g.bh;
     p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
     p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
     p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
