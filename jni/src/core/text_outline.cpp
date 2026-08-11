@@ -58,12 +58,31 @@ void OutlineText(ImDrawData* dd, float radius, unsigned char alpha) {
     for (int n = 0; n < dd->CmdListsCount; ++n) {
         ImDrawList* src = dd->CmdLists[n];
 
-        // A user callback cannot be reproduced by replaying geometry, so a list
-        // containing one is left exactly as it came.
-        bool has_callback = false;
-        for (const ImDrawCmd& cmd : src->CmdBuffer)
-            if (cmd.UserCallback) { has_callback = true; break; }
-        if (has_callback) {
+        // Two reasons to leave a list exactly as it came.
+        //
+        // A user callback cannot be reproduced by replaying geometry.
+        //
+        // And a texture queued for destruction cannot be pushed onto a draw
+        // list at all: PushTexture asserts on it. The texture is not actually
+        // dead — ImTextureData says of that flag "may still be used in the
+        // current frame", and this frame's own commands are still drawing with
+        // it — but the assert cannot tell replaying finished commands from
+        // recording new ones, and it aborts the process rather than complains.
+        // The atlas queues a texture whenever it outgrows itself, which here
+        // means whenever a Chinese glyph nobody has typed yet gets rasterised,
+        // so this is not rare. One frame without outlines is not noticeable.
+        // An empty list is skipped too: there is nothing to rebuild, and the
+        // seed texture it would be given comes from the atlas rather than from
+        // a command, so it is not covered by the scan below.
+        bool skip = src->CmdBuffer.Size == 0;
+        for (const ImDrawCmd& cmd : src->CmdBuffer) {
+            if (cmd.UserCallback) { skip = true; break; }
+            if (cmd.TexRef._TexData && cmd.TexRef._TexData->WantDestroyNextFrame) {
+                skip = true;
+                break;
+            }
+        }
+        if (skip) {
             total_vtx += src->VtxBuffer.Size;
             total_idx += src->IdxBuffer.Size;
             continue;
@@ -72,8 +91,9 @@ void OutlineText(ImDrawData* dd, float radius, unsigned char alpha) {
         ImDrawList* out = g_pool[n];
         out->_ResetForNewFrame();
         out->PushClipRect(ImVec2(-8192.0f, -8192.0f), ImVec2(8192.0f, 8192.0f), false);
-        out->PushTexture(src->CmdBuffer.Size ? src->CmdBuffer[0].TexRef
-                                             : ImGui::GetIO().Fonts->TexRef);
+        // Safe by the scan above: the list is non-empty and none of its
+        // textures is queued for destruction.
+        out->PushTexture(src->CmdBuffer[0].TexRef);
 
         for (const ImDrawCmd& cmd : src->CmdBuffer) {
             if (cmd.ElemCount == 0) continue;
