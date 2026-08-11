@@ -464,6 +464,109 @@ void UpdateSpring(float* pos, float* vel, float target, float dt) {
 
 } // namespace
 
+
+// ─── Liquid glass ────────────────────────────────────────────────────────
+// Draws the live screen behind the window as if seen through a thick pane of
+// glass: the middle is clear, and towards the rim the image bends and
+// compresses the way it does through a rounded edge, finished with a specular
+// highlight along the lit side.
+//
+// The refraction is done per-vertex over a tessellated quad rather than in a
+// shader. A custom pipeline would have to be written twice, once per backend,
+// and hooked into the bloom composite; a grid rides ImGui's existing textured
+// path and costs a few hundred vertices. The distortion is smooth and
+// low-frequency, so evaluating it per-vertex and letting the rasteriser
+// interpolate is visually indistinguishable from doing it per-pixel.
+namespace glass {
+
+// Signed distance to a rounded box centred on the origin. Negative inside.
+float SdRoundedBox(const ImVec2& p, const ImVec2& half, float r) {
+    const float qx = std::fabs(p.x) - half.x + r;
+    const float qy = std::fabs(p.y) - half.y + r;
+    const float ax = qx > 0.0f ? qx : 0.0f;
+    const float ay = qy > 0.0f ? qy : 0.0f;
+    const float outside = std::sqrt(ax * ax + ay * ay);
+    const float inside  = (qx > qy ? qx : qy);
+    return (inside < 0.0f ? inside : 0.0f) + outside - r;
+}
+
+void Draw(ImDrawList* dl, ImTextureID tex, const ImVec2& pos, const ImVec2& size,
+          float rounding, float display_w, float display_h, float alpha) {
+    if (!tex || size.x < 4.0f || size.y < 4.0f) return;
+    if (display_w <= 0.0f || display_h <= 0.0f) return;
+
+    constexpr int   kCells     = 24;    // grid resolution
+    constexpr float kEdgeWidth = 46.0f; // how far in the bending reaches, px
+    constexpr float kBend      = 0.42f; // how hard the rim pulls the image
+
+    const ImVec2 half(size.x * 0.5f, size.y * 0.5f);
+    const ImVec2 centre(pos.x + half.x, pos.y + half.y);
+    const int    nx = kCells + 1, ny = kCells + 1;
+
+    dl->PushTexture(ImTextureRef(tex));
+    dl->PrimReserve(kCells * kCells * 6, nx * ny);
+
+    const unsigned int base = dl->_VtxCurrentIdx;
+    const ImU32 col = IM_COL32(255, 255, 255, (int)(alpha * 255.0f));
+
+    for (int j = 0; j < ny; ++j) {
+        for (int i = 0; i < nx; ++i) {
+            const float u = (float)i / (float)kCells;
+            const float v = (float)j / (float)kCells;
+            const ImVec2 p(pos.x + size.x * u, pos.y + size.y * v);
+
+            // Distance to the rim, and the direction pointing away from it.
+            const ImVec2 rel(p.x - centre.x, p.y - centre.y);
+            const float  d = SdRoundedBox(rel, half, rounding);
+
+            // Gradient of the distance field by central difference — the
+            // surface normal of the glass edge at this point.
+            constexpr float kEps = 1.5f;
+            const float gx = SdRoundedBox(ImVec2(rel.x + kEps, rel.y), half, rounding) -
+                             SdRoundedBox(ImVec2(rel.x - kEps, rel.y), half, rounding);
+            const float gy = SdRoundedBox(ImVec2(rel.x, rel.y + kEps), half, rounding) -
+                             SdRoundedBox(ImVec2(rel.x, rel.y - kEps), half, rounding);
+            const float glen = std::sqrt(gx * gx + gy * gy) + 1e-5f;
+
+            // Ramps from 0 well inside the pane to 1 at the very rim, so the
+            // centre stays honest and only the border refracts.
+            float t = 1.0f + d / kEdgeWidth;   // d is negative inside
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            const float bend = t * t * kEdgeWidth * kBend;
+
+            // Sample from further out near the rim: the border magnifies and
+            // drags in what lies just outside the window, as thick glass does.
+            const ImVec2 sp(p.x + (gx / glen) * bend, p.y + (gy / glen) * bend);
+            dl->PrimWriteVtx(p, ImVec2(sp.x / display_w, sp.y / display_h), col);
+        }
+    }
+
+    for (int j = 0; j < kCells; ++j) {
+        for (int i = 0; i < kCells; ++i) {
+            const unsigned int i0 = base + (unsigned int)(j * nx + i);
+            const unsigned int i1 = i0 + 1;
+            const unsigned int i2 = i0 + (unsigned int)nx;
+            const unsigned int i3 = i2 + 1;
+            dl->PrimWriteIdx((ImDrawIdx)i0); dl->PrimWriteIdx((ImDrawIdx)i1); dl->PrimWriteIdx((ImDrawIdx)i3);
+            dl->PrimWriteIdx((ImDrawIdx)i0); dl->PrimWriteIdx((ImDrawIdx)i3); dl->PrimWriteIdx((ImDrawIdx)i2);
+        }
+    }
+    dl->PopTexture();
+
+    // Specular rim: a bright hairline along the top-left, fading round to the
+    // unlit side, which is what reads as "this has thickness".
+    const ImVec2 mx(pos.x + size.x, pos.y + size.y);
+    // 1.92.8 swapped thickness/flags on these; the old order is =delete'd.
+    constexpr float kPi = 3.14159265f;
+    dl->AddRect(pos, mx, IM_COL32(255, 255, 255, (int)(70 * alpha)), rounding, 2.0f);
+    dl->PathArcTo(ImVec2(pos.x + rounding, pos.y + rounding), rounding, kPi, kPi * 1.5f, 12);
+    dl->PathLineTo(ImVec2(mx.x - rounding, pos.y));
+    dl->PathStroke(IM_COL32(255, 255, 255, (int)(150 * alpha)), 1.5f);
+}
+
+} // namespace glass
+
 void DrawUi(UiState* state, bool* keep_running) {
     ApplyStyleOnce();
 
@@ -592,14 +695,10 @@ void DrawUi(UiState* state, bool* keep_running) {
     // beneath its contents, sampling the region of the mirror that sits behind
     // where the window actually is, so it reads as glass rather than a picture.
     if (state->screen_texture_id && lt > 0.01f) {
-        const ImVec2 lo(win_pos.x / (float)(state->display_w > 0 ? state->display_w : 1),
-                        win_pos.y / (float)(state->display_h > 0 ? state->display_h : 1));
-        const ImVec2 hi((win_pos.x + win_size.x) / (float)(state->display_w > 0 ? state->display_w : 1),
-                        (win_pos.y + win_size.y) / (float)(state->display_h > 0 ? state->display_h : 1));
-        ImGui::GetBackgroundDrawList()->AddImageRounded(
-            (ImTextureID)(uintptr_t)state->screen_texture_id,
-            win_pos, ImVec2(win_pos.x + win_size.x, win_pos.y + win_size.y),
-            lo, hi, IM_COL32(255, 255, 255, 255), rounding);
+        glass::Draw(ImGui::GetBackgroundDrawList(),
+                    (ImTextureID)(uintptr_t)state->screen_texture_id,
+                    win_pos, win_size, rounding,
+                    (float)state->display_w, (float)state->display_h, lt);
     }
 
     // Frosted-glass backdrop: hand SurfaceFlinger the window's current rect
