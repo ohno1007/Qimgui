@@ -24,7 +24,13 @@ namespace {
 // keeps the build at API 24 instead of forcing 26 on everyone, and turns "this
 // device can't do it" into a disabled feature rather than a failure.
 constexpr int32_t  kMediaOk         = 0;
-constexpr int32_t  kFormatPrivate   = 0x22;      // AIMAGE_FORMAT_PRIVATE
+// RGBA_8888 rather than PRIVATE. PRIVATE (IMPLEMENTATION_DEFINED) lets the
+// allocator pick a GPU-friendly layout, which is ideal for a sample-only
+// buffer — but SurfaceFlinger has to negotiate a format it can composite a
+// virtual display into, and with PRIVATE it silently settled on producing
+// nothing. RGBA_8888 is the combination every MediaProjection + ImageReader
+// screen-capture path uses, and it is unambiguous for both writer and reader.
+constexpr int32_t  kFormatRgba8888 = 0x1;       // AIMAGE_FORMAT_RGBA_8888
 constexpr uint64_t kUsageGpuSampled = 1ULL << 8; // GPU_SAMPLED_IMAGE
 constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour output)
 
@@ -70,12 +76,11 @@ const MediaNdk& Media() {
 // actually matters is whether SF created the display at all — and only SF can
 // answer that.
 void DumpSurfaceFlingerDisplays() {
-    FILE* pipe = ::popen("dumpsys SurfaceFlinger --display-id; "
-                         "dumpsys SurfaceFlinger | grep -i -m 20 -E 'display|aimgui'", "r");
+    FILE* pipe = ::popen("dumpsys SurfaceFlinger --display-id 2>/dev/null", "r");
     if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
     char line[512];
     int printed = 0;
-    while (std::fgets(line, sizeof(line), pipe) && printed < 30) {
+    while (std::fgets(line, sizeof(line), pipe) && printed < 8) {
         std::fprintf(stderr, "[sf] %s", line);
         ++printed;
     }
@@ -96,13 +101,10 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     if (!media.ok) return false;
     if (!android::ANativeWindowCreator::ScreenCaptureSupported()) return false;
 
-    // PRIVATE format keeps the buffers in whatever layout the GPU prefers —
-    // they are only ever composited into and sampled, never touched from the
-    // CPU, so there is no reason to force a linear layout.
-    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d usage=0x%llx", width, height,
-                (unsigned long long)kMirrorUsage);
+    MIRROR_STEP("1/6 AImageReader_newWithUsage %dx%d fmt=RGBA_8888 usage=0x%llx",
+                width, height, (unsigned long long)kMirrorUsage);
     void* reader = nullptr;
-    if (media.ReaderNewWithUsage(width, height, kFormatPrivate, kMirrorUsage,
+    if (media.ReaderNewWithUsage(width, height, kFormatRgba8888, kMirrorUsage,
                                  /*maxImages=*/3, &reader) != kMediaOk || !reader) {
         return false;
     }
