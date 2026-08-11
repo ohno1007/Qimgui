@@ -46,6 +46,7 @@ public:
 
 private:
     void*    m_Reader   = nullptr;   // AImageReader*
+    void*    m_Window   = nullptr;   // ANativeWindow*, owned by the reader
     void*    m_Image    = nullptr;   // AImage*, held while its buffer is in use
     void*    m_Token    = nullptr;   // display token (StrongPointer payload)
     bool     m_Running  = false;

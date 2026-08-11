@@ -2,6 +2,8 @@
 
 #include "platform/ANativeWindowCreator.h"
 
+#include <android/native_window.h>
+
 #include <cstdio>
 #include <dlfcn.h>
 
@@ -181,6 +183,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
 
     MIRROR_STEP("6/6 running");
     DumpSurfaceFlingerDisplays();
+    m_Window = window;
     m_Reader  = reader;
     m_Token   = token.get();
     m_Width   = width;
@@ -219,9 +222,19 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
         // Report the code periodically. NO_BUFFER_AVAILABLE means the
         // compositor simply hasn't produced anything yet; any other code is a
         // different failure and would otherwise look identical from the UI.
-        if (m_Frames == 0 && ++m_AcquireMisses % 240 == 0)
-            MIRROR_STEP("acquire still empty after %llu tries, rc=%d",
-                        (unsigned long long)m_AcquireMisses, rc);
+        if (m_Frames == 0 && ++m_AcquireMisses % 240 == 0) {
+            // The queue's negotiated state answers whether SurfaceFlinger ever
+            // connected as a producer at all. If it had connected and dequeued,
+            // these would reflect what it asked for; unchanged values mean the
+            // display exists and the transaction was accepted, but nothing on
+            // SF's side ever touched our buffer queue.
+            ANativeWindow* w = static_cast<ANativeWindow*>(m_Window);
+            MIRROR_STEP("acquire still empty after %llu tries, rc=%d; queue now %dx%d fmt=%d",
+                        (unsigned long long)m_AcquireMisses, rc,
+                        w ? ANativeWindow_getWidth(w) : -1,
+                        w ? ANativeWindow_getHeight(w) : -1,
+                        w ? ANativeWindow_getFormat(w) : -1);
+        }
         return nullptr;
     }
 
