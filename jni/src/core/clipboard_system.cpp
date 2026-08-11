@@ -166,11 +166,14 @@ void* OpenService() {
         if (!g_clazz) return nullptr;
     }
     void* b = g.getService("clipboard");
-    if (!b) return nullptr;
+    if (!b) { LOGI("[clip] no 'clipboard' service"); return nullptr; }
     // Not a formality: this asks the far end for its own descriptor and
     // compares, so success is proof the object really is IClipboard before a
-    // transaction is sent whose meaning depends entirely on that.
+    // transaction is sent whose meaning depends entirely on that. It is also
+    // the first thing that would fail if the service were renamed or wrapped,
+    // so it is worth hearing about separately from a failed transaction.
     if (!g.associateClass(b, g_clazz)) {
+        LOGI("[clip] 'clipboard' is not %s", kDescriptor);
         g.decStrong(b);
         return nullptr;
     }
@@ -196,25 +199,44 @@ bool DoRead(std::string* out) {
 
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kGetPrimaryClip, &in, &rep, 0);
-    g.decStrong(svc);
-    if (st != 0 || !rep) { LOGI("[clip] transact failed: %d", st); return false; }
+    if (st != 0 || !rep) {
+        LOGI("[clip] read: transact failed, status %d", st);
+        g.decStrong(svc);
+        return false;
+    }
 
+    // Every step is named. A parcel walked against the wrong layout fails at
+    // some particular field and then silently at every field after it, so
+    // "it did not work" is useless — which one stopped is the whole diagnosis.
+    const char* step = "exception header";
     bool ok = false;
     int32_t v = 0;
     do {
-        if (g.readInt32(rep, &v) != 0 || v != 0) {          // exception header
-            LOGI("[clip] service threw: %d", v);
+        if (g.readInt32(rep, &v) != 0) break;
+        if (v != 0) { LOGI("[clip] read: service threw %d", v); break; }
+
+        step = "clip presence";
+        if (g.readInt32(rep, &v) != 0) break;
+        if (v == 0) {
+            // Not a failure. The clipboard is simply empty, and reporting that
+            // as a broken transaction would send the UI to the file fallback
+            // and show the wrong text.
+            LOGI("[clip] read: clipboard is empty");
+            out->clear();
+            ok = true;
             break;
         }
-        if (g.readInt32(rep, &v) != 0 || v == 0) break;     // null ClipData
-        // ClipDescription
+
+        step = "description label";
         std::string label;
         if (!ReadCharSequence(rep, &label)) break;
+
+        step = "mime types";
         int32_t mimeCount = 0;
         if (g.readInt32(rep, &mimeCount) != 0) break;
-        for (int32_t i = 0; i < mimeCount && i < 64; ++i) {
+        if (mimeCount > 64) break;
+        for (int32_t i = 0; i < mimeCount; ++i) {
             std::string mime;
-            g_sink = nullptr;
             // Mime types are Java Strings (utf-16 on the wire), unlike the
             // String8s above, so the NDK's own reader is right for them.
             struct A { static bool Alloc(void* d, int32_t len, char** buf) {
@@ -228,20 +250,36 @@ bool DoRead(std::string* out) {
             if (g.readString(rep, &mime, (void*)&A::Alloc) != 0) { mimeCount = -1; break; }
         }
         if (mimeCount < 0) break;
-        if (!SkipBundle(rep)) break;                        // extras
+
+        step = "extras bundle";
+        if (!SkipBundle(rep)) break;
+        step = "timestamp";
         int64_t ts = 0;
-        if (g.readInt64(rep, &ts) != 0) break;              // timestamp
-        if (g.readInt32(rep, &v) != 0) break;               // isStyledText
-        if (g.readInt32(rep, &v) != 0) break;               // classification
-        if (!SkipBundle(rep)) break;                        // confidences
-        if (g.readInt32(rep, &v) != 0) break;               // icon present
-        if (v != 0) { LOGI("[clip] clip carries an icon; not parsed"); break; }
+        if (g.readInt64(rep, &ts) != 0) break;
+        step = "styled flag";
+        if (g.readInt32(rep, &v) != 0) break;
+        step = "classification";
+        if (g.readInt32(rep, &v) != 0) break;
+        step = "confidences bundle";
+        if (!SkipBundle(rep)) break;
+        step = "icon presence";
+        if (g.readInt32(rep, &v) != 0) break;
+        if (v != 0) { LOGI("[clip] read: clip carries an icon; not parsed"); break; }
+        step = "item count";
         int32_t items = 0;
         if (g.readInt32(rep, &items) != 0 || items <= 0) break;
-        ok = ReadCharSequence(rep, out);                    // item[0].mText
+        step = "item text";
+        ok = ReadCharSequence(rep, out);
     } while (false);
 
+    if (!ok) LOGI("[clip] read: stopped at '%s'", step);
+    else     LOGI("[clip] read: ok, %d bytes", (int)out->size());
+
     if (g.deleteParcel) g.deleteParcel(rep);
+    // Only now: the reply parcel was created against this binder and may still
+    // reference it, so dropping the last reference before the parcel is gone
+    // is a use-after-free waiting for the wrong moment to happen.
+    g.decStrong(svc);
     return ok;
 }
 
@@ -271,16 +309,18 @@ bool DoWrite(const char* text) {
 
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kSetPrimaryClip, &in, &rep, 0);
-    g.decStrong(svc);
     bool ok = false;
     if (st == 0 && rep) {
         int32_t exc = -1;
         ok = (g.readInt32(rep, &exc) == 0 && exc == 0);
-        if (!ok) LOGI("[clip] set threw: %d", exc);
+        if (!ok) LOGI("[clip] write: service threw %d", exc);
+        else     LOGI("[clip] write: ok");
     } else {
-        LOGI("[clip] set transact failed: %d", st);
+        LOGI("[clip] write: transact failed, status %d", st);
     }
     if (g.deleteParcel) g.deleteParcel(rep);
+    // After the parcel, for the same reason as the read path.
+    g.decStrong(svc);
     return ok;
 }
 
