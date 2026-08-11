@@ -65,6 +65,23 @@ const MediaNdk& Media() {
     return m;
 }
 
+// Print SurfaceFlinger's own view of the displays it knows about. When every
+// setup call reports success but nothing is ever composited, the question that
+// actually matters is whether SF created the display at all — and only SF can
+// answer that.
+void DumpSurfaceFlingerDisplays() {
+    FILE* pipe = ::popen("dumpsys SurfaceFlinger --display-id; "
+                         "dumpsys SurfaceFlinger | grep -i -m 20 -E 'display|aimgui'", "r");
+    if (!pipe) { MIRROR_STEP("dumpsys unavailable"); return; }
+    char line[512];
+    int printed = 0;
+    while (std::fgets(line, sizeof(line), pipe) && printed < 30) {
+        std::fprintf(stderr, "[sf] %s", line);
+        ++printed;
+    }
+    ::pclose(pipe);
+}
+
 } // namespace
 
 bool ScreenMirror::Available() {
@@ -158,6 +175,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     t.Apply(false, false);
 
     MIRROR_STEP("6/6 running");
+    DumpSurfaceFlingerDisplays();
     m_Reader  = reader;
     m_Token   = token.get();
     m_Width   = width;
