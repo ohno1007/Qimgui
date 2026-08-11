@@ -3,6 +3,7 @@
 #include <android/log.h>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <dlfcn.h>
 #include <vector>
 
@@ -156,6 +157,12 @@ constexpr uint32_t kGetPrimaryClip = 4;   // on Android 14, 15 and 16
 constexpr const char* kDescriptor  = "android.content.IClipboard";
 constexpr const char* kPackage     = "com.android.shell";
 
+// Declared here rather than beside the entry points so the transaction code
+// can fill it in. Whatever stopped it is shown in the UI, not only logged:
+// asking someone to reproduce a failure under logcat is a poor trade when the
+// screen is right there and the answer is one short string.
+std::string g_error;
+
 void* g_clazz = nullptr;
 
 void* OpenService() {
@@ -166,13 +173,14 @@ void* OpenService() {
         if (!g_clazz) return nullptr;
     }
     void* b = g.getService("clipboard");
-    if (!b) { LOGI("[clip] no 'clipboard' service"); return nullptr; }
+    if (!b) { g_error = "no clipboard service"; LOGI("[clip] no 'clipboard' service"); return nullptr; }
     // Not a formality: this asks the far end for its own descriptor and
     // compares, so success is proof the object really is IClipboard before a
     // transaction is sent whose meaning depends entirely on that. It is also
     // the first thing that would fail if the service were renamed or wrapped,
     // so it is worth hearing about separately from a failed transaction.
     if (!g.associateClass(b, g_clazz)) {
+        g_error = "not IClipboard";
         LOGI("[clip] 'clipboard' is not %s", kDescriptor);
         g.decStrong(b);
         return nullptr;
@@ -200,6 +208,7 @@ bool DoRead(std::string* out) {
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kGetPrimaryClip, &in, &rep, 0);
     if (st != 0 || !rep) {
+        g_error = "transact " + std::to_string(st);
         LOGI("[clip] read: transact failed, status %d", st);
         g.decStrong(svc);
         return false;
@@ -213,7 +222,14 @@ bool DoRead(std::string* out) {
     int32_t v = 0;
     do {
         if (g.readInt32(rep, &v) != 0) break;
-        if (v != 0) { LOGI("[clip] read: service threw %d", v); break; }
+        if (v != 0) {
+            // The service refusing is the interesting case and reads nothing
+            // like a layout mismatch, so it is worded as itself.
+            g_error = "service refused (" + std::to_string(v) + ")";
+            LOGI("[clip] read: service threw %d", v);
+            step = nullptr;
+            break;
+        }
 
         step = "clip presence";
         if (g.readInt32(rep, &v) != 0) break;
@@ -272,7 +288,12 @@ bool DoRead(std::string* out) {
         ok = ReadCharSequence(rep, out);
     } while (false);
 
-    if (!ok) LOGI("[clip] read: stopped at '%s'", step);
+    if (!ok && step) {
+        g_error = std::string("stopped at ") + step;
+        LOGI("[clip] read: stopped at '%s'", step);
+    } else if (!ok) {
+        LOGI("[clip] read failed");
+    }
     else     LOGI("[clip] read: ok, %d bytes", (int)out->size());
 
     if (g.deleteParcel) g.deleteParcel(rep);
@@ -313,9 +334,11 @@ bool DoWrite(const char* text) {
     if (st == 0 && rep) {
         int32_t exc = -1;
         ok = (g.readInt32(rep, &exc) == 0 && exc == 0);
-        if (!ok) LOGI("[clip] write: service threw %d", exc);
+        if (!ok) { g_error = "write refused (" + std::to_string(exc) + ")";
+                   LOGI("[clip] write: service threw %d", exc); }
         else     LOGI("[clip] write: ok");
     } else {
+        g_error = "transact " + std::to_string(st);
         LOGI("[clip] write: transact failed, status %d", st);
     }
     if (g.deleteParcel) g.deleteParcel(rep);
@@ -345,7 +368,6 @@ bool DoWrite(const char* text) {
 // checking every AParcel status: AParcel is bounds-checked and returns an
 // error rather than running off the end, so a layout that does not match now
 // fails the read instead of the process.
-std::string g_error;
 
 } // namespace
 
@@ -354,14 +376,22 @@ const char* LastError() { return g_error.c_str(); }
 
 bool ReadText(std::string* out) {
     if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
-    if (!DoRead(out)) { g_error = "clipboard read refused"; return false; }
+    g_error.clear();
+    if (!DoRead(out)) {
+        if (g_error.empty()) g_error = "read failed";
+        return false;
+    }
     g_error.clear();
     return true;
 }
 
 bool WriteText(const char* text) {
     if (!LoadNdk()) { g_error = "libbinder_ndk unavailable"; return false; }
-    if (!DoWrite(text ? text : "")) { g_error = "clipboard write refused"; return false; }
+    g_error.clear();
+    if (!DoWrite(text ? text : "")) {
+        if (g_error.empty()) g_error = "write failed";
+        return false;
+    }
     g_error.clear();
     return true;
 }

@@ -673,10 +673,28 @@ void ContentGesture(const char* id, UiState* state) {
             d->mode   = ImGui::IsAnyItemActive() ? Mode::Widget : Mode::Undecided;
         }
 
-        const float dx = io.MousePos.x - d->start.x;
-        const float dy = io.MousePos.y - d->start.y;
+        float dx = io.MousePos.x - d->start.x;
+        float dy = io.MousePos.y - d->start.y;
 
-        if (d->mode == Mode::Undecided && (std::fabs(dx) > 6.0f || std::fabs(dy) > 6.0f)) {
+        // A touch point that moves further than this between two frames is not
+        // a finger travelling — at 120 Hz nothing human covers it in 8ms. It is
+        // the press and the position arriving on different frames, which leaves
+        // `start` sitting wherever the pointer happened to be last. Re-seed
+        // from the real position instead of reading the jump as a throw, which
+        // is how a tap sometimes came out as a scroll.
+        constexpr float kTeleport = 140.0f;
+        if (d->mode == Mode::Undecided &&
+            (std::fabs(io.MouseDelta.x) > kTeleport || std::fabs(io.MouseDelta.y) > kTeleport)) {
+            d->start = io.MousePos;
+            dx = dy = 0.0f;
+        }
+
+        // Android's own touch slop is 8dp, which on this panel is nearer thirty
+        // pixels than six. Six is under a tenth of a millimetre: no finger
+        // presses that precisely, so a tap that drifted while landing was being
+        // read as a drag and the button under it never got its release.
+        constexpr float kSlop = 26.0f;
+        if (d->mode == Mode::Undecided && (std::fabs(dx) > kSlop || std::fabs(dy) > kSlop)) {
             const bool vertical  = std::fabs(dy) > std::fabs(dx);
             const bool canScroll = ImGui::GetScrollMaxY() > 1.0f;
             d->mode = (vertical && canScroll) ? Mode::Scroll : Mode::Move;
@@ -1491,7 +1509,10 @@ void DrawUi(UiState* state, bool* keep_running) {
             if (s_press && !io.MouseDown[0]) {
                 const float dy = io.MousePos.y - s_from.y;
                 const float dx = io.MousePos.x - s_from.x;
-                if (!s_handled && std::fabs(dy) < 18.0f && std::fabs(dx) < 18.0f &&
+                // Same slop as the content gesture, for the same reason: a tap
+                // that wandered 20px is still a tap, and holding it to 18 meant
+                // the card sometimes swallowed one.
+                if (!s_handled && std::fabs(dy) < 26.0f && std::fabs(dx) < 26.0f &&
                     state->stage < UiState::StageWindow) {
                     ++state->stage;
                 }
