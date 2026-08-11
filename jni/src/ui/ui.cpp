@@ -119,7 +119,7 @@ void Begin(const ImVec2& origin, const ImVec2& size,
 
     // Particle size is fixed rather than scaled to the window: dust should look
     // the same regardless of how big the thing that turned into it was.
-    constexpr float kCell = 13.0f;
+    constexpr float kCell = 9.0f;
     const int nx = (int)(size.x / kCell) + 1;
     const int ny = (int)(size.y / kCell) + 1;
     g_parts.reserve((size_t)nx * ny);
@@ -148,12 +148,18 @@ void Begin(const ImVec2& origin, const ImVec2& size,
             const float v = (float)j / (float)ny;
             p.delay = (u * 0.55f + (1.0f - v) * 0.45f) * 0.34f + Frand(0.0f, 0.05f);
 
-            // Mostly upward and outward from the centre, with enough spread
-            // that the cloud never looks like it is following one path.
+            // Outward from the centre in every direction, with a mild upward
+            // bias. Throwing everything upwards and letting gravity bring it
+            // back is what made this read as debris being tossed; dust leaves
+            // in the direction it happened to be facing and simply keeps
+            // going, slower and slower.
             const float cx = (x - (origin.x + size.x * 0.5f)) / (size.x * 0.5f);
-            p.vel  = ImVec2(cx * Frand(18.0f, 62.0f) + Frand(-26.0f, 26.0f),
-                            Frand(-150.0f, -52.0f));
-            p.spin = Frand(-3.4f, 3.4f);
+            const float cy = (y - (origin.y + size.y * 0.5f)) / (size.y * 0.5f);
+            const float spread = Frand(40.0f, 130.0f);
+            p.vel  = ImVec2(cx * spread + Frand(-34.0f, 34.0f),
+                            cy * spread * 0.7f + Frand(-30.0f, 30.0f) - 34.0f);
+            p.spin = Frand(-2.2f, 2.2f);
+            p.sway = Frand(0.0f, 6.283f);
             p.rot  = 0.0f;
             p.color = palette[(uint32_t)(x + y) % 3u];
             g_parts.push_back(p);
@@ -164,9 +170,10 @@ void Begin(const ImVec2& origin, const ImVec2& size,
 // Advance and draw. `t01` runs 0..1 over the animation; `snapshot_tex`, when
 // present, lets each particle carry the piece of UI it was cut from.
 void Step(float dt, float t01, ImTextureID snapshot_tex) {
-    // Light and mostly lateral: enough to curve the paths, not enough to make
-    // this read as falling debris.
-    constexpr float kGravity = 210.0f;
+    // Barely there. Enough that the cloud settles rather than expanding
+    // forever, far too little to pull anything back down — the moment
+    // particles visibly fall, this stops being dust and becomes debris.
+    constexpr float kGravity = 42.0f;
 
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     if (snapshot_tex) dl->PushTexture(ImTextureRef(snapshot_tex));
@@ -192,21 +199,25 @@ void Step(float dt, float t01, ImTextureID snapshot_tex) {
         }
 
         p.vel.y += kGravity * dt;
-        // Air drag, so particles ease into a drift instead of accelerating
-        // away — dust slows down, debris does not.
-        const float drag = std::exp(-1.6f * dt);
+        // Heavy drag: particles shed most of their speed in the first moments
+        // and then hang, drifting. That deceleration is the whole read — it is
+        // what says the pieces are light enough for the air to hold them.
+        const float drag = std::exp(-3.2f * dt);
         p.vel.x *= drag;
         p.vel.y *= drag;
-        p.pos.x += p.vel.x * dt;
-        p.pos.y += p.vel.y * dt;
+        // A slow lateral wander on top, each particle on its own phase, so the
+        // cloud keeps moving after it has stopped travelling.
+        p.sway += dt * 1.7f;
+        p.pos.x += (p.vel.x + std::sin(p.sway) * 22.0f) * dt;
+        p.pos.y += (p.vel.y + std::cos(p.sway * 0.7f) * 9.0f) * dt;
         p.rot   += p.spin * dt;
 
         // Shrink and fade together over the particle's own lifetime, so it
         // thins out to nothing rather than blinking off at full size.
-        const float life = local / 0.72f;
+        const float life = local / 0.95f;
         if (life >= 1.0f) continue;
         const float fade = 1.0f - life;
-        const float sz   = p.size * (0.35f + 0.65f * fade);
+        const float sz   = p.size * (0.15f + 0.85f * fade);
         const uint32_t a = (uint32_t)(255.0f * fade * fade);
         if (a == 0) continue;
 
@@ -736,8 +747,13 @@ void DrawUi(UiState* state, bool* keep_running) {
     // pill, and `rounding` follows them, so the island is the same pane at a
     // different size — it only ever looked bare because this was gated on the
     // window being expanded, and faded out with it.
+    // Nothing to submit once the window is coming apart: the particles carry
+    // the glass with them. The snapshot they sample is the scene image, and
+    // the panes are drawn into that before ImGui's widgets — so the refraction
+    // is already baked into every particle. Leaving the pane submitted just
+    // left a rectangle of glass hanging where the window used to be.
     state->glass_count = 0;
-    if (state->screen_texture_id) {
+    if (state->screen_texture_id && !state->exit_anim_active) {
         GlassRect r{};
         r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
         r.rounding = rounding;
