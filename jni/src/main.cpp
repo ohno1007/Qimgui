@@ -26,10 +26,18 @@
 static void Live2DScenePreDraw() { aimgui::live2d::Draw(); }
 #endif
 
+// Startup markers. Everything below runs before the first frame is on screen,
+// so a hang in any of it looks identical from the outside: a full-screen
+// surface that never draws and never lets a touch through, which on a phone is
+// indistinguishable from the device itself locking up. These make logcat say
+// which step it stopped at instead of leaving it to guesswork.
+#define BOOT(step) __android_log_print(ANDROID_LOG_INFO, "AImGui", "[boot] " step)
+
 int main() {
     using namespace android;
     using clock = std::chrono::steady_clock;
 
+    BOOT("display info");
     auto info = ANativeWindowCreator::GetDisplayInfo();
     const int W = info.width > info.height ? info.width : info.height;
     const int H = info.width > info.height ? info.height : info.width;
@@ -51,6 +59,7 @@ int main() {
     // system font degrades gracefully (logged, skipped) instead of crashing.
     io.ConfigErrorRecoveryEnableAssert = false;
     ImGui::StyleColorsDark();
+    BOOT("fonts");
     aimgui::LoadDefaultAndSystemCJKFont(25.0f);
     aimgui::clipboard::Install();
 
@@ -59,8 +68,10 @@ int main() {
     // Before the window is built: permeate_record decides how the surface is
     // created, so it has to be known by then rather than applied afterwards
     // through the rebuild path.
+    BOOT("config");
     aimgui::config::Load(&st);
 
+    BOOT("haptics");
     aimgui::Haptics haptics;
     haptics.Init();
     aimgui::haptic::Install(&haptics, &st.haptics_enabled);
@@ -70,11 +81,14 @@ int main() {
     st.dot_text    = ICON_FA_ROBOT;
     st.card_icon   = ICON_FA_CUBE;
 
+    BOOT("surface + renderer");
     aimgui::WindowSession ws;
     if (!ws.Build(W, st.permeate_record)) { ImGui::DestroyContext(); return 1; }
     st.renderer_name = ws.renderer()->Name();
+    BOOT("touch");
     Touch::Init({(float)W, (float)H}, false);
     Touch::setOrientation((int)info.orientation);
+    BOOT("keyboard");
     aimgui::kbd_input::Init();
 
 #ifdef AIMGUI_LIVE2D
@@ -97,9 +111,18 @@ int main() {
     aimgui::ScreenMirror mirror;
     // Optional: no sensor is reachable from a package-less process on some
     // builds, in which case the glass keeps its fixed key light.
+    BOOT("sensors");
     aimgui::SensorTilt tilt;
     tilt.Init();
+    BOOT("entering main loop");
     aimgui::FramePacer pacer;
+    // The mirror is a persisted setting now, so it can be on before the first
+    // frame has ever been presented — which it never was when it could only be
+    // switched on from a running UI. Starting it there means building a virtual
+    // display and powering it on while our own surface has not yet been through
+    // a composition cycle, so it waits for the window to be up and drawing.
+    int frames_presented = 0;
+    constexpr int kMirrorHoldoff = 12;
     auto last = clock::now();
     // Settings are written a beat after they stop changing, not on every frame
     // a slider is being dragged — the file would otherwise be rewritten 120
@@ -141,7 +164,7 @@ int main() {
         if (mirror.NeedsRestart(info.width, info.height)) {
             mirror.Stop();
         }
-        if (st.screen_mirror && !mirror.running()) {
+        if (st.screen_mirror && !mirror.running() && frames_presented >= kMirrorHoldoff) {
             mirror.Start(info.width / 2, info.height / 2, info.width, info.height);
         } else if (!st.screen_mirror && mirror.running()) {
             mirror.Stop();
@@ -218,6 +241,9 @@ int main() {
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);
         ws.renderer()->SetSnapshotFrozen(st.exit_anim_active);
         ws.renderer()->EndFrame();
+        if (frames_presented <= kMirrorHoldoff) {
+            if (++frames_presented == 1) BOOT("first frame presented");
+        }
         pacer.Wait();
 
         if (aimgui::config::Dirty(&st)) {

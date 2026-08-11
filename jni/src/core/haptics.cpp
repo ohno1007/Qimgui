@@ -23,22 +23,41 @@ bool BitSet(const unsigned long* bits, int bit) {
     return (bits[bit / kPerLong] >> (bit % kPerLong)) & 1ul;
 }
 
-// First /dev/input node that advertises FF_RUMBLE. On a phone this is the
-// vibrator itself; on a device with a gamepad attached it might be that, which
-// is harmless — it is still feedback in the user's hand.
+// First /dev/input node that advertises FF_RUMBLE *and* is named like a
+// vibrator.
+//
+// The name test is not fussiness. This walks every input node on the device,
+// which includes the touchscreen, and opening those read-write with a blocking
+// open is a good way to sit down next to a driver that does not expect it. So:
+// O_NONBLOCK, so the open cannot be the thing that hangs; and a name check, so
+// a panel that advertises feedback for its own haptics is not the one we grab
+// and hold open for the life of the process.
 int OpenRumbleDevice() {
     DIR* d = opendir("/dev/input");
     if (!d) return -1;
     int found = -1;
     char path[64];
+    char name[128];
     while (dirent* e = readdir(d)) {
         if (std::strncmp(e->d_name, "event", 5) != 0) continue;
         std::snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
-        const int fd = open(path, O_RDWR | O_CLOEXEC);
+        const int fd = open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (fd < 0) continue;
+
+        name[0] = '\0';
+        if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) < 0) { close(fd); continue; }
+        static const char* const kHints[] = { "vibra", "Vibra", "VIBRA",
+                                              "haptic", "Haptic", "HAPTIC" };
+        bool named = false;
+        for (const char* hint : kHints) {
+            if (std::strstr(name, hint)) { named = true; break; }
+        }
+        if (!named) { close(fd); continue; }
+
         unsigned long ff[(FF_MAX / (8 * sizeof(unsigned long))) + 1] = {};
         if (ioctl(fd, EVIOCGBIT(EV_FF, sizeof(ff)), ff) >= 0 &&
             BitSet(ff, FF_RUMBLE)) {
+            LOGI("[haptics] using %s (%s)", path, name);
             found = fd;
             break;
         }

@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "ui/main_ui.h"   // kPagesCount, to keep a saved page in range
 #include "ui/ui.h"
 
 #include <android/log.h>
@@ -135,13 +136,23 @@ void Load(UiState* state) {
     if (state->last_full_size.y < 560.0f) state->last_full_size.y = 560.0f;
     if (state->stage < UiState::StageIsland) state->stage = UiState::StageIsland;
     if (state->stage > UiState::StageWindow) state->stage = UiState::StageWindow;
+    // A page index the enum does not cover draws nothing at all, which reads as
+    // a broken window rather than a bad setting.
+    if (state->nav_page < 0 || state->nav_page >= kPagesCount) state->nav_page = 0;
     // The spring has to start where the stage says, or the window plays its
     // whole opening animation every launch.
     state->expand = (float)state->stage * 0.5f;
     state->resize_target_size = state->last_full_size;
 
     Remember(state);
-    LOGI("[config] loaded %s", kPath);
+    // Spelled out because these now decide what happens before the first frame
+    // — the mirror and the anti-record flag in particular change how the
+    // surface is built and what it talks to. If startup ever wedges, this line
+    // says which settings it wedged with, and deleting the file is the way out.
+    LOGI("[config] loaded %s: mirror=%d permeate=%d fps=%d stage=%d page=%d haptics=%d",
+         kPath, state->screen_mirror ? 1 : 0, state->permeate_record ? 1 : 0,
+         state->target_fps, state->stage, state->nav_page,
+         state->haptics_enabled ? 1 : 0);
 }
 
 void Save(const UiState* state) {
