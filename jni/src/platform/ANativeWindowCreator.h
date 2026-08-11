@@ -380,6 +380,9 @@ namespace android {
             // ANativeWindow is an android::Surface; this hands back the
             // producer end to attach to the virtual display.
             StrongPointer<void> (*Surface__GetIGraphicBufferProducer)(void *thiz) = nullptr;
+            // A display that is configured but powered off composites nothing,
+            // which looks exactly like a layer-stack mismatch from outside.
+            void (*SurfaceComposerClient__SetDisplayPowerMode)(StrongPointer<void> &display, int32_t mode) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Show)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Hide)(void *thiz, StrongPointer<void> &surfaceControl) = nullptr;
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
@@ -584,6 +587,9 @@ namespace android {
                     Surface__GetIGraphicBufferProducer =
                         reinterpret_cast<decltype(Surface__GetIGraphicBufferProducer)>(
                             bind("7Surface25getIGraphicBufferProducer", nullptr));
+                    SurfaceComposerClient__SetDisplayPowerMode =
+                        reinterpret_cast<decltype(SurfaceComposerClient__SetDisplayPowerMode)>(
+                            bind("21SurfaceComposerClient19setDisplayPowerMode", nullptr));
                 }
 
                 // Display related methods - version specific selection
@@ -1010,6 +1016,14 @@ namespace android {
             // Same query, but for a caller-supplied display token instead of
             // the built-in one — lets a virtual display's stored state be read
             // back and compared against what was sent.
+            // mode: 0 = off, 1 = doze, 2 = on.
+            bool SetDisplayPowerMode(StrongPointer<void> &token, int32_t mode) {
+                auto fn = Functionals::GetInstance().SurfaceComposerClient__SetDisplayPowerMode;
+                if (nullptr == fn) return false;
+                fn(token, mode);
+                return true;
+            }
+
             bool GetDisplayStateOf(StrongPointer<void> &token, ui::DisplayState *out) {
                 auto fn = Functionals::GetInstance().SurfaceComposerClient__GetDisplayState;
                 if (nullptr == fn) return false;

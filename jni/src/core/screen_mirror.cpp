@@ -193,6 +193,13 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
                 okSurf, okStack, layerStack, okProj,
                 srcWidth, srcHeight, width, height, applyRc);
 
+    // SurfaceFlinger stores our layer stack and projection correctly and the
+    // matching layers exist, yet it assigns none of them to this display —
+    // the signature of a display that is configured but not powered on. That
+    // normally happens automatically for virtual displays; do it explicitly.
+    const bool poweredOn = composer.SetDisplayPowerMode(token, /*ON=*/2);
+    MIRROR_STEP("power on: %d", poweredOn);
+
     MIRROR_STEP("6/6 running");
     m_Window = window;
 
