@@ -353,23 +353,63 @@ bool DoRead(std::string* out) {
     return ok;
 }
 
+// Byte offsets of the fields as they were actually written, relative to the end
+// of the interface token.
+//
+// "Parcel data not fully consumed, unread size: 28" says the service read a
+// whole valid ClipData and found 28 bytes to spare — but not where they came
+// from. Counting the layout by hand against AOSP twice produced a total that
+// should have been consumed exactly, which means one of the assumptions about
+// what libbinder_ndk actually emits is wrong, and no amount of further counting
+// will say which. So the parcel reports its own shape.
+struct Layout {
+    const char* name[20];
+    int32_t     at[20];
+    int         n = 0;
+    int32_t     base = 0;
+    void Mark(void* p, const char* what) {
+        if (n < 20) { name[n] = what; at[n] = g.getDataPos(p) - base; ++n; }
+    }
+    void Dump() const {
+        std::string s;
+        char buf[64];
+        for (int i = 0; i < n; ++i) {
+            std::snprintf(buf, sizeof(buf), "%s=%d ", name[i], at[i]);
+            s += buf;
+        }
+        std::fprintf(stderr, "[clip] write layout: %s\n", s.c_str());
+        std::fflush(stderr);
+        LOGI("[clip] write layout: %s", s.c_str());
+    }
+};
+
 bool DoWrite(const char* text) {
     void* svc = OpenService();
     if (!svc) return false;
     void* in = nullptr;
     if (g.prepare(svc, &in) != 0) { g.decStrong(svc); return false; }
 
+    Layout L;
+    L.base = g.getDataPos(in);           // just past the interface token
+
     g.writeInt32(in, 1);                 // ClipData is present
+    L.Mark(in, "present");
     WriteCharSequence(in, "AImGui");     // ClipDescription.mLabel
+    L.Mark(in, "label");
     g.writeInt32(in, 1);                 // one mime type
+    L.Mark(in, "mimeN");
     const char* kMime = "text/plain";
     g.writeString(in, kMime, (int32_t)std::strlen(kMime));
+    L.Mark(in, "mime");
     // extras may be null — ClipDescription's constructor just stores whatever
     // readPersistableBundle returns.
     g.writeInt32(in, -1);
+    L.Mark(in, "extras");
     g.writeInt64(in, 0);                 // timestamp; the service sets its own
+    L.Mark(in, "stamp");
     g.writeInt32(in, 0);                 // isStyledText
     g.writeInt32(in, 0);                 // classification status
+    L.Mark(in, "styled+class");
     // Confidences may NOT. The constructor ends with
     //
     //     readBundleToConfidences(in.readBundle());
@@ -381,13 +421,20 @@ bool DoWrite(const char* text) {
     // empty bundle is a lone zero on the wire, which is the same fact about
     // empty bundles that broke the read path, arriving from the other side.
     g.writeInt32(in, 0);
+    L.Mark(in, "confid");
     g.writeInt32(in, 0);                 // no icon
     g.writeInt32(in, 1);                 // one item
+    L.Mark(in, "icon+count");
     WriteCharSequence(in, text);         // item[0].mText
+    L.Mark(in, "itemText");
     WriteString8(in, nullptr);           // htmlText
+    L.Mark(in, "html");
     for (int i = 0; i < 5; ++i) g.writeInt32(in, 0);  // intent, sender, uri,
                                                       // activityInfo, textLinks
+    L.Mark(in, "typed5");
     WriteCallerTail(in);
+    L.Mark(in, "tail");
+    L.Dump();
 
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kSetPrimaryClip, &in, &rep, 0);
