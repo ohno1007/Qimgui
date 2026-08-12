@@ -307,9 +307,51 @@ void Rect(const ImVec2& a, const ImVec2& b, float rounding,
     dl->PopClipRect();
 }
 
+namespace {
+// A press spring per control, keyed by the item's own id.
+//
+// The colour step alone changes on the frame the finger lands and again on the
+// frame it leaves, which reads as a state flag rather than as something being
+// pressed. A sprung squash gives under the finger and comes back past its size,
+// and being stiff and under-damped it bites immediately rather than easing —
+// so a tap is felt even when it is over before a slow curve would have started.
+struct Press { ImGuiID id; float v; float vel; };
+std::vector<Press> g_press;
+
+float PressAmount(ImGuiID id, bool active, float dt) {
+    Press* p = nullptr;
+    for (Press& e : g_press) if (e.id == id) { p = &e; break; }
+    if (!p) {
+        // Bounded: one entry per control ever chrome'd, and the oldest goes
+        // when that runs long. A stale entry costs a wrong first frame, which
+        // is nothing next to growing without limit.
+        if (g_press.size() >= 96) g_press.erase(g_press.begin());
+        g_press.push_back({id, 0.0f, 0.0f});
+        p = &g_press.back();
+    }
+    constexpr float kOmega = 26.0f, kZeta = 0.55f;
+    const float diff  = (active ? 1.0f : 0.0f) - p->v;
+    const float accel = kOmega * kOmega * diff - 2.0f * kZeta * kOmega * p->vel;
+    p->vel += accel * dt;
+    p->v   += p->vel * dt;
+    if (p->v < 0.0f) p->v = 0.0f;
+    return p->v;
+}
+
+// Inset by up to three pixels a side. Enough to see, small enough that the
+// label it sits under does not look like it came loose.
+void ApplySquash(ImVec2* a, ImVec2* b, float press) {
+    const float d = 3.0f * press;
+    a->x += d; a->y += d; b->x -= d; b->y -= d;
+}
+} // namespace
+
 void LastItem(float rounding) {
-    Rect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), rounding,
-         ImGui::IsItemHovered(), ImGui::IsItemActive());
+    ImVec2 a = ImGui::GetItemRectMin();
+    ImVec2 b = ImGui::GetItemRectMax();
+    const float dt = ImGui::GetIO().DeltaTime > 0.0f ? ImGui::GetIO().DeltaTime : 1.0f / 60.0f;
+    ApplySquash(&a, &b, PressAmount(ImGui::GetItemID(), ImGui::IsItemActive(), dt));
+    Rect(a, b, rounding, ImGui::IsItemHovered(), ImGui::IsItemActive());
 }
 
 void LastItemFrame(const char* label, float rounding) {
@@ -321,6 +363,8 @@ void LastItemFrame(const char* label, float rounding) {
         const ImVec2 ls  = ImGui::CalcTextSize(label, end);
         if (ls.x > 0.0f) b.x -= ls.x + ImGui::GetStyle().ItemInnerSpacing.x;
     }
+    const float dt = ImGui::GetIO().DeltaTime > 0.0f ? ImGui::GetIO().DeltaTime : 1.0f / 60.0f;
+    ApplySquash(&a, &b, PressAmount(ImGui::GetItemID(), ImGui::IsItemActive(), dt));
     Rect(a, b, rounding, ImGui::IsItemHovered(), ImGui::IsItemActive());
 }
 
@@ -1036,6 +1080,13 @@ struct State {
     // Where the lean has carried each body, and its own velocity.
     ImVec2      off[3]     = {};
     ImVec2      off_vel[3] = {};
+
+    // Press. Read a frame late — the panes are submitted before the hit areas
+    // exist — which at these speeds is not visible, and is the price of the
+    // glass being the button's background rather than something drawn on it.
+    bool        held[2]      = {};
+    float       press[2]     = {};
+    float       press_vel[2] = {};
 };
 State g;
 
@@ -1054,6 +1105,18 @@ void SpringTo(float* pos, float* vel, float target, float dt, float omega) {
     if (std::fabs(diff) < 0.01f && std::fabs(*vel) < 0.05f) { *pos = target; *vel = 0.0f; }
 }
 
+// The press squash. A capsule that gives under the finger and springs back past
+// its size is the whole of the feedback here: the glass is the button's
+// background, and the shader takes its material from one pane per group, so
+// there is no per-button colour to change. Shape is what is left, and shape is
+// what a jelly would do anyway.
+ImVec4 Squash(const ImVec4& r, float p) {
+    const float s  = 1.0f - 0.06f * p;
+    const float cx = r.x + r.z * 0.5f;
+    const float cy = r.y + r.w * 0.5f;
+    return ImVec4(cx - r.z * s * 0.5f, cy - r.w * s * 0.5f, r.z * s, r.w * s);
+}
+
 void Commit(int kind, const std::string& title, const std::string& body,
             const std::string& ok, const std::string& cancel) {
     g.kind = kind; g.title = title; g.body = body; g.ok = ok; g.cancel = cancel;
@@ -1062,6 +1125,7 @@ void Commit(int kind, const std::string& title, const std::string& body,
 void Answer(int result) {
     g.result = result;
     g.open   = false;
+    g.held[0] = g.held[1] = false;   // or it collapses with a button still down
     haptic::Step();
 }
 
@@ -1148,9 +1212,16 @@ void Draw(UiState* state) {
     const float btnW = (bodyW - kBtnGap) * 0.5f;
     const float btnY = y0 + bodyH + kRowGap;
 
+    // Stiff and under-damped, so a press bites immediately and the release
+    // overshoots before settling rather than easing back.
+    for (int i = 0; i < 2; ++i)
+        SpringTo(&g.press[i], &g.press_vel[i], g.held[i] ? 1.0f : 0.0f, dt, 26.0f);
+
     const ImVec4 fBody (x0 + g.off[0].x, y0 + g.off[0].y, bodyW, bodyH);
-    const ImVec4 fLeft (x0 + g.off[1].x, btnY + g.off[1].y, btnW, kBtnH);
-    const ImVec4 fRight(x0 + bodyW - btnW + g.off[2].x, btnY + g.off[2].y, btnW, kBtnH);
+    const ImVec4 fLeft  = Squash(ImVec4(x0 + g.off[1].x, btnY + g.off[1].y, btnW, kBtnH),
+                                 g.press[0]);
+    const ImVec4 fRight = Squash(ImVec4(x0 + bodyW - btnW + g.off[2].x,
+                                        btnY + g.off[2].y, btnW, kBtnH), g.press[1]);
 
     // Where it comes from: the island itself. At u = 0 all three are that one
     // capsule, so the field has a single body; the separation into three is the
@@ -1200,6 +1271,11 @@ void Draw(UiState* state) {
 
     // Modal in the only sense that matters here: a press anywhere else is
     // eaten rather than reaching the window behind.
+    //
+    // AllowOverlap is not optional. Without it this covers the screen, claims
+    // the hover and takes the active id on press, and the answers below it can
+    // never be hovered or clicked — which is exactly what happened.
+    ImGui::SetNextItemAllowOverlap();
     ImGui::SetCursorScreenPos(ImVec2(0, 0));
     ImGui::InvisibleButton("##swallow", io.DisplaySize);
 
@@ -1234,18 +1310,23 @@ void Draw(UiState* state) {
         // The answers: the glass is already their background, so the button is
         // only a hit area and the label is centred on it by hand.
         auto answer = [&](const char* id, const ImVec4& r, const char* label,
-                          int result) {
+                          int idx, int result) {
             ImGui::SetCursorScreenPos(ImVec2(r.x, r.y));
             const bool hit = ImGui::InvisibleButton(id, ImVec2(r.z, r.w));
+            // Fed back to the squash, which is applied when the panes for the
+            // next frame are built.
+            g.held[idx] = ImGui::IsItemActive();
             ripple::TouchLastItem();
+            // The label rides the squash with the capsule, or it floats free of
+            // the thing it is written on.
             const ImVec2 ts = ImGui::CalcTextSize(label);
             dl->AddText(ImVec2(r.x + (r.z - ts.x) * 0.5f,
                                r.y + (r.w - ts.y) * 0.5f),
                         ImGui::GetColorU32(ImGuiCol_Text), label);
             if (hit) Answer(result);
         };
-        answer("##no", rLeft, g.cancel.c_str(), ResultCancel);
-        answer("##yes", rRight, g.ok.c_str(), ResultOk);
+        answer("##no", rLeft, g.cancel.c_str(), 0, ResultCancel);
+        answer("##yes", rRight, g.ok.c_str(), 1, ResultOk);
 
         ImGui::PopStyleVar();
     }
