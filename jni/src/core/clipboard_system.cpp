@@ -38,6 +38,7 @@ struct Ndk {
     int32_t (*readByteArray)(const void*, void*, void*)                = nullptr;
     int32_t (*getDataPos)(const void*)                                 = nullptr;
     int32_t (*setDataPos)(const void*, int32_t)                        = nullptr;
+    int32_t (*getDataSize)(const void*)                                 = nullptr;
     void    (*deleteParcel)(void*)                                     = nullptr;
     bool ok = false;
 };
@@ -68,6 +69,7 @@ bool LoadNdk() {
     g.readByteArray  = (decltype(g.readByteArray))  S("AParcel_readByteArray");
     g.getDataPos     = (decltype(g.getDataPos))     S("AParcel_getDataPosition");
     g.setDataPos     = (decltype(g.setDataPos))     S("AParcel_setDataPosition");
+    g.getDataSize    = (decltype(g.getDataSize))    S("AParcel_getDataSize");
     g.deleteParcel   = (decltype(g.deleteParcel))   S("AParcel_delete");
     g.ok = g.getService && g.classDefine && g.associateClass && g.prepare &&
            g.transact && g.writeInt32 && g.writeInt64 && g.writeString &&
@@ -375,6 +377,30 @@ bool DoRead(std::string* out) {
         step = "item text";
         ok = ReadCharSequence(rep, out);
         L.Mark(rep, "itemText");
+
+        // Past what is needed, purely to see the shape. The reply holds one
+        // ClipData and nothing else, so how far this gets before running out
+        // says exactly how many trailing fields an Item really has on this ROM
+        // — the one part of the layout a successful read has never exercised,
+        // and the only place the 28 bytes can still be hiding.
+        if (ok && g.getDataSize) {
+            const int32_t total = g.getDataSize(rep);
+            std::string html;
+            if (ReadString8(rep, &html)) L.Mark(rep, "html");
+            for (int i = 0; i < 8 && g.getDataPos(rep) < total; ++i) {
+                int32_t flag = 0;
+                if (g.readInt32(rep, &flag) != 0) break;
+                if (flag != 0) { L.Mark(rep, "OBJ!"); break; }
+            }
+            L.Mark(rep, "trailing");
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "size=%d left=%d",
+                          total - L.base, total - g.getDataPos(rep));
+            L.Mark(rep, "end");
+            std::fprintf(stderr, "[clip] read: %s\n", buf);
+            std::fflush(stderr);
+            LOGI("[clip] read: %s", buf);
+        }
         L.Dump("read");
     } while (false);
 
