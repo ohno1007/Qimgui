@@ -131,12 +131,27 @@ void WriteString8(void* p, const char* s) {
     g.setDataPos(p, end);
 }
 
-// [int32 length][int32 magic][length bytes], or a lone -1 for null. The length
-// counts what follows the magic, so skipping is 8 + length.
+// A Bundle or PersistableBundle on the wire, skipped without unpacking it.
+//
+// Three shapes, not two, and the third is what this got wrong. From
+// BaseBundle.writeToParcelInner:
+//
+//     -1            null — writePersistableBundle's own early return
+//      0            "Special case for empty bundles": writeInt(0) and return.
+//                   No magic word follows. Nothing follows.
+//     len > 0       [int32 len][int32 magic][len bytes], len counting only
+//                   what comes after the magic
+//
+// Treating 0 like len > 0 skipped four bytes that were never written, and the
+// clip's confidence bundle is empty for any ordinary text — so the cursor came
+// out four bytes long and every field after it read garbage. It surfaced as a
+// failure at the icon flag, four fields later, which is the nature of walking a
+// parcel: the report names where it stopped, not where it went wrong.
 bool SkipBundle(void* p) {
     int32_t len = 0;
     if (g.readInt32(p, &len) != 0) return false;
-    if (len < 0) return true;
+    if (len <= 0) return true;
+    if (len > kMaxField) return false;
     return g.setDataPos(p, g.getDataPos(p) + 4 + len) == 0;
 }
 
@@ -283,10 +298,16 @@ bool DoRead(std::string* out) {
         if (!SkipBundle(rep)) break;
         step = "icon presence";
         if (g.readInt32(rep, &v) != 0) break;
-        if (v != 0) { LOGI("[clip] read: clip carries an icon; not parsed"); break; }
+        // A presence flag can only be 0 or 1. Anything else is not a clip with
+        // a strange icon, it is the cursor in the wrong place — and saying so
+        // is worth more than the one true case it rules out, because a value
+        // out of range is the earliest honest sign that the walk has drifted.
+        if (v != 0 && v != 1) { step = "icon presence (bad flag, layout drift)"; break; }
+        if (v == 1) { step = "icon present, not parsed"; break; }
         step = "item count";
         int32_t items = 0;
-        if (g.readInt32(rep, &items) != 0 || items <= 0) break;
+        if (g.readInt32(rep, &items) != 0) break;
+        if (items <= 0 || items > 64) { step = "item count (out of range, layout drift)"; break; }
         step = "item text";
         ok = ReadCharSequence(rep, out);
     } while (false);
