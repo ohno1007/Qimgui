@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <dlfcn.h>
@@ -429,8 +430,12 @@ bool Spawn(bool write, const char* text, std::string* out) {
     if (!WIFEXITED(status)) { g_error = "clipboard helper crashed"; return false; }
     const int code = WEXITSTATUS(status);
     if (code == kExitEmpty) { if (out) out->clear(); g_error.clear(); return true; }
-    if (code == 127)        { g_error = "helper could not start"; return false; }
-    if (code != 0)          { g_error = "clipboard refused"; return false; }
+    if (code == 127)        { g_error = "helper could not exec"; return false; }
+    // The helper prints its own reason to stderr on the way out — an exit code
+    // is a byte and the diagnosis is a sentence — so this only has to say that
+    // it failed and point at where the detail went.
+    if (code != 0)          { g_error = "helper exit " + std::to_string(code) +
+                                        ", see [clip] helper line"; return false; }
     g_error.clear();
     if (out) *out = std::move(got);
     return true;
@@ -444,6 +449,17 @@ const char* LastError() { return g_error.c_str(); }
 bool ReadText(std::string* out) { return Spawn(false, nullptr, out); }
 bool WriteText(const char* text) { return Spawn(true, text ? text : "", nullptr); }
 
+// Only stdin and stdout are redirected into the pipes, so the child's stderr is
+// still the terminal the app was launched from. That is the one channel by
+// which what it learned can escape: an exit code carries a byte, and the whole
+// diagnosis — which service, which transaction, which parcel field — is a
+// sentence. Without this the parent could only report "refused" and every
+// distinct failure looked the same from outside.
+void HelperSay(const char* what) {
+    std::fprintf(stderr, "[clip] helper: %s\n", what);
+    std::fflush(stderr);
+}
+
 int RunHelperMain(int argc, char** argv) {
     if (argc < 2) return -1;
     const bool get = std::strcmp(argv[1], kFlagGet) == 0;
@@ -454,14 +470,18 @@ int RunHelperMain(int argc, char** argv) {
     // changed. From here on this process genuinely is shell, which is the
     // entire point of it existing.
     setgroups(0, nullptr);
-    if (setgid(kShellGid) != 0) return 1;
-    if (setuid(kShellUid) != 0) return 1;
+    if (setgid(kShellGid) != 0) { HelperSay("setgid failed"); return 1; }
+    if (setuid(kShellUid) != 0) { HelperSay("setuid failed"); return 1; }
+    if (getuid() != kShellUid) { HelperSay("uid did not drop"); return 1; }
 
-    if (!LoadNdk()) return 1;
+    if (!LoadNdk()) { HelperSay("libbinder_ndk unavailable"); return 1; }
 
     if (get) {
         std::string text;
-        if (!DoRead(&text)) return 1;
+        if (!DoRead(&text)) {
+            HelperSay(g_error.empty() ? "read failed" : g_error.c_str());
+            return 1;
+        }
         if (text.empty()) return kExitEmpty;
         (void)!::write(STDOUT_FILENO, text.data(), text.size());
         return 0;
@@ -471,7 +491,9 @@ int RunHelperMain(int argc, char** argv) {
     char buf[4096];
     ssize_t n;
     while ((n = read(STDIN_FILENO, buf, sizeof(buf))) > 0) text.append(buf, (size_t)n);
-    return DoWrite(text.c_str()) ? 0 : 1;
+    if (DoWrite(text.c_str())) return 0;
+    HelperSay(g_error.empty() ? "write failed" : g_error.c_str());
+    return 1;
 }
 
 } // namespace aimgui::sysclip
