@@ -170,4 +170,9 @@ void OutlineText(ImDrawData* dd, float radius, unsigned char alpha) {
     dd->TotalIdxCount = total_idx;
 }
 
+void ShutdownTextOutline() {
+    for (ImDrawList* dl : g_pool) IM_DELETE(dl);
+    g_pool.clear();
+}
+
 } // namespace aimgui

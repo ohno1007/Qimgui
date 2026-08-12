@@ -8,6 +8,7 @@
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
 #include "core/sensor_tilt.h"
+#include "core/text_outline.h"
 
 #include <android/hardware_buffer.h>
 #include "core/window_session.h"
@@ -294,5 +295,9 @@ int main(int argc, char** argv) {
     tilt.Shutdown();
     aimgui::kbd_input::Shutdown();
     ws.Destroy();
+    // Before DestroyContext: the outline pass keeps its rebuilt draw lists for
+    // the life of the process, and ImDrawListSharedData asserts on destruction
+    // that every list made against it has been returned.
+    aimgui::ShutdownTextOutline();
     ImGui::DestroyContext();
 }

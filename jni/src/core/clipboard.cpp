@@ -102,6 +102,14 @@ const char* Get() {
 }
 
 void Install() {
+    // Unconditional, at startup, on the same channel the copy and paste lines
+    // use. It settles two things at once that otherwise have to be guessed at
+    // from a device I cannot reach: that this really is the new binary, and
+    // that stderr reaches the terminal at all. Without it, "nothing printed"
+    // has three explanations and no way to tell them apart.
+    std::fprintf(stderr, "[clip] ready, file fallback at %s\n", kPath);
+    std::fflush(stderr);
+
     ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
     pio.Platform_GetClipboardTextFn = &GetFn;
     pio.Platform_SetClipboardTextFn = &SetFn;
