@@ -645,8 +645,24 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             // scene image to that. state->display_w/h are the physical
             // screen dimensions and would mis-map most particles off-frame.
             const ImGuiIO& io2 = ImGui::GetIO();
-            dissolve::Begin(state->last_full_pos, state->last_full_size,
-                           io2.DisplaySize.x, io2.DisplaySize.y);
+            // The modal has to come apart too. From the next frame DrawUi
+            // returns early and nothing draws it, so a region that has no
+            // particles is a region where the question simply stops existing
+            // while the window it was asked about dissolves. Union rather than a
+            // second call: the particles sample one snapshot of the whole scene,
+            // and the modal is inside the window's rect for a window at anything
+            // like its usual place anyway — this covers the case where it is not.
+            ImVec2 dp = state->last_full_pos;
+            ImVec2 ds = state->last_full_size;
+            const ImVec4& m = state->modal_rect;
+            if (m.z > 2.0f && m.w > 2.0f) {
+                const float x1 = (dp.x + ds.x > m.x + m.z) ? dp.x + ds.x : m.x + m.z;
+                const float y1 = (dp.y + ds.y > m.y + m.w) ? dp.y + ds.y : m.y + m.w;
+                if (m.x < dp.x) dp.x = m.x;
+                if (m.y < dp.y) dp.y = m.y;
+                ds = ImVec2(x1 - dp.x, y1 - dp.y);
+            }
+            dissolve::Begin(dp, ds, io2.DisplaySize.x, io2.DisplaySize.y);
             haptic::Heavy();
             state->exit_anim_active      = true;
             state->exit_anim_first_frame = true;
@@ -1020,12 +1036,20 @@ namespace dialog {
 // only DrawUi calls it — the outside world only opens and reads.
 void Draw(UiState* state);
 
-// Once the modal shares the window's group the two are one body, and one body
-// gets one material — so the window's pane, which leads the group, has to carry
-// the modal's settings as it comes up. That is what BlendMaterial does, and
-// Openness is how far along it is.
+// Whether the shell is currently sharing the modal's body. When it is, the two
+// are one merged field: the shell has to come down to a single shape to fit
+// inside the four one body gets, and its pane — which leads the group — has to
+// carry the material for both, because a group only gets one set. BlendMaterial
+// is that, and Openness is how far along it is.
+bool  JoinedShell();
 float Openness();
 void  BlendMaterial(GlassRect* lead);
+
+// True while the shell's rest state and what the modal is attached to disagree,
+// which is the window a retract has to happen in. DrawUi holds the shell still
+// for it — a shell moving across the frame the swap is made on is exactly what
+// would make the swap visible.
+bool  StageMismatch(int stage);
 
 namespace {
 
@@ -1054,11 +1078,16 @@ constexpr float kMerge  = 34.0f;
 constexpr float kRowGap = 26.0f;   // needs 9px of approach to bridge
 constexpr float kBtnGap = 34.0f;   // needs 17px
 
-// How much of the window's wash the shared body keeps once the modal is fully
-// out. It cannot be thinner than the window any more — one body, one material —
-// so the whole sheet thins instead, which reads as the window receding behind
-// the question rather than as a second sheet stacked on the first.
-constexpr float kClarity = 0.62f;
+// The wash, as a share of the window's, in the two cases.
+//
+// Alone over a window it is its own sheet and can be properly thin — a sheet
+// laid over another sheet has to read as thinner or the two stack into
+// something opaque. Sharing the island's body it cannot be thinner than what it
+// is part of, because a group gets one material, so the pair thins together
+// instead; that reads as the island receding behind the question, and it is the
+// price of them being able to touch at all.
+constexpr float kClarityAlone = 0.45f;
+constexpr float kClarity      = 0.62f;
 
 // The shares, per axis, because the two gaps answer to different ones: the row
 // gap moves with the vertical lean and the gap between the answers with the
@@ -1106,18 +1135,35 @@ struct State {
     ImVec2      off[3]     = {};
     ImVec2      off_vel[3] = {};
 
-    // The line the whole thing hangs from — the shell's bottom edge, whatever
-    // the shell currently is. Sprung, and deliberately under-damped: the shell
-    // moving quickly leaves the modal behind, which opens the gap past the
-    // merge threshold and necks the join down, and the spring coming back
-    // through closes it again. That is the entire reason the window retracting
-    // past the modal does anything at all.
+    // The line it hangs from: the island's resting edge, plus however far the
+    // shell is pressing down past it. Sprung, and deliberately under-damped —
+    // the shell moving quickly leaves the modal behind, which closes the gap
+    // past the merge threshold and joins them, and the spring coming back
+    // through opens it again and lets go.
     float       anchor = 0.0f, anchor_vel = 0.0f;
     bool        anchor_valid = false;
 
+    // Whether the shell is sharing this body.
+    //
+    // It can only share it while it is the island or the card. A full window
+    // *contains* the modal's resting place, and a smooth union swallows a shape
+    // inside another one completely — merging there would delete the modal, not
+    // join it. So over a window the modal is a separate sheet at the island's
+    // spot, which is where it has always hung and what was asked for.
+    //
+    // The volume key flips the shell between window and island from outside
+    // ImGui entirely (main.cpp), so this can change while a modal is up. The
+    // change is made during a retract: `regroup` drives the openness to zero,
+    // the swap happens at the bottom where the modal is drawn as nothing at all,
+    // and it springs back out on the other side. One blob going in and one
+    // coming out is the only way a body can change what it is part of without
+    // the swap itself being visible.
+    bool        joined  = false;
+    bool        regroup = false;
+
     // Whether the shared body had room for three more shapes last frame. The
-    // opening is held until it does, so the modal never appears in a group of
-    // its own on the way in.
+    // opening waits for it, so the modal is never dropped on the floor by the
+    // four-shape cap on the way out.
     bool        room = false;
 
     // Press. Read a frame late — the panes are submitted before the hit areas
@@ -1204,18 +1250,29 @@ void Close()      { g.open = false; }
 bool IsOpen()     { return g.open || g.t > 0.002f; }
 const char* Input() { return g.input; }
 
-float Openness() { return g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t); }
+float Openness()    { return g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t); }
+bool  JoinedShell() { return IsOpen() && g.joined; }
+
+bool StageMismatch(int stage) {
+    return IsOpen() && ((stage != UiState::StageWindow) != g.joined);
+}
 
 // The group's material, walked toward the modal's as it comes out. Applied by
-// DrawUi to the window's pane because that pane is the group's lead and a group
+// DrawUi to the shell's pane because that pane is the group's lead and a group
 // has one set of settings — so this is not a preference, it is the only place
-// the modal's material can live once the two are one body.
+// the modal's material can live once the two are one body. A no-op when they
+// are not, which is why the call sites do not have to know.
 void BlendMaterial(GlassRect* r) {
     const float u = Openness();
-    if (u <= 0.001f) return;
+    if (!g.joined || u <= 0.001f) return;
     auto mix = [u](float a, float b) { return a + (b - a) * u; };
     r->rounding  = mix(r->rounding,  kBtnH * 0.5f);
-    r->edgeWidth = mix(r->edgeWidth, 40.0f);
+    // Narrowing only. DrawUi pulls the rim in deliberately when the shell's
+    // shorter side is under 200px, because a 40px rim on a 56px pill reaches in
+    // from both sides and meets in the middle — and a group gets one material,
+    // so widening it back for the modal's sake would undo that guard for the
+    // island, which is the case this whole join exists for.
+    if (r->edgeWidth > 40.0f) r->edgeWidth = mix(r->edgeWidth, 40.0f);
     r->blur      = mix(r->blur,      5.0f);
     r->merge     = mix(r->merge,     kMerge);
     r->tintA     = mix(r->tintA,     r->tintA * kClarity);
@@ -1227,15 +1284,39 @@ Result Take() {
     return (Result)r;
 }
 
-// Drawn last, over everything, and it submits its own pane group so it can be
-// clearer than the window underneath. Called from DrawUi.
+// Drawn last, over everything. Its panes go into the shell's group while the
+// shell is small enough to stand beside them, and into a thinner group of their
+// own over a window, which contains them. Called from DrawUi.
 void Draw(UiState* state) {
     ImGuiIO& io = ImGui::GetIO();
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
-    // Held at zero until the shared body has shapes to spare — the window is
-    // closing ranks over those few frames and the modal has nowhere to be yet.
-    // Closing never waits: only the way out needs the room.
-    UpdateSpring(&g.t, &g.vel, (g.open && g.room) ? 1.0f : 0.0f, dt);
+    // Whether the shell can share this body, and the retract that lets the
+    // answer change without the change being seen. Taken from the stage — the
+    // target — rather than the animated size, so it is decided once per press
+    // instead of chattering while the shell springs past a threshold.
+    //
+    // The swap is committed at the bottom, where the openness spring has reached
+    // exactly zero and the three bodies contribute nothing at all. Not merely
+    // "small": at two percent out they are still an island-sized capsule, and in
+    // a sheet of their own that is a stray pill rather than nothing. The spring
+    // is under-damped and undershoots, so it lands on zero in about a third of a
+    // second rather than creeping towards it.
+    if (StageMismatch(state->stage)) g.regroup = true;
+    if (g.regroup && g.t < 0.002f) {
+        g.joined  = state->stage != UiState::StageWindow;
+        g.regroup = false;
+        // What it hangs from has just changed meaning — the island's line, or
+        // that line plus whatever the shell is pressing down with. Re-seed
+        // rather than spring, or it emerges hundreds of pixels out of place and
+        // sweeps back up in full view.
+        g.anchor_valid = false;
+    }
+
+    // Held at zero while retracting, and until the shared body has shapes to
+    // spare — the window is closing ranks over those few frames and the modal
+    // has nowhere to be yet. Closing never waits: only the way out does.
+    const bool out = g.open && g.room && !g.regroup;
+    UpdateSpring(&g.t, &g.vel, out ? 1.0f : 0.0f, dt);
 
     // The cross-fade for a switch, and the handover at its midpoint.
     if (g.swap > 0.0f) {
@@ -1246,7 +1327,7 @@ void Draw(UiState* state) {
             g.pending = false;
         }
     }
-    if (!IsOpen()) return;
+    if (!IsOpen()) { state->modal_rect = ImVec4(0, 0, 0, 0); return; }
 
     const float u  = g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t);
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
@@ -1282,43 +1363,58 @@ void Draw(UiState* state) {
 
     const float x0 = (dw - bodyW) * 0.5f;
 
-    // What it hangs from: the shell's bottom edge, tracked exactly — including
-    // the shell's own lean, so leaning the phone does not simply drag the pair
-    // apart. Only to the extent the shell is overhead, though: a window dragged
-    // off to one side is not above this and does not carry it, and the share
-    // slides with the overlap rather than switching, so crossing that boundary
-    // is not an event. With nothing overhead it falls back to the island's
-    // resting line, which is where it always hung.
+    // It hangs from the island's resting edge. That is the whole answer to
+    // where it lives: the island's spot, whatever the shell is doing.
+    //
+    // What moves it is being pressed on. While the shell shares this body it
+    // cannot pass through it, so a shell that comes to rest below the line
+    // carries the modal down ahead of its own edge — which is the card opening
+    // and pushing it out of the way. Only to the extent the shell is actually
+    // overhead: a window dragged off to one side is not above this and presses
+    // on nothing, and the share slides with the overlap rather than switching,
+    // so crossing that boundary is not an event.
+    //
+    // The shell's *rest* rect, not the live one. A shell mid-collapse is briefly
+    // huge, and holding the modal clear of that would fling it down the screen
+    // and drag it back — so it is pressed between settled places, and the shell
+    // sweeping over it on the way absorbs it instead, which is what a passing
+    // body should do to a smaller one.
+    //
+    // The shell's own lean is inside this, so leaning the phone does not simply
+    // drag the pair apart — the modal's own lean is what opens and closes the
+    // gap, and it is meant to be the only thing that does.
     const float dh_m  = state->display_h > 0 ? (float)state->display_h
                                              : io.DisplaySize.y;
-    const ImVec4& sh  = state->shell_rect;
-    const float span  = (sh.z < bodyW ? sh.z : bodyW);
-    const float lo    = (sh.x > x0 ? sh.x : x0);
-    const float hi    = (sh.x + sh.z < x0 + bodyW ? sh.x + sh.z : x0 + bodyW);
-    float cover = (span > 1.0f) ? (hi - lo) / span : 0.0f;
-    if (cover < 0.0f) cover = 0.0f;
-    if (cover > 1.0f) cover = 1.0f;
-
+    const ImVec4& sh  = state->shell_rect;        // live, for the swallow test
+    const ImVec4& sr  = state->shell_rest_rect;   // settled, for the press
     const float rest  = kIslandTop + kIslandH;
     const float total = bodyH + kRowGap + kBtnH;   // everything below the line
-    float want = rest + ((sh.y + sh.w) - rest) * cover;
-    // Rails, not design lines. A shell filling the screen would push it off the
-    // bottom, and one riding high would carry it off the top once the lean is
-    // added on; both are held, and the overlap that leaves is a better failure
-    // than a modal nobody can see. Neither is reachable by any shell that
-    // exists today — the island's own lean is already clamped on screen and
-    // nothing else can get near the top — so in practice the edge is tracked
-    // exactly and these only stop a future shell from breaking it.
-    const float ceiling = dh_m - 16.0f - total - kHangGap;
-    const float floor_  = kTiltRangeDlg - kHangGap + 16.0f;   // clears a full lean up
-    if (want > ceiling) want = ceiling;
-    if (want < floor_)  want = floor_;
+    float want = rest;
+    if (g.joined) {
+        const float span = (sr.z < bodyW ? sr.z : bodyW);
+        const float lo   = (sr.x > x0 ? sr.x : x0);
+        const float hi   = (sr.x + sr.z < x0 + bodyW ? sr.x + sr.z : x0 + bodyW);
+        float cover = (span > 1.0f) ? (hi - lo) / span : 0.0f;
+        if (cover < 0.0f) cover = 0.0f;
+        if (cover > 1.0f) cover = 1.0f;
+        want = rest + ((sr.y + sr.w) - rest) * cover;
+        // Rails, not design lines. A shell filling the screen would press it off
+        // the bottom, and one riding high would carry it off the top once the
+        // lean is added on. Neither is reachable by a shell that shares this
+        // body — it is the island or the card, and the island's own lean is
+        // already clamped on screen — so these only stop a future one breaking
+        // it, and the overlap they leave is a better failure than a modal
+        // nobody can see.
+        const float ceiling = dh_m - 16.0f - total - kHangGap;
+        const float floor_  = kTiltRangeDlg - kHangGap + 16.0f;
+        if (want > ceiling) want = ceiling;
+        if (want < floor_)  want = floor_;
+    }
     if (!g.anchor_valid) { g.anchor = want; g.anchor_valid = true; }
-    // Under-damped, and this is the whole of the third complaint: the shell
-    // moving leaves the modal behind, which closes the gap past the merge
-    // threshold and joins them, and the spring coming back through opens it
-    // again and lets go. The card growing downwards drags the modal with it;
-    // the window retracting draws it up behind itself and drops it.
+    // Under-damped: the shell moving leaves the modal behind, which closes the
+    // gap past the merge threshold and joins them, and the spring coming back
+    // through opens it again and lets go. The card growing downwards drags the
+    // modal along and drops it.
     SpringTo(&g.anchor, &g.anchor_vel, want, dt, 12.0f, 0.55f);
 
     const float y0   = g.anchor + kHangGap;
@@ -1337,14 +1433,20 @@ void Draw(UiState* state) {
     const ImVec4 fRight = Squash(ImVec4(x0 + bodyW - btnW + g.off[2].x,
                                         btnY + g.off[2].y, btnW, kBtnH), g.press[1]);
 
-    // Where it comes from: the shell, whatever the shell currently is. At u = 0
-    // all three bodies are exactly that rect, and they are in its group, so the
-    // field is unchanged — the modal at rest is literally the shell. The
-    // separation into three is the opening itself rather than something drawn
-    // on top of it, and because the seed is the live rect the modal is squeezed
-    // out of the pill, the card or the window without any of them being a case.
-    const ImVec4 seed = (state->shell_rect.z > 2.0f && state->shell_rect.w > 2.0f)
-        ? state->shell_rect
+    // Where it comes from: the island's own capsule. At u = 0 all three bodies
+    // are that one shape, so the field has a single body; the separation into
+    // three is the opening itself rather than something drawn on top of it.
+    //
+    // Seeding from the shell's live rect was tried and reverted — a 900px window
+    // shrinking into a 540px modal is a lot of shape to travel and it read as
+    // the window tearing rather than as a capsule being drawn out of the island.
+    // The island is the thing the modal belongs to whatever the shell is doing.
+    //
+    // Read from where the island actually is rather than rebuilt from the top
+    // centre: with Live2D loaded the island follows the dragged ball, and a seed
+    // that assumed the centre grew the modal out of empty screen.
+    const ImVec4 seed = (state->island_rect.z > 2.0f)
+        ? state->island_rect
         : ImVec4(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
                  kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
 
@@ -1352,31 +1454,50 @@ void Draw(UiState* state) {
     const ImVec4 rLeft  = Lerp(seed, fLeft,  u);
     const ImVec4 rRight = Lerp(seed, fRight, u);
 
-    // The panes, in the window's group — that is what buys every join here: the
-    // shell and the modal are one distance field, so they run together and let
-    // go by distance exactly the way the nav column and the companion dot do.
-    // Material comes from the group's first pane, which is the window's, and
+    // The whole of it, for the exit dissolve to seed particles over as well as
+    // over the window. Published from here because these three rects are the
+    // only place the modal's real extent exists.
+    state->modal_rect = ImVec4(rBody.x, rBody.y, rBody.z,
+                               (rRight.y + rRight.w) - rBody.y);
+
+    // The panes. In the shell's group while it shares this body — that is what
+    // buys the join: one distance field, so they run together and let go by
+    // distance exactly the way the nav column and the companion dot do. The
+    // material then comes from the group's first pane, which is the shell's, and
     // DrawUi has already walked it toward these numbers as the modal opened.
     //
-    // Three shapes of the four a body gets, so the window has to be down to one
-    // by now. It closes ranks on modal_close before this can fit; until then
-    // nothing is submitted and the openness spring is held at zero, so the wait
-    // is a stillness on the island rather than a modal drawn in the wrong group.
+    // Three shapes of the four one body gets, so the shell has to be down to a
+    // single shape by now. It closes ranks on modal_close before this can fit;
+    // until then nothing is submitted and the openness spring is held at zero,
+    // so the wait is a stillness on the island rather than a modal drawn into a
+    // group that has no room for it.
+    //
+    // Over a window it is a sheet of its own instead, thinner than what it
+    // covers, and then the alpha ramp matters: at the bottom of a retract the
+    // three bodies are the island's capsule, which in its own group would be a
+    // stray pill of glass rather than nothing. Fading the pass out over the
+    // first tenth of the opening is what makes the group swap unseeable.
     int used = 0;
+    const int grp = g.joined ? 0 : 1;
     for (int i = 0; i < state->glass_count; ++i)
-        if (state->glass_rects[i].group == 0) ++used;
+        if (state->glass_rects[i].group == grp) ++used;
     const bool room = used + 3 <= kMaxMergedShapes &&
                       state->glass_count + 3 <= kMaxGlassRects;
     g.room = room;
     if (state->screen_texture_id && room) {
         GlassRect base{};
-        base.group     = 0;
-        base.alpha     = 1.0f;
+        base.group     = grp;
+        // Faded over the first tenth, in both cases. Sharing the shell's body
+        // this only matters at the very bottom, where zero alpha drops the
+        // shapes out of the union entirely — but that is the case that needs it:
+        // the shell does not always cover the island's capsule, and the frames
+        // either side of a swap must not show one.
+        base.alpha     = u < 0.10f ? u / 0.10f : 1.0f;
         base.rounding  = kBtnH * 0.5f;   // capsule answers, rounded body
         base.edgeWidth = 40.0f;
         base.blur      = 5.0f;
         base.merge     = kMerge;
-        base.tintA     = state->glass_clarity * kClarity;
+        base.tintA     = state->glass_clarity * (g.joined ? kClarity : kClarityAlone);
         base.lightX    = state->glass_light_x;
         base.lightY    = state->glass_light_y;
         const ImVec4 rects[3] = { rBody, rLeft, rRight };
@@ -1393,10 +1514,21 @@ void Draw(UiState* state) {
     ImGui::SetNextWindowSize(io.DisplaySize);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    // In front, explicitly, every frame it is up.
+    //
+    // This used to carry NoBringToFrontOnFocus, which does more than its name
+    // says: ImGui's CreateNewWindow push_front()s such a window into g.Windows,
+    // and g.Windows runs back-to-front, so the flag puts the window at the very
+    // *back* of the display order for good — it is the flag a full-screen
+    // dockspace host uses to stay behind everything. FindHoveredWindowEx walks
+    // that list from the front and takes the first hit, so the main window won
+    // everywhere it overlapped and the answers were unclickable wherever the
+    // window covered them. Which is anywhere, for a window at its default size.
+    // Being drawn last was never the same as being in front.
+    if (g.t < 0.05f) ImGui::SetNextWindowFocus();
     ImGui::Begin("##modal", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
-                 ImGuiWindowFlags_NoBringToFrontOnFocus |
                  ImGuiWindowFlags_NoScrollbar);
 
     // Modal in the only sense that matters here: a press anywhere else is
@@ -1409,22 +1541,63 @@ void Draw(UiState* state) {
     ImGui::SetCursorScreenPos(ImVec2(0, 0));
     ImGui::InvisibleButton("##swallow", io.DisplaySize);
 
+    // A modal owns the question, not the app's chrome. Now that it is genuinely
+    // in front, the main window is hovered nowhere and its own tap handlers
+    // cannot fire, so the one gesture that matters is passed through by hand: a
+    // press on the shell, and on none of the three bodies, opens the next rest
+    // state. Being unable to put the window away while an answer is pending is
+    // what "the UI has seized up" looks like — and it is also the only way to
+    // watch the card grow and press the modal out of its way.
+    if (u > 0.6f && ImGui::IsMouseClicked(0)) {
+        const ImVec2 m  = io.MousePos;
+        const ImVec4& s = state->shell_rect;
+        auto in = [&m](const ImVec4& r) {
+            return m.x >= r.x && m.y >= r.y && m.x <= r.x + r.z && m.y <= r.y + r.w;
+        };
+        if (in(s) && !in(rBody) && !in(rLeft) && !in(rRight) &&
+            state->stage < UiState::StageWindow) {
+            ++state->stage;
+            haptic::Step();
+        }
+    }
+
+    // With no mirror there are no panes, and the words would be sitting on
+    // nothing at all. Draw the three bodies as plain fills instead — the same
+    // shapes without the glass. This is also the frame or two a rotation takes
+    // to rebuild the mirror, which would otherwise leave a question hanging in
+    // mid air over an ImGui-grey window.
+    if (!state->screen_texture_id) {
+        ImDrawList* bg = ImGui::GetWindowDrawList();
+        const float a  = u < 0.10f ? u / 0.10f : 1.0f;
+        const ImU32 c  = IM_COL32(22, 24, 28, (int)(232.0f * a));
+        const ImVec4 bodies[3] = { rBody, rLeft, rRight };
+        for (const ImVec4& r : bodies)
+            bg->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.z, r.y + r.w),
+                              c, kBtnH * 0.5f);
+    }
+
     // Text lags the shape a little, so the words arrive on a surface that is
     // already there rather than growing with it — and during a switch it goes
     // out and comes back, crossing zero at the moment the content changes
     // hands, so the swap itself is never seen.
     const float open_a = u < 0.55f ? 0.0f : (u - 0.55f) / 0.45f;
     const float swap_a = g.swap > 0.0f ? std::fabs(2.0f * g.swap - 1.0f) : 1.0f;
-    // And they go with the body when the shell grows over it. Opening the card
-    // while a modal is up drags the modal a long way inside it before the spring
-    // brings it back out, and words on a surface that is no longer there land on
-    // whatever the shell is showing instead. Measured as a share of the body's
-    // own height, so a thread across the gap — which is a join, not a swallow —
-    // costs nothing.
-    const float sunk = (rBody.w > 1.0f) ? ((sh.y + sh.w) - rBody.y) / rBody.w : 0.0f;
-    float sunk_a = 1.0f - (sunk - 0.15f) / 0.45f;
-    if (sunk_a < 0.0f) sunk_a = 0.0f;
-    if (sunk_a > 1.0f) sunk_a = 1.0f;
+    // And they go with the body when the shell grows over it. The card opening
+    // presses the modal a long way inside itself before the spring gets it back
+    // out, and while the two are one field the body inside is not a surface at
+    // all — words left on it land on whatever the shell is showing instead.
+    // Measured as a share of the body's own height, so a thread across the gap,
+    // which is a join rather than a swallow, costs nothing.
+    //
+    // Only while they are one body. A modal in a sheet of its own sits happily
+    // over an open window with all of it inside the window's rect, and fading
+    // its text there would blank every dialog the window ever asks for.
+    float sunk_a = 1.0f;
+    if (g.joined && rBody.w > 1.0f) {
+        sunk_a = 1.0f - (((sh.y + sh.w) - rBody.y) / rBody.w - 0.15f) / 0.45f;
+        if (sunk_a < 0.0f) sunk_a = 0.0f;
+        if (sunk_a > 1.0f) sunk_a = 1.0f;
+    }
     const float text_a = open_a * swap_a * sunk_a;
     if (text_a > 0.01f) {
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, text_a);
@@ -1591,7 +1764,14 @@ void DrawUi(UiState* state, bool* keep_running) {
         state->haptic_last_stage = state->stage;
         haptic::Step();
     }
-    const float target = (float)state->stage * 0.5f;
+    // The shell holds still while a modal is being re-issued. A modal can be
+    // part of the island's body or a sheet of its own; changing which is only
+    // invisible on the one frame it has retracted to nothing, and a shell moving
+    // across that frame is precisely what would make the change visible. So the
+    // stage is taken but not acted on until the retract has finished — about a
+    // third of a second, with the modal pulling in as the feedback.
+    if (!dialog::StageMismatch(state->stage)) state->stage_shown = state->stage;
+    const float target = (float)state->stage_shown * 0.5f;
     UpdateSpring(&state->expand, &state->expand_vel, target, dt);
     const float t = state->expand;
     const float lt = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
@@ -1616,14 +1796,17 @@ void DrawUi(UiState* state, bool* keep_running) {
     // The dot hangs off the capsule's right, so what should sit centred on
     // screen is the pair. The offset fades out with the stage, since the dot
     // is gone by the time the card is open.
-    // A modal is three of the four shapes one merged body gets, so while one is
-    // up the window has to be a single shape: no parting, no companion dot.
+    // A modal sharing this body is three of the four shapes one body gets, so
+    // while one is the shell has to be a single shape: no parting, no companion
+    // dot. Only while it is shared — over a window the modal is its own sheet
+    // and the window keeps everything it had.
+    //
     // Ramped over about a sixth of a second, and the modal's own opening waits
-    // on it, so what the eye sees is the sheet closing and then the question
-    // being squeezed out of it — in that order, rather than both at once.
+    // on it, so what the eye sees is the island closing ranks and then the
+    // question being drawn out of it, in that order rather than both at once.
     {
         const float d = dt * 5.5f;
-        state->modal_close += dialog::IsOpen() ? d : -d;
+        state->modal_close += dialog::JoinedShell() ? d : -d;
         if (state->modal_close < 0.0f) state->modal_close = 0.0f;
         if (state->modal_close > 1.0f) state->modal_close = 1.0f;
     }
@@ -1671,6 +1854,10 @@ void DrawUi(UiState* state, bool* keep_running) {
     const ImVec2 island_pos(island_base.x + state->island_tilt.x,
                             island_base.y + state->island_tilt.y);
     const ImVec2 island_size(kIslandW, kIslandH);
+    // Where the capsule is, for the modal to be drawn out of. Published rather
+    // than recomputed there, because with Live2D loaded this is the ball's
+    // position and not the top centre.
+    state->island_rect = ImVec4(island_pos.x, island_pos.y, kIslandW, kIslandH);
 
     // The card: big enough to read, small enough to still feel like the island
     // opened rather than the window arrived. It grows from the island's centre
@@ -1684,6 +1871,18 @@ void DrawUi(UiState* state, bool* keep_running) {
     if (card_pos.y < 16.0f) card_pos.y = 16.0f;
     if (card_pos.x + card_size.x > dw - 16.0f) card_pos.x = dw - 16.0f - card_size.x;
     if (card_pos.y + card_size.y > dh - 16.0f) card_pos.y = dh - 16.0f - card_size.y;
+
+    // Where the shell will end up for the stage that has been asked for — the
+    // asked-for one, not the one being animated, so that on the frame a modal
+    // commits to a new attachment it is already pressed by the destination
+    // rather than by the shape the shell is passing through.
+    state->shell_rest_rect =
+        state->stage == UiState::StageIsland
+            ? state->island_rect
+            : (state->stage == UiState::StageCard
+                   ? ImVec4(card_pos.x, card_pos.y, card_size.x, card_size.y)
+                   : ImVec4(state->last_full_pos.x, state->last_full_pos.y,
+                            state->last_full_size.x, state->last_full_size.y));
 
     auto lerp = [](ImVec2 a, ImVec2 b, float u) {
         return ImVec2(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u);
@@ -1973,21 +2172,31 @@ void DrawUi(UiState* state, bool* keep_running) {
                 r.merge = dot.merge = kDotMerge;
                 state->dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
                 state->dot_radius = dot.w * 0.5f;
-                dialog::BlendMaterial(&r);
                 state->glass_rects[state->glass_count++] = r;
                 state->glass_rects[state->glass_count++] = dot;
             } else {
                 state->dot_radius = 0.0f;
-                // This pane leads the group, and a modal joins that group, so
-                // the settings the shader has room for only once per pass have
-                // to travel from here to the modal's as it comes out. Also
-                // where the merge itself comes from: a lone window has nothing
-                // to merge with and carries none, and a window with a modal
-                // hanging off it needs the modal's radius or the two would
-                // stand next to each other without touching.
-                dialog::BlendMaterial(&r);
                 state->glass_rects[state->glass_count++] = r;
             }
+        }
+    }
+
+    // A group takes its material from its first surviving pane, so a modal
+    // sharing this body has to reach that pane — and which one it is depends on
+    // which branch above ran. Applied by index rather than inside one of them:
+    // only the single-pane branch is reachable with a modal joined today, and
+    // only because the four-shape budget forbids the others, which is a coupling
+    // six hundred lines away with nothing holding it in place. Also where the
+    // merge itself comes from — a shell on its own has nothing to merge with and
+    // carries none, and one with a modal hanging off it needs the modal's radius
+    // or the two stand next to each other without touching.
+    if (dialog::JoinedShell()) {
+        for (int i = 0; i < state->glass_count; ++i) {
+            GlassRect& gr = state->glass_rects[i];
+            if (gr.group != 0 || gr.w < 2.0f || gr.h < 2.0f || gr.alpha <= 0.001f)
+                continue;
+            dialog::BlendMaterial(&gr);
+            break;
         }
     }
 

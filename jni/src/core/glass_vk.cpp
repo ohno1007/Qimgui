@@ -188,8 +188,10 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
     // distance field is the smooth union of its panes, so a pane cannot be
     // drawn on its own without losing the neck it shares with its neighbours.
     // So a group is also a wall: two panes in different groups can never touch.
-    // That is why there is only one — the modal gave up a clarity of its own to
-    // get inside it.
+    // Which is why a modal beside the island shares its group and gives up a
+    // clarity of its own, and one over a window keeps that clarity and cannot
+    // touch it. Two passes at most in practice, and an empty group costs a
+    // filter and nothing else.
     for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
         GlassGroup g;
         const GlassRect* lead = nullptr;

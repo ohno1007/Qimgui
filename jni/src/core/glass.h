@@ -35,11 +35,13 @@ struct GlassRect {
     // in one pass with one set of material settings. Separate groups are drawn
     // separately — and cannot merge, which is the whole cost of splitting one.
     //
-    // Nothing uses a second group today. The modal had one so it could be
-    // thinner than the window it covered, and that bought exactly what it
-    // sounds like: it could never touch the window either. It joined group 0
-    // and gave up its own clarity for the join. Anything that genuinely must
-    // not run into its neighbours can still take a group of its own.
+    // The modal moves between the two, and it is worth knowing why, because it
+    // is the clearest illustration of the trade. Beside the island it shares
+    // group 0 and can neck to it, at the price of the island's material being
+    // its material. Over a window it takes a group of its own so it can be
+    // thinner — and because a merged union swallows a shape that lies inside
+    // another one, which is what a window would do to it. There is no
+    // arrangement that gets both.
     int   group = 0;
 };
 
@@ -59,7 +61,7 @@ struct GlassGroup {
 };
 
 // The most groups a frame may carry. Each costs a full pass, so this is small
-// on purpose — and in practice one is all that is used.
+// on purpose: the shell is one, and a modal it cannot merge with is a second.
 constexpr int kMaxGlassGroups = 4;
 
 // Packs the rects belonging to `group` into one merged body, and reports the

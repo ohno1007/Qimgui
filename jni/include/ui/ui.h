@@ -61,6 +61,16 @@ struct UiState {
     float expand      = 1.0f;
     float expand_vel  = 0.0f;
 
+    // The rest state the shell is actually animating towards, which is `stage`
+    // except while a modal is being re-issued.
+    //
+    // A modal can be part of the island's body or a sheet of its own, and it
+    // can only change which by retracting to nothing and coming back — the swap
+    // is invisible on that one frame and nowhere else. The volume key can flip
+    // the stage from outside ImGui at any moment, so the shell waits the third
+    // of a second that takes rather than moving through it.
+    int   stage_shown = StageWindow;
+
     // What the three rest states show. Every one of these is optional; leave it
     // null and the built-in default is used. Icons come from ui/icons.h and are
     // just strings, so they concatenate with text: ICON_FA_BOLT "  就绪".
@@ -81,21 +91,40 @@ struct UiState {
     float  dot_radius = 0.0f;
 
     // The shell — pill, card or full window — exactly as it stands this frame,
-    // published by DrawUi. A modal grows out of this rect and then hangs off
-    // its bottom edge, so it needs where the shell actually is rather than
-    // where the island rests: that is what makes the window shrinking past the
-    // modal something the modal answers to, and what lets the card push it
-    // down as it opens.
-    ImVec4 shell_rect = ImVec4(0, 0, 0, 0);
+    // and the island's own capsule wherever it currently is (which is not the
+    // top centre in Live2D builds, where it follows the dragged ball). Both
+    // published by DrawUi for the modal: it is drawn out of the island's
+    // capsule, and it is the shell's bottom edge that presses it down.
+    ImVec4 shell_rect  = ImVec4(0, 0, 0, 0);
+    ImVec4 island_rect = ImVec4(0, 0, 0, 0);
 
-    // How far the window has closed ranks for a modal, 0..1.
+    // Where the shell will come to rest for the stage that has been asked for,
+    // which is not where it is while it is on its way there.
+    //
+    // The modal is pressed down by this rather than by the live rect, and the
+    // difference is the whole behaviour: a shell that is mid-collapse is briefly
+    // enormous, and a modal held clear of *that* would be flung down the screen
+    // and hauled back up again. Pressed by the rest state it moves once, between
+    // two settled places, and the shell sweeping over it on the way is an
+    // absorption — which is what a passing body should do to a smaller one.
+    ImVec4 shell_rest_rect = ImVec4(0, 0, 0, 0);
+
+    // The modal's whole body, published by dialog::Draw, so the exit dissolve
+    // can seed particles over it as well as over the window — otherwise the
+    // question blinks out of existence while the window it was asked about
+    // comes apart. Zero size when no modal is up.
+    ImVec4 modal_rect = ImVec4(0, 0, 0, 0);
+
+    // How far the shell has closed ranks for a modal sharing its body, 0..1.
     //
     // One merged body gets four shapes — Vulkan's guaranteed push-constant
-    // budget, not a number anyone chose — and the modal is three of them. So
-    // for the two to be one field at all, the window has to give up its parting
-    // while a modal is up. Ramped rather than switched, because at zero slot
-    // width the four parted shapes tile the window exactly: the handover to a
-    // single shape then happens at the one moment it cannot be seen.
+    // budget, not a number anyone chose — and the modal is three of them. So for
+    // the two to be one field at all, the shell has to come down to a single
+    // shape: no parted nav column, no companion dot. Ramped rather than
+    // switched, because at zero slot width the four parted shapes tile the
+    // window exactly, so the handover happens at the one moment it cannot be
+    // seen. Stays at zero when the modal is a sheet of its own, where the shell
+    // keeps everything it had.
     float modal_close = 0.0f;
 
 
@@ -242,19 +271,27 @@ void LastItemFrame(const char* label, float rounding = -1.0f);
 } // namespace chrome
 
 // ─── Modal dialogs ───────────────────────────────────────────────────────
-// A modal made of the same liquid glass, in the window's own pane group so the
-// two are one field: it is squeezed out of the shell, hangs off its bottom
-// edge, and joins or lets go of it by distance like everything else here.
+// A modal made of the same liquid glass, drawn out of the Dynamic Island's
+// capsule and hanging just below it — which is where it lives whatever the
+// shell is doing.
 //
-// That costs it a material of its own. One group is one pass and one set of
-// settings, so a modal can no longer be thinner than the window it covers —
-// instead the whole body thins while one is up, which reads as the window
-// receding rather than as a sheet stacked on a sheet.
+// Whether it is *part of* the shell depends on what the shell currently is.
+// Beside the island or the card it shares their body: one merged field, so they
+// run together and let go by distance like everything else here, and a card
+// growing downwards presses the modal out of its way. Over a full window it
+// cannot — a window contains the island's spot, and a smooth union swallows a
+// shape inside another one completely, so merging there would delete the modal
+// rather than join it. There it is a sheet of its own, and thinner than what it
+// covers.
+//
+// Sharing costs it that thinness: one group is one pass and one set of
+// settings, so while it is part of the island's body the pair thins together
+// instead, which reads as the island receding behind the question.
 //
 // It is three bodies, not one panel: a capsule carrying the text, and two
 // smaller capsules beneath it for the answers, close enough that the field
-// joins them. They start collapsed on the shell and spring out from it, which
-// is where the separation happens — one blob becoming three.
+// joins them. They start collapsed on the island's capsule and spring out from
+// it, which is where the separation happens — one blob becoming three.
 //
 // One at a time. Opening while one is up replaces it.
 namespace dialog {
