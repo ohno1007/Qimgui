@@ -1057,10 +1057,21 @@ bool  StageMismatch(int stage);
 
 namespace {
 
-// The body's width, capped to the display. The two answers split it, so this
-// also sets how wide a button gets.
-constexpr float kBodyW      = 540.0f;
+// The body's width is measured from its own words, between these bounds. The
+// two answers split it, so it is also what sets how wide a button gets.
+//
+// The floor is a shape rather than a size: below about this a dialog stops
+// reading as a dialog and starts reading as a tooltip, whatever its text. The
+// cap is what makes long text wrap at all — past it the words go down instead of
+// out — and it is deliberately short of the display, because a line of text as
+// wide as a phone is hard to read back.
+constexpr float kBodyWMin   = 300.0f;
+constexpr float kBodyWMax   = 660.0f;
 constexpr float kSideMargin = 26.0f;
+// What a licence field asks for when there is no body text to measure.
+constexpr float kFieldW     = 400.0f;
+// Slack around an answer's label, which sets the narrowest the pair can be.
+constexpr float kBtnPadX    = 26.0f;
 constexpr float kBtnH       = 54.0f;
 constexpr float kPadX       = 26.0f;
 constexpr float kPadY       = 20.0f;
@@ -1122,9 +1133,10 @@ struct State {
     float       t = 0.0f, vel = 0.0f;   // 0 collapsed on the island, 1 open
     int         result = ResultNone;
 
-    // The body's height is content-dependent, so switching kinds resizes it.
-    // Springing it rather than snapping is what makes one dialog become
-    // another instead of being replaced by it.
+    // Both of the body's dimensions are content-dependent, so switching kinds
+    // resizes it. Springing them rather than snapping is what makes one dialog
+    // become another instead of being replaced by it.
+    float       w = 0.0f, w_vel = 0.0f;
     float       h = 0.0f, h_vel = 0.0f;
 
     // Cross-fade for a switch while one is already up. Runs 1 -> 0; the new
@@ -1339,16 +1351,50 @@ void Draw(UiState* state) {
     const float u  = g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t);
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
 
-    // Where it ends up. The height is sprung rather than assigned, so a switch
-    // to a kind that needs more room grows into it.
+    // Where it ends up. Both axes are measured from the words and then sprung
+    // rather than assigned, so a switch to a kind that needs more room grows
+    // into it in both directions.
+    //
+    // The width used to be a flat 540. That is the wrong number for everything:
+    // a four-word confirmation got a capsule twice the width of its own
+    // sentence, and anything longer than a line was poured into that same 540
+    // and grew downwards instead of sideways. So take the natural, unwrapped
+    // width of the widest thing in it and let that decide, wrapping only once it
+    // runs out of screen.
+    ImGui::PushFont(nullptr, kTitleSize);
+    const ImVec2 titleSz = ImGui::CalcTextSize(g.title.c_str());
+    ImGui::PopFont();
+    // Wrap width 0 means "do not wrap", so this is the widest line the body
+    // already has — its own line breaks are respected, and a paragraph with none
+    // reports its full length and is what pushes the capsule out to the cap.
+    const float natBody = (g.kind == KindLicense)
+        ? kFieldW
+        : ImGui::CalcTextSize(g.body.c_str(), nullptr, false, 0.0f).x;
+    // The answers set a floor: two capsules that can still hold their labels,
+    // which are caller-supplied and so cannot be assumed short.
+    const float okW  = ImGui::CalcTextSize(g.ok.c_str()).x;
+    const float noW  = ImGui::CalcTextSize(g.cancel.c_str()).x;
+    const float btnW_min = (okW > noW ? okW : noW) + kBtnPadX * 2.0f;
+
     const float avail = dw - 2.0f * kSideMargin;
-    const float bodyW = avail < kBodyW ? avail : kBodyW;
+    float maxW = avail < kBodyWMax ? avail : kBodyWMax;
+    float wantW = (titleSz.x > natBody ? titleSz.x : natBody) + kPadX * 2.0f;
+    const float floorW = btnW_min * 2.0f + kBtnGap;
+    if (wantW < floorW)   wantW = floorW;
+    if (wantW < kBodyWMin) wantW = kBodyWMin;
+    if (wantW > maxW)     wantW = maxW;
+    if (g.w <= 0.0f) g.w = wantW;          // first open: no growth to animate
+    SpringTo(&g.w, &g.w_vel, wantW, dt, 10.0f);
+    const float bodyW = g.w;
+
     // Measured, not counted in lines. A fixed three lines is right for nothing:
     // too tall for one sentence and too short for three, and it was the reason
-    // this looked oversized.
+    // this looked oversized. Measured against the *animated* width too, so the
+    // two axes stay consistent while a switch is morphing between them — a
+    // height sized for the destination width overflows the width it has now.
     const float wrapW = bodyW - kPadX * 2.0f;
     ImGui::PushFont(nullptr, kTitleSize);
-    const float titleH = ImGui::CalcTextSize(g.title.c_str()).y;
+    const float titleH = ImGui::CalcTextSize(g.title.c_str(), nullptr, false, wrapW).y;
     ImGui::PopFont();
     const float contentH = (g.kind == KindLicense)
         ? ImGui::GetFrameHeight()
@@ -1638,8 +1684,20 @@ void Draw(UiState* state) {
 
         ImGui::SetCursorScreenPos(ImVec2(rBody.x + kPadX, rBody.y + kPadY));
         ImGui::BeginGroup();
+        // Window-local, and that is the whole of it. PushTextWrapPos takes a
+        // position in the window's own coordinates, and this used to be handed a
+        // screen one — which agreed only because the window was pinned at the
+        // origin. Sizing the window to the bodies moved it, and every wrap
+        // position went out by the window's x, so nothing wrapped inside the
+        // capsule any more. Taken from the cursor instead, which is already local
+        // and already exactly where the text starts.
+        const float wrap_local = ImGui::GetCursorPosX() + wrapW;
+        // The title wraps too. It never did, so a title longer than the capsule
+        // simply ran out of the glass and kept going.
         ImGui::PushFont(nullptr, kTitleSize);
+        ImGui::PushTextWrapPos(wrap_local);
         ImGui::TextUnformatted(g.title.c_str());
+        ImGui::PopTextWrapPos();
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0, kTitleGap - ImGui::GetStyle().ItemSpacing.y));
         if (g.kind == KindLicense) {
@@ -1647,7 +1705,7 @@ void Draw(UiState* state) {
             ImGui::InputTextWithHint("##key", u8"输入卡密", g.input, sizeof(g.input));
             chrome::LastItem(14.0f);
         } else {
-            ImGui::PushTextWrapPos(rBody.x + kPadX + wrapW);
+            ImGui::PushTextWrapPos(wrap_local);
             ImGui::TextUnformatted(g.body.c_str());
             ImGui::PopTextWrapPos();
         }
