@@ -1020,6 +1020,13 @@ namespace dialog {
 // only DrawUi calls it — the outside world only opens and reads.
 void Draw(UiState* state);
 
+// Once the modal shares the window's group the two are one body, and one body
+// gets one material — so the window's pane, which leads the group, has to carry
+// the modal's settings as it comes up. That is what BlendMaterial does, and
+// Openness is how far along it is.
+float Openness();
+void  BlendMaterial(GlassRect* lead);
+
 namespace {
 
 // The body's width, capped to the display. The two answers split it, so this
@@ -1046,6 +1053,12 @@ constexpr float kHangGap    = 22.0f;   // below the island it hangs from
 constexpr float kMerge  = 34.0f;
 constexpr float kRowGap = 26.0f;   // needs 9px of approach to bridge
 constexpr float kBtnGap = 34.0f;   // needs 17px
+
+// How much of the window's wash the shared body keeps once the modal is fully
+// out. It cannot be thinner than the window any more — one body, one material —
+// so the whole sheet thins instead, which reads as the window receding behind
+// the question rather than as a second sheet stacked on the first.
+constexpr float kClarity = 0.62f;
 
 // The shares, per axis, because the two gaps answer to different ones: the row
 // gap moves with the vertical lean and the gap between the answers with the
@@ -1092,6 +1105,20 @@ struct State {
     // Where the lean has carried each body, and its own velocity.
     ImVec2      off[3]     = {};
     ImVec2      off_vel[3] = {};
+
+    // The line the whole thing hangs from — the shell's bottom edge, whatever
+    // the shell currently is. Sprung, and deliberately under-damped: the shell
+    // moving quickly leaves the modal behind, which opens the gap past the
+    // merge threshold and necks the join down, and the spring coming back
+    // through closes it again. That is the entire reason the window retracting
+    // past the modal does anything at all.
+    float       anchor = 0.0f, anchor_vel = 0.0f;
+    bool        anchor_valid = false;
+
+    // Whether the shared body had room for three more shapes last frame. The
+    // opening is held until it does, so the modal never appears in a group of
+    // its own on the way in.
+    bool        room = false;
 
     // Press. Read a frame late — the panes are submitted before the hit areas
     // exist — which at these speeds is not visible, and is the price of the
@@ -1163,6 +1190,11 @@ void Open(Kind kind, const char* title, const char* body,
         g.swap = 1.0f;
     } else {
         Commit(kind, t, b, o, c);
+        // A fresh entrance starts hanging from wherever the shell is now rather
+        // than springing down from wherever it was left last time, and it waits
+        // for room in the shared body rather than trusting the last answer.
+        g.anchor_valid = false;
+        g.room         = false;
     }
     g.open = true;
     haptic::Step();
@@ -1171,6 +1203,23 @@ void Open(Kind kind, const char* title, const char* body,
 void Close()      { g.open = false; }
 bool IsOpen()     { return g.open || g.t > 0.002f; }
 const char* Input() { return g.input; }
+
+float Openness() { return g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t); }
+
+// The group's material, walked toward the modal's as it comes out. Applied by
+// DrawUi to the window's pane because that pane is the group's lead and a group
+// has one set of settings — so this is not a preference, it is the only place
+// the modal's material can live once the two are one body.
+void BlendMaterial(GlassRect* r) {
+    const float u = Openness();
+    if (u <= 0.001f) return;
+    auto mix = [u](float a, float b) { return a + (b - a) * u; };
+    r->rounding  = mix(r->rounding,  kBtnH * 0.5f);
+    r->edgeWidth = mix(r->edgeWidth, 40.0f);
+    r->blur      = mix(r->blur,      5.0f);
+    r->merge     = mix(r->merge,     kMerge);
+    r->tintA     = mix(r->tintA,     r->tintA * kClarity);
+}
 
 Result Take() {
     const int r = g.result;
@@ -1183,7 +1232,10 @@ Result Take() {
 void Draw(UiState* state) {
     ImGuiIO& io = ImGui::GetIO();
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
-    UpdateSpring(&g.t, &g.vel, g.open ? 1.0f : 0.0f, dt);
+    // Held at zero until the shared body has shapes to spare — the window is
+    // closing ranks over those few frames and the modal has nowhere to be yet.
+    // Closing never waits: only the way out needs the room.
+    UpdateSpring(&g.t, &g.vel, (g.open && g.room) ? 1.0f : 0.0f, dt);
 
     // The cross-fade for a switch, and the handover at its midpoint.
     if (g.swap > 0.0f) {
@@ -1228,8 +1280,48 @@ void Draw(UiState* state) {
         SpringTo(&g.off[i].y, &g.off_vel[i].y, lean.y * kTiltY[i], dt, kOmega[i]);
     }
 
-    const float x0   = (dw - bodyW) * 0.5f;
-    const float y0   = kIslandTop + kIslandH + kHangGap;
+    const float x0 = (dw - bodyW) * 0.5f;
+
+    // What it hangs from: the shell's bottom edge, tracked exactly — including
+    // the shell's own lean, so leaning the phone does not simply drag the pair
+    // apart. Only to the extent the shell is overhead, though: a window dragged
+    // off to one side is not above this and does not carry it, and the share
+    // slides with the overlap rather than switching, so crossing that boundary
+    // is not an event. With nothing overhead it falls back to the island's
+    // resting line, which is where it always hung.
+    const float dh_m  = state->display_h > 0 ? (float)state->display_h
+                                             : io.DisplaySize.y;
+    const ImVec4& sh  = state->shell_rect;
+    const float span  = (sh.z < bodyW ? sh.z : bodyW);
+    const float lo    = (sh.x > x0 ? sh.x : x0);
+    const float hi    = (sh.x + sh.z < x0 + bodyW ? sh.x + sh.z : x0 + bodyW);
+    float cover = (span > 1.0f) ? (hi - lo) / span : 0.0f;
+    if (cover < 0.0f) cover = 0.0f;
+    if (cover > 1.0f) cover = 1.0f;
+
+    const float rest  = kIslandTop + kIslandH;
+    const float total = bodyH + kRowGap + kBtnH;   // everything below the line
+    float want = rest + ((sh.y + sh.w) - rest) * cover;
+    // Rails, not design lines. A shell filling the screen would push it off the
+    // bottom, and one riding high would carry it off the top once the lean is
+    // added on; both are held, and the overlap that leaves is a better failure
+    // than a modal nobody can see. Neither is reachable by any shell that
+    // exists today — the island's own lean is already clamped on screen and
+    // nothing else can get near the top — so in practice the edge is tracked
+    // exactly and these only stop a future shell from breaking it.
+    const float ceiling = dh_m - 16.0f - total - kHangGap;
+    const float floor_  = kTiltRangeDlg - kHangGap + 16.0f;   // clears a full lean up
+    if (want > ceiling) want = ceiling;
+    if (want < floor_)  want = floor_;
+    if (!g.anchor_valid) { g.anchor = want; g.anchor_valid = true; }
+    // Under-damped, and this is the whole of the third complaint: the shell
+    // moving leaves the modal behind, which closes the gap past the merge
+    // threshold and joins them, and the spring coming back through opens it
+    // again and lets go. The card growing downwards drags the modal with it;
+    // the window retracting draws it up behind itself and drops it.
+    SpringTo(&g.anchor, &g.anchor_vel, want, dt, 12.0f, 0.55f);
+
+    const float y0   = g.anchor + kHangGap;
     const float btnW = (bodyW - kBtnGap) * 0.5f;
     const float btnY = y0 + bodyH + kRowGap;
 
@@ -1245,30 +1337,46 @@ void Draw(UiState* state) {
     const ImVec4 fRight = Squash(ImVec4(x0 + bodyW - btnW + g.off[2].x,
                                         btnY + g.off[2].y, btnW, kBtnH), g.press[1]);
 
-    // Where it comes from: the island itself. At u = 0 all three are that one
-    // capsule, so the field has a single body; the separation into three is the
-    // opening animation rather than something drawn on top of it.
-    // The seed follows the island's own offset, not the modal's, so it grows
-    // out of where the island actually is.
-    const ImVec4 seed(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
-                      kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
+    // Where it comes from: the shell, whatever the shell currently is. At u = 0
+    // all three bodies are exactly that rect, and they are in its group, so the
+    // field is unchanged — the modal at rest is literally the shell. The
+    // separation into three is the opening itself rather than something drawn
+    // on top of it, and because the seed is the live rect the modal is squeezed
+    // out of the pill, the card or the window without any of them being a case.
+    const ImVec4 seed = (state->shell_rect.z > 2.0f && state->shell_rect.w > 2.0f)
+        ? state->shell_rect
+        : ImVec4(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
+                 kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
 
     const ImVec4 rBody  = Lerp(seed, fBody,  u);
     const ImVec4 rLeft  = Lerp(seed, fLeft,  u);
     const ImVec4 rRight = Lerp(seed, fRight, u);
 
-    // The panes. Group 1, so the window's own group keeps its settings and this
-    // one can be thinner — a sheet over a sheet has to read as thinner or the
-    // two stack into something opaque.
-    if (state->screen_texture_id && state->glass_count + 3 <= kMaxGlassRects) {
+    // The panes, in the window's group — that is what buys every join here: the
+    // shell and the modal are one distance field, so they run together and let
+    // go by distance exactly the way the nav column and the companion dot do.
+    // Material comes from the group's first pane, which is the window's, and
+    // DrawUi has already walked it toward these numbers as the modal opened.
+    //
+    // Three shapes of the four a body gets, so the window has to be down to one
+    // by now. It closes ranks on modal_close before this can fit; until then
+    // nothing is submitted and the openness spring is held at zero, so the wait
+    // is a stillness on the island rather than a modal drawn in the wrong group.
+    int used = 0;
+    for (int i = 0; i < state->glass_count; ++i)
+        if (state->glass_rects[i].group == 0) ++used;
+    const bool room = used + 3 <= kMaxMergedShapes &&
+                      state->glass_count + 3 <= kMaxGlassRects;
+    g.room = room;
+    if (state->screen_texture_id && room) {
         GlassRect base{};
-        base.group     = 1;
+        base.group     = 0;
         base.alpha     = 1.0f;
         base.rounding  = kBtnH * 0.5f;   // capsule answers, rounded body
         base.edgeWidth = 40.0f;
         base.blur      = 5.0f;
         base.merge     = kMerge;
-        base.tintA     = state->glass_clarity * 0.45f;
+        base.tintA     = state->glass_clarity * kClarity;
         base.lightX    = state->glass_light_x;
         base.lightY    = state->glass_light_y;
         const ImVec4 rects[3] = { rBody, rLeft, rRight };
@@ -1307,7 +1415,17 @@ void Draw(UiState* state) {
     // hands, so the swap itself is never seen.
     const float open_a = u < 0.55f ? 0.0f : (u - 0.55f) / 0.45f;
     const float swap_a = g.swap > 0.0f ? std::fabs(2.0f * g.swap - 1.0f) : 1.0f;
-    const float text_a = open_a * swap_a;
+    // And they go with the body when the shell grows over it. Opening the card
+    // while a modal is up drags the modal a long way inside it before the spring
+    // brings it back out, and words on a surface that is no longer there land on
+    // whatever the shell is showing instead. Measured as a share of the body's
+    // own height, so a thread across the gap — which is a join, not a swallow —
+    // costs nothing.
+    const float sunk = (rBody.w > 1.0f) ? ((sh.y + sh.w) - rBody.y) / rBody.w : 0.0f;
+    float sunk_a = 1.0f - (sunk - 0.15f) / 0.45f;
+    if (sunk_a < 0.0f) sunk_a = 0.0f;
+    if (sunk_a > 1.0f) sunk_a = 1.0f;
+    const float text_a = open_a * swap_a * sunk_a;
     if (text_a > 0.01f) {
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, text_a);
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -1351,6 +1469,11 @@ void Draw(UiState* state) {
         answer("##yes", rRight, g.ok.c_str(), 1, ResultOk);
 
         ImGui::PopStyleVar();
+    } else {
+        // No hit areas this frame, so nothing is going to report the finger
+        // lifting. Left alone, a press held as the content faded would stay
+        // squashed for as long as the modal is up.
+        g.held[0] = g.held[1] = false;
     }
 
     ImGui::End();
@@ -1493,7 +1616,20 @@ void DrawUi(UiState* state, bool* keep_running) {
     // The dot hangs off the capsule's right, so what should sit centred on
     // screen is the pair. The offset fades out with the stage, since the dot
     // is gone by the time the card is open.
-    const float dot_t = lt < 0.22f ? 1.0f - lt / 0.22f : 0.0f;
+    // A modal is three of the four shapes one merged body gets, so while one is
+    // up the window has to be a single shape: no parting, no companion dot.
+    // Ramped over about a sixth of a second, and the modal's own opening waits
+    // on it, so what the eye sees is the sheet closing and then the question
+    // being squeezed out of it — in that order, rather than both at once.
+    {
+        const float d = dt * 5.5f;
+        state->modal_close += dialog::IsOpen() ? d : -d;
+        if (state->modal_close < 0.0f) state->modal_close = 0.0f;
+        if (state->modal_close > 1.0f) state->modal_close = 1.0f;
+    }
+    const float mclose = state->modal_close;
+
+    const float dot_t = (lt < 0.22f ? 1.0f - lt / 0.22f : 0.0f) * (1.0f - mclose);
     const float pair_shift = (kDotD + kDotGap) * 0.5f * dot_t;
 
     // Lean carries the island. Faded out well before the window opens, and run
@@ -1600,6 +1736,12 @@ void DrawUi(UiState* state, bool* keep_running) {
         win_pos.x = c.x - win_size.x * 0.5f;
         win_pos.y = c.y - win_size.y * 0.5f;
     }
+
+    // The shell as it finally stands, squash included, for the modal to be
+    // squeezed out of and to hang from. Published here rather than inside the
+    // pane block below, which is skipped whenever the mirror is off — the modal
+    // still has to know where to hang then.
+    state->shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
 
     // Above the card's rest, and clear of it: the spring is deliberately
     // under-damped and overshoots past 0.5 on its way to the card, so a
@@ -1723,7 +1865,12 @@ void DrawUi(UiState* state, bool* keep_running) {
             hold(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, kNavLagMax);
         }
 
-        const float split = lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f;
+        // Closed out by mclose while a modal is up. Driving the slot to zero
+        // rather than switching the parting off is what makes the handover
+        // invisible: at zero width the four shapes tile the window exactly, so
+        // the frame where they become one changes nothing on screen.
+        const float split = (lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f)
+                          * (1.0f - mclose);
         GlassRect a = base, b = base, strand = base, title = base;
         bool parted = false;
         if (split > 0.01f) {
@@ -1826,10 +1973,19 @@ void DrawUi(UiState* state, bool* keep_running) {
                 r.merge = dot.merge = kDotMerge;
                 state->dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
                 state->dot_radius = dot.w * 0.5f;
+                dialog::BlendMaterial(&r);
                 state->glass_rects[state->glass_count++] = r;
                 state->glass_rects[state->glass_count++] = dot;
             } else {
                 state->dot_radius = 0.0f;
+                // This pane leads the group, and a modal joins that group, so
+                // the settings the shader has room for only once per pass have
+                // to travel from here to the modal's as it comes out. Also
+                // where the merge itself comes from: a lone window has nothing
+                // to merge with and carries none, and a window with a modal
+                // hanging off it needs the modal's radius or the two would
+                // stand next to each other without touching.
+                dialog::BlendMaterial(&r);
                 state->glass_rects[state->glass_count++] = r;
             }
         }

@@ -80,6 +80,24 @@ struct UiState {
     ImVec2 dot_center = ImVec2(0, 0);
     float  dot_radius = 0.0f;
 
+    // The shell — pill, card or full window — exactly as it stands this frame,
+    // published by DrawUi. A modal grows out of this rect and then hangs off
+    // its bottom edge, so it needs where the shell actually is rather than
+    // where the island rests: that is what makes the window shrinking past the
+    // modal something the modal answers to, and what lets the card push it
+    // down as it opens.
+    ImVec4 shell_rect = ImVec4(0, 0, 0, 0);
+
+    // How far the window has closed ranks for a modal, 0..1.
+    //
+    // One merged body gets four shapes — Vulkan's guaranteed push-constant
+    // budget, not a number anyone chose — and the modal is three of them. So
+    // for the two to be one field at all, the window has to give up its parting
+    // while a modal is up. Ramped rather than switched, because at zero slot
+    // width the four parted shapes tile the window exactly: the handover to a
+    // single shape then happens at the one moment it cannot be seen.
+    float modal_close = 0.0f;
+
 
     // Live2D floating "ball": when collapsed the character is the visual and
     // can be dragged anywhere; this is its centre in screen px. Re-clamped to
@@ -224,14 +242,19 @@ void LastItemFrame(const char* label, float rounding = -1.0f);
 } // namespace chrome
 
 // ─── Modal dialogs ───────────────────────────────────────────────────────
-// A modal made of the same liquid glass, in its own pane group so it can be
-// clearer than the window it covers — a sheet laid over another sheet has to
-// read as thinner, or the two stack into something opaque.
+// A modal made of the same liquid glass, in the window's own pane group so the
+// two are one field: it is squeezed out of the shell, hangs off its bottom
+// edge, and joins or lets go of it by distance like everything else here.
+//
+// That costs it a material of its own. One group is one pass and one set of
+// settings, so a modal can no longer be thinner than the window it covers —
+// instead the whole body thins while one is up, which reads as the window
+// receding rather than as a sheet stacked on a sheet.
 //
 // It is three bodies, not one panel: a capsule carrying the text, and two
 // smaller capsules beneath it for the answers, close enough that the field
-// joins them. They start collapsed on the Dynamic Island and spring out from
-// it, which is where the separation happens — one blob becoming three.
+// joins them. They start collapsed on the shell and spring out from it, which
+// is where the separation happens — one blob becoming three.
 //
 // One at a time. Opening while one is up replaces it.
 namespace dialog {

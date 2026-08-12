@@ -187,7 +187,9 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
     // One pass per group, and one group is one body: the fragment shader's
     // distance field is the smooth union of its panes, so a pane cannot be
     // drawn on its own without losing the neck it shares with its neighbours.
-    // Groups are what let a modal sit over the window with its own clarity.
+    // So a group is also a wall: two panes in different groups can never touch.
+    // That is why there is only one — the modal gave up a clarity of its own to
+    // get inside it.
     for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
         GlassGroup g;
         const GlassRect* lead = nullptr;

@@ -33,8 +33,13 @@ struct GlassRect {
     float merge = 0.0f;
     // Panes sharing a group are one body: merged into a single field and drawn
     // in one pass with one set of material settings. Separate groups are drawn
-    // separately, which is what lets a modal sit over the window with its own
-    // clarity instead of inheriting the window's.
+    // separately — and cannot merge, which is the whole cost of splitting one.
+    //
+    // Nothing uses a second group today. The modal had one so it could be
+    // thinner than the window it covered, and that bought exactly what it
+    // sounds like: it could never touch the window either. It joined group 0
+    // and gave up its own clarity for the join. Anything that genuinely must
+    // not run into its neighbours can still take a group of its own.
     int   group = 0;
 };
 
@@ -54,7 +59,7 @@ struct GlassGroup {
 };
 
 // The most groups a frame may carry. Each costs a full pass, so this is small
-// on purpose: the window is one, a modal over it is another.
+// on purpose — and in practice one is all that is used.
 constexpr int kMaxGlassGroups = 4;
 
 // Packs the rects belonging to `group` into one merged body, and reports the

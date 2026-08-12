@@ -335,9 +335,9 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
     glUniform2f(m_LocScreen, (float)screenW, (float)screenH);
     glUniform2f(m_LocSurface, (float)surfaceW, (float)surfaceH);
 
-    // One pass per group. Two at most in practice — the window, and a modal
-    // over it that wants its own clarity — and an empty group costs a filter
-    // and nothing else.
+    // One pass per group. One in practice, since everything on screen wants to
+    // be able to run into everything else and separate groups cannot; an empty
+    // group costs a filter and nothing else.
     for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
         GlassGroup g;
         const GlassRect* lead = nullptr;
