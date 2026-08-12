@@ -339,11 +339,23 @@ bool DoWrite(const char* text) {
     g.writeInt32(in, 1);                 // one mime type
     const char* kMime = "text/plain";
     g.writeString(in, kMime, (int32_t)std::strlen(kMime));
-    g.writeInt32(in, -1);                // extras: null PersistableBundle
+    // extras may be null — ClipDescription's constructor just stores whatever
+    // readPersistableBundle returns.
+    g.writeInt32(in, -1);
     g.writeInt64(in, 0);                 // timestamp; the service sets its own
     g.writeInt32(in, 0);                 // isStyledText
     g.writeInt32(in, 0);                 // classification status
-    g.writeInt32(in, -1);                // confidences: null Bundle
+    // Confidences may NOT. The constructor ends with
+    //
+    //     readBundleToConfidences(in.readBundle());
+    //
+    // and that method opens with bundle.keySet(), unguarded — so a null here is
+    // a NullPointerException inside the service, which comes back as exception
+    // code -4 and nothing else. The real writer never sends null either:
+    // confidencesToBundle() always returns a Bundle, usually an empty one. An
+    // empty bundle is a lone zero on the wire, which is the same fact about
+    // empty bundles that broke the read path, arriving from the other side.
+    g.writeInt32(in, 0);
     g.writeInt32(in, 0);                 // no icon
     g.writeInt32(in, 1);                 // one item
     WriteCharSequence(in, text);         // item[0].mText
