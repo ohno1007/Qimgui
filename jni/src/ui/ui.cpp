@@ -982,13 +982,35 @@ constexpr float kPadX       = 34.0f;
 constexpr float kPadY       = 26.0f;
 constexpr float kHangGap    = 24.0f;   // below the island it hangs from
 
-// The two gaps are chosen on opposite sides of the same threshold. A smooth
-// union closes over only once the merge radius passes twice the gap, so at 14
-// the body and the answers are joined by a neck, and at 26 the two answers are
-// not — which is the whole difference between one control and two.
+// At rest the three bodies are apart. A smooth union closes over only once the
+// merge radius passes twice the gap, so both gaps sit above 17 and nothing is
+// joined when the panel is level.
+//
+// What joins them is the lean. Each body takes a different share of it, so a
+// tilt does not slide the group about — it changes the distances inside it, and
+// the field answers: a gap closing past the threshold grows a neck, and one
+// opening past it lets go. The threads are a consequence of the geometry rather
+// than an effect layered on top, which is the only way they read as surface
+// tension instead of decoration.
 constexpr float kMerge  = 34.0f;
-constexpr float kRowGap = 14.0f;
-constexpr float kBtnGap = 26.0f;
+constexpr float kRowGap = 26.0f;   // needs 9px of approach to bridge
+constexpr float kBtnGap = 34.0f;   // needs 17px
+
+// The shares, per axis, because the two gaps answer to different ones: the row
+// gap moves with the vertical lean and the gap between the answers with the
+// horizontal. A single share per body cannot serve both — the spread that puts
+// a thread across the row runs the two answers into each other.
+//
+// Its own range rather than the island's: island_tilt is clamped to keep the
+// island on screen, which makes it nearly one-sided vertically, and a modal
+// hanging below it has room in both directions.
+constexpr float kTiltRangeDlg = 60.0f;
+constexpr float kTiltX[3] = { 1.00f, 1.15f, 0.85f };
+constexpr float kTiltY[3] = { 1.00f, 1.25f, 0.78f };
+// Stiffnesses differ too, so during the movement itself the bodies are never
+// quite where each other expect and the threads form on the way as well as at
+// the ends.
+constexpr float kOmega[3] = { 9.0f, 6.5f, 11.5f };
 
 struct State {
     bool        open  = false;
@@ -997,12 +1019,44 @@ struct State {
     char        input[256] = "";
     float       t = 0.0f, vel = 0.0f;   // 0 collapsed on the island, 1 open
     int         result = ResultNone;
+
+    // The body's height is content-dependent, so switching kinds resizes it.
+    // Springing it rather than snapping is what makes one dialog become
+    // another instead of being replaced by it.
+    float       h = 0.0f, h_vel = 0.0f;
+
+    // Cross-fade for a switch while one is already up. Runs 1 -> 0; the new
+    // content is committed at the half-way point, so the old text leaves before
+    // the new arrives rather than cutting.
+    float       swap = 0.0f;
+    bool        pending = false;
+    int         p_kind = KindConfirm;
+    std::string p_title, p_body, p_ok, p_cancel;
+
+    // Where the lean has carried each body, and its own velocity.
+    ImVec2      off[3]     = {};
+    ImVec2      off_vel[3] = {};
 };
 State g;
 
 ImVec4 Lerp(const ImVec4& a, const ImVec4& b, float u) {
     return ImVec4(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u,
                   a.z + (b.z - a.z) * u, a.w + (b.w - a.w) * u);
+}
+
+// UpdateSpring's stiffness is fixed; these need one each.
+void SpringTo(float* pos, float* vel, float target, float dt, float omega) {
+    constexpr float kZeta = 0.62f;
+    const float diff  = target - *pos;
+    const float accel = omega * omega * diff - 2.0f * kZeta * omega * (*vel);
+    *vel += accel * dt;
+    *pos += (*vel) * dt;
+    if (std::fabs(diff) < 0.01f && std::fabs(*vel) < 0.05f) { *pos = target; *vel = 0.0f; }
+}
+
+void Commit(int kind, const std::string& title, const std::string& body,
+            const std::string& ok, const std::string& cancel) {
+    g.kind = kind; g.title = title; g.body = body; g.ok = ok; g.cancel = cancel;
 }
 
 void Answer(int result) {
@@ -1015,14 +1069,26 @@ void Answer(int result) {
 
 void Open(Kind kind, const char* title, const char* body,
           const char* ok, const char* cancel) {
-    g.kind   = kind;
-    g.title  = title  ? title  : "";
-    g.body   = body   ? body   : "";
-    g.ok     = ok     ? ok     : (kind == KindLicense ? u8"粘贴" : u8"确定");
-    g.cancel = cancel ? cancel : u8"取消";
+    const std::string t  = title  ? title  : "";
+    const std::string b  = body   ? body   : "";
+    const std::string o  = ok     ? ok     : (kind == KindLicense ? u8"粘贴" : u8"确定");
+    const std::string c  = cancel ? cancel : u8"取消";
+
     g.input[0] = '\0';
-    g.result = ResultNone;
-    g.open   = true;
+    g.result   = ResultNone;
+
+    if (IsOpen()) {
+        // Already up: this is a switch, not an entrance. The content is held
+        // until the cross-fade reaches its midpoint so the old text leaves
+        // before the new arrives, and the body's height springs across, so one
+        // dialog becomes another rather than being replaced by it.
+        g.pending = true;
+        g.p_kind = kind; g.p_title = t; g.p_body = b; g.p_ok = o; g.p_cancel = c;
+        g.swap = 1.0f;
+    } else {
+        Commit(kind, t, b, o, c);
+    }
+    g.open = true;
     haptic::Step();
 }
 
@@ -1042,28 +1108,55 @@ void Draw(UiState* state) {
     ImGuiIO& io = ImGui::GetIO();
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
     UpdateSpring(&g.t, &g.vel, g.open ? 1.0f : 0.0f, dt);
+
+    // The cross-fade for a switch, and the handover at its midpoint.
+    if (g.swap > 0.0f) {
+        g.swap -= dt * 3.2f;
+        if (g.swap < 0.0f) g.swap = 0.0f;
+        if (g.pending && g.swap <= 0.5f) {
+            Commit(g.p_kind, g.p_title, g.p_body, g.p_ok, g.p_cancel);
+            g.pending = false;
+        }
+    }
     if (!IsOpen()) return;
 
     const float u  = g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t);
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
 
-    // Where it ends up.
+    // Where it ends up. The height is sprung rather than assigned, so a switch
+    // to a kind that needs more room grows into it.
     const float avail = dw - 2.0f * kSideMargin;
     const float bodyW = avail < kBodyW ? avail : kBodyW;
     const float lineH = ImGui::GetTextLineHeightWithSpacing();
-    const float bodyH = kPadY * 2.0f + lineH * (g.kind == KindLicense ? 3.4f : 3.0f);
-    const float x0    = (dw - bodyW) * 0.5f + state->island_tilt.x;
-    const float y0    = kIslandTop + kIslandH + kHangGap + state->island_tilt.y;
-    const float btnW  = (bodyW - kBtnGap) * 0.5f;
-    const float btnY  = y0 + bodyH + kRowGap;
+    const float wantH = kPadY * 2.0f + lineH * (g.kind == KindLicense ? 3.4f : 3.0f);
+    if (g.h <= 0.0f) g.h = wantH;          // first open: no growth to animate
+    SpringTo(&g.h, &g.h_vel, wantH, dt, 10.0f);
+    const float bodyH = g.h;
 
-    const ImVec4 fBody(x0, y0, bodyW, bodyH);
-    const ImVec4 fLeft(x0, btnY, btnW, kBtnH);
-    const ImVec4 fRight(x0 + bodyW - btnW, btnY, btnW, kBtnH);
+    // Each body takes its own share of the lean, through its own spring. This
+    // is the whole mechanism: the group does not slide about, the distances
+    // inside it change, and the field grows or drops a neck as a gap crosses
+    // twice the merge radius. Nothing here animates the merge itself.
+    const ImVec2 lean(state->tilt_x * kTiltRangeDlg, state->tilt_y * kTiltRangeDlg);
+    for (int i = 0; i < 3; ++i) {
+        SpringTo(&g.off[i].x, &g.off_vel[i].x, lean.x * kTiltX[i], dt, kOmega[i]);
+        SpringTo(&g.off[i].y, &g.off_vel[i].y, lean.y * kTiltY[i], dt, kOmega[i]);
+    }
+
+    const float x0   = (dw - bodyW) * 0.5f;
+    const float y0   = kIslandTop + kIslandH + kHangGap;
+    const float btnW = (bodyW - kBtnGap) * 0.5f;
+    const float btnY = y0 + bodyH + kRowGap;
+
+    const ImVec4 fBody (x0 + g.off[0].x, y0 + g.off[0].y, bodyW, bodyH);
+    const ImVec4 fLeft (x0 + g.off[1].x, btnY + g.off[1].y, btnW, kBtnH);
+    const ImVec4 fRight(x0 + bodyW - btnW + g.off[2].x, btnY + g.off[2].y, btnW, kBtnH);
 
     // Where it comes from: the island itself. At u = 0 all three are that one
     // capsule, so the field has a single body; the separation into three is the
     // opening animation rather than something drawn on top of it.
+    // The seed follows the island's own offset, not the modal's, so it grows
+    // out of where the island actually is.
     const ImVec4 seed(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
                       kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
 
@@ -1111,8 +1204,12 @@ void Draw(UiState* state) {
     ImGui::InvisibleButton("##swallow", io.DisplaySize);
 
     // Text lags the shape a little, so the words arrive on a surface that is
-    // already there rather than growing with it.
-    const float text_a = u < 0.55f ? 0.0f : (u - 0.55f) / 0.45f;
+    // already there rather than growing with it — and during a switch it goes
+    // out and comes back, crossing zero at the moment the content changes
+    // hands, so the swap itself is never seen.
+    const float open_a = u < 0.55f ? 0.0f : (u - 0.55f) / 0.45f;
+    const float swap_a = g.swap > 0.0f ? std::fabs(2.0f * g.swap - 1.0f) : 1.0f;
+    const float text_a = open_a * swap_a;
     if (text_a > 0.01f) {
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, text_a);
         ImDrawList* dl = ImGui::GetWindowDrawList();
