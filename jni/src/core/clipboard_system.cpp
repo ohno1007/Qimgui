@@ -430,7 +430,37 @@ bool DoRead(std::string* out) {
 // what libbinder_ndk actually emits is wrong, and no amount of further counting
 // will say which. So the parcel reports its own shape.
 
-bool DoWrite(const char* text) {
+// One transaction per candidate layout, in a single run.
+//
+// Every field has now been checked against AOSP and against a clip the device
+// itself produced, and they agree — yet the service reads 28 bytes fewer than
+// are sent. That means an assumption is wrong somewhere the source cannot show,
+// so the remaining move is to stop reasoning and let the device score the
+// candidates: whichever variant it consumes exactly is the right one, and the
+// unread count for each of the others says how far off it was.
+enum Variant {
+    kBaseline = 0,   // exactly what AOSP specifies
+    kNoMime,         // mime list empty — tests whether the list is read at all
+    kFourTyped,      // four trailing typed objects instead of five
+    kSixTyped,       // six
+    kNoHtml,         // no htmlText field
+    kLabelUtf16,     // label as a Java String rather than a String8
+    kVariantCount
+};
+
+const char* VariantName(int v) {
+    switch (v) {
+    case kBaseline:   return "baseline";
+    case kNoMime:     return "no-mime";
+    case kFourTyped:  return "4-typed";
+    case kSixTyped:   return "6-typed";
+    case kNoHtml:     return "no-html";
+    case kLabelUtf16: return "label-utf16";
+    }
+    return "?";
+}
+
+bool DoWriteVariant(const char* text, int variant) {
     void* svc = OpenService();
     if (!svc) return false;
     void* in = nullptr;
@@ -441,12 +471,23 @@ bool DoWrite(const char* text) {
 
     g.writeInt32(in, 1);                 // ClipData is present
     L.Mark(in, "present");
-    WriteCharSequence(in, "AImGui");     // ClipDescription.mLabel
+    if (variant == kLabelUtf16) {
+        g.writeInt32(in, 1);             // not spanned
+        const char* kLabel = "AImGui";
+        g.writeString(in, kLabel, (int32_t)std::strlen(kLabel));
+    } else {
+        WriteCharSequence(in, "AImGui"); // ClipDescription.mLabel
+    }
     L.Mark(in, "label");
-    g.writeInt32(in, 1);                 // one mime type
-    L.Mark(in, "mimeN");
     const char* kMime = "text/plain";
-    g.writeString(in, kMime, (int32_t)std::strlen(kMime));
+    if (variant == kNoMime) {
+        g.writeInt32(in, 0);             // empty list
+        L.Mark(in, "mimeN");
+    } else {
+        g.writeInt32(in, 1);             // one mime type
+        L.Mark(in, "mimeN");
+        g.writeString(in, kMime, (int32_t)std::strlen(kMime));
+    }
     L.Mark(in, "mime");
     // extras may be null — ClipDescription's constructor just stores whatever
     // readPersistableBundle returns.
@@ -474,14 +515,17 @@ bool DoWrite(const char* text) {
     L.Mark(in, "icon+count");
     WriteCharSequence(in, text);         // item[0].mText
     L.Mark(in, "itemText");
-    WriteString8(in, nullptr);           // htmlText
+    if (variant != kNoHtml) WriteString8(in, nullptr);   // htmlText
     L.Mark(in, "html");
-    for (int i = 0; i < 5; ++i) g.writeInt32(in, 0);  // intent, sender, uri,
-                                                      // activityInfo, textLinks
-    L.Mark(in, "typed5");
+    int typed = 5;
+    if (variant == kFourTyped) typed = 4;
+    if (variant == kSixTyped)  typed = 6;
+    for (int i = 0; i < typed; ++i) g.writeInt32(in, 0);  // intent, sender, uri,
+                                                          // activityInfo, textLinks
+    L.Mark(in, "typed");
     WriteCallerTail(in);
     L.Mark(in, "tail");
-    L.Dump("write");
+    if (variant == kBaseline) L.Dump("write");
 
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kSetPrimaryClip, &in, &rep, 0);
@@ -493,9 +537,14 @@ bool DoWrite(const char* text) {
             const std::string msg = ReadExceptionMessage(rep);
             g_error = "write refused (" + std::to_string(exc) + ")" +
                       (msg.empty() ? "" : ": " + msg);
-            LOGI("[clip] write: service threw %d: %s", exc, msg.c_str());
+            std::fprintf(stderr, "[clip] try %-11s -> %d %s\n",
+                         VariantName(variant), exc, msg.c_str());
+            std::fflush(stderr);
+            LOGI("[clip] try %s -> %d %s", VariantName(variant), exc, msg.c_str());
         } else {
-            LOGI("[clip] write: ok");
+            std::fprintf(stderr, "[clip] try %-11s -> OK\n", VariantName(variant));
+            std::fflush(stderr);
+            LOGI("[clip] try %s -> OK", VariantName(variant));
         }
     } else {
         g_error = "transact " + std::to_string(st);
@@ -505,6 +554,13 @@ bool DoWrite(const char* text) {
     // After the parcel, for the same reason as the read path.
     g.decStrong(svc);
     return ok;
+}
+
+bool DoWrite(const char* text) {
+    for (int v = 0; v < kVariantCount; ++v) {
+        if (DoWriteVariant(text, v)) return true;
+    }
+    return false;
 }
 
 // ─── Which process sends it ──────────────────────────────────────────────
