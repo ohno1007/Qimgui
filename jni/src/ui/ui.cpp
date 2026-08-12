@@ -329,7 +329,11 @@ float PressAmount(ImGuiID id, bool active, float dt) {
         g_press.push_back({id, 0.0f, 0.0f});
         p = &g_press.back();
     }
-    constexpr float kOmega = 26.0f, kZeta = 0.55f;
+    // Critically damped, not under-damped. Overshoot on the way in reads as a
+    // press biting, which is wanted; overshoot on the way *out* swells the
+    // control past its resting size before settling, which reads as a recoil —
+    // the "bounce back" that made a tap feel like it rejected the finger.
+    constexpr float kOmega = 30.0f, kZeta = 1.0f;
     const float diff  = (active ? 1.0f : 0.0f) - p->v;
     const float accel = kOmega * kOmega * diff - 2.0f * kZeta * kOmega * p->vel;
     p->vel += accel * dt;
@@ -338,10 +342,11 @@ float PressAmount(ImGuiID id, bool active, float dt) {
     return p->v;
 }
 
-// Inset by up to three pixels a side. Enough to see, small enough that the
-// label it sits under does not look like it came loose.
+// Inset by up to two pixels a side. Enough to see, small enough that the label
+// it sits under does not look like it came loose — and with a critically damped
+// spring it never returns past this, so the control cannot bulge on release.
 void ApplySquash(ImVec2* a, ImVec2* b, float press) {
-    const float d = 3.0f * press;
+    const float d = 2.0f * press;
     a->x += d; a->y += d; b->x -= d; b->y -= d;
 }
 } // namespace
@@ -1019,12 +1024,14 @@ namespace {
 
 // The body's width, capped to the display. The two answers split it, so this
 // also sets how wide a button gets.
-constexpr float kBodyW      = 620.0f;
+constexpr float kBodyW      = 540.0f;
 constexpr float kSideMargin = 26.0f;
-constexpr float kBtnH       = 68.0f;
-constexpr float kPadX       = 34.0f;
-constexpr float kPadY       = 26.0f;
-constexpr float kHangGap    = 24.0f;   // below the island it hangs from
+constexpr float kBtnH       = 54.0f;
+constexpr float kPadX       = 26.0f;
+constexpr float kPadY       = 20.0f;
+constexpr float kTitleSize  = 27.0f;
+constexpr float kTitleGap   = 10.0f;
+constexpr float kHangGap    = 22.0f;   // below the island it hangs from
 
 // At rest the three bodies are apart. A smooth union closes over only once the
 // merge radius passes twice the gap, so both gaps sit above 17 and nothing is
@@ -1049,8 +1056,13 @@ constexpr float kBtnGap = 34.0f;   // needs 17px
 // island on screen, which makes it nearly one-sided vertically, and a modal
 // hanging below it has room in both directions.
 constexpr float kTiltRangeDlg = 60.0f;
-constexpr float kTiltX[3] = { 1.00f, 1.15f, 0.85f };
-constexpr float kTiltY[3] = { 1.00f, 1.25f, 0.78f };
+// The two answers share a vertical share and differ only horizontally. The row
+// gap is vertical and the gap between them is horizontal, so that is all the
+// difference each one needs — giving them different vertical shares as well
+// bought nothing and cost the thing that matters most about a row of buttons,
+// which is that they sit on a line.
+constexpr float kTiltX[3] = { 1.00f, 1.16f, 0.84f };
+constexpr float kTiltY[3] = { 1.00f, 1.22f, 1.22f };
 // Stiffnesses differ too, so during the movement itself the bodies are never
 // quite where each other expect and the threads form on the way as well as at
 // the ends.
@@ -1096,10 +1108,10 @@ ImVec4 Lerp(const ImVec4& a, const ImVec4& b, float u) {
 }
 
 // UpdateSpring's stiffness is fixed; these need one each.
-void SpringTo(float* pos, float* vel, float target, float dt, float omega) {
-    constexpr float kZeta = 0.62f;
+void SpringTo(float* pos, float* vel, float target, float dt, float omega,
+              float zeta = 0.62f) {
     const float diff  = target - *pos;
-    const float accel = omega * omega * diff - 2.0f * kZeta * omega * (*vel);
+    const float accel = omega * omega * diff - 2.0f * zeta * omega * (*vel);
     *vel += accel * dt;
     *pos += (*vel) * dt;
     if (std::fabs(diff) < 0.01f && std::fabs(*vel) < 0.05f) { *pos = target; *vel = 0.0f; }
@@ -1111,7 +1123,7 @@ void SpringTo(float* pos, float* vel, float target, float dt, float omega) {
 // there is no per-button colour to change. Shape is what is left, and shape is
 // what a jelly would do anyway.
 ImVec4 Squash(const ImVec4& r, float p) {
-    const float s  = 1.0f - 0.06f * p;
+    const float s  = 1.0f - 0.035f * p;
     const float cx = r.x + r.z * 0.5f;
     const float cy = r.y + r.w * 0.5f;
     return ImVec4(cx - r.z * s * 0.5f, cy - r.w * s * 0.5f, r.z * s, r.w * s);
@@ -1191,8 +1203,17 @@ void Draw(UiState* state) {
     // to a kind that needs more room grows into it.
     const float avail = dw - 2.0f * kSideMargin;
     const float bodyW = avail < kBodyW ? avail : kBodyW;
-    const float lineH = ImGui::GetTextLineHeightWithSpacing();
-    const float wantH = kPadY * 2.0f + lineH * (g.kind == KindLicense ? 3.4f : 3.0f);
+    // Measured, not counted in lines. A fixed three lines is right for nothing:
+    // too tall for one sentence and too short for three, and it was the reason
+    // this looked oversized.
+    const float wrapW = bodyW - kPadX * 2.0f;
+    ImGui::PushFont(nullptr, kTitleSize);
+    const float titleH = ImGui::CalcTextSize(g.title.c_str()).y;
+    ImGui::PopFont();
+    const float contentH = (g.kind == KindLicense)
+        ? ImGui::GetFrameHeight()
+        : ImGui::CalcTextSize(g.body.c_str(), nullptr, false, wrapW).y;
+    const float wantH = kPadY * 2.0f + titleH + kTitleGap + contentH;
     if (g.h <= 0.0f) g.h = wantH;          // first open: no growth to animate
     SpringTo(&g.h, &g.h_vel, wantH, dt, 10.0f);
     const float bodyH = g.h;
@@ -1212,10 +1233,11 @@ void Draw(UiState* state) {
     const float btnW = (bodyW - kBtnGap) * 0.5f;
     const float btnY = y0 + bodyH + kRowGap;
 
-    // Stiff and under-damped, so a press bites immediately and the release
-    // overshoots before settling rather than easing back.
+    // Critically damped. Under-damping made the release swell past the resting
+    // size on the way back, which reads as the button recoiling rather than
+    // simply letting go.
     for (int i = 0; i < 2; ++i)
-        SpringTo(&g.press[i], &g.press_vel[i], g.held[i] ? 1.0f : 0.0f, dt, 26.0f);
+        SpringTo(&g.press[i], &g.press_vel[i], g.held[i] ? 1.0f : 0.0f, dt, 26.0f, 1.0f);
 
     const ImVec4 fBody (x0 + g.off[0].x, y0 + g.off[0].y, bodyW, bodyH);
     const ImVec4 fLeft  = Squash(ImVec4(x0 + g.off[1].x, btnY + g.off[1].y, btnW, kBtnH),
@@ -1292,16 +1314,16 @@ void Draw(UiState* state) {
 
         ImGui::SetCursorScreenPos(ImVec2(rBody.x + kPadX, rBody.y + kPadY));
         ImGui::BeginGroup();
-        ImGui::PushFont(nullptr, 30.0f);
+        ImGui::PushFont(nullptr, kTitleSize);
         ImGui::TextUnformatted(g.title.c_str());
         ImGui::PopFont();
-        ImGui::Spacing();
+        ImGui::Dummy(ImVec2(0, kTitleGap - ImGui::GetStyle().ItemSpacing.y));
         if (g.kind == KindLicense) {
-            ImGui::SetNextItemWidth(rBody.z - kPadX * 2.0f);
+            ImGui::SetNextItemWidth(wrapW);
             ImGui::InputTextWithHint("##key", u8"输入卡密", g.input, sizeof(g.input));
             chrome::LastItem(14.0f);
         } else {
-            ImGui::PushTextWrapPos(rBody.x + rBody.z - kPadX);
+            ImGui::PushTextWrapPos(rBody.x + kPadX + wrapW);
             ImGui::TextUnformatted(g.body.c_str());
             ImGui::PopTextWrapPos();
         }

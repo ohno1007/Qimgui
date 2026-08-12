@@ -29,10 +29,6 @@ namespace aimgui::sysclip {
 //   Blast radius. That child is also where a parcel walk that does not match
 //   would run off the end. It dies alone and the caller sees a failure.
 //
-// Available() only says libbinder_ndk could be loaded. Whether a given read is
-// permitted is decided per call.
-bool Available();
-
 bool ReadText(std::string* out);
 
 // Why the last call failed, for the UI to show rather than leaving the user

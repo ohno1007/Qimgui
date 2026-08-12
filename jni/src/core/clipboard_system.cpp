@@ -368,7 +368,6 @@ bool Spawn(std::string* out) {
 
 } // namespace
 
-bool Available() { return LoadNdk(); }
 const char* LastError() { return g_error.c_str(); }
 bool ReadText(std::string* out) { return Spawn(out); }
 

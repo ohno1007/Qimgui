@@ -36,11 +36,14 @@ const char* SystemError() { return sysclip::LastError(); }
 // a screenshot of it is asking for the impossible. stderr is not redirected and
 // lands in the shell the binary was exec'd from, which is somewhere the answer
 // can actually be read.
-void Report(const char* op, bool system_path, size_t n) {
+void Report(const char* op, bool system_path, size_t n, const char* why = nullptr) {
     if (system_path) {
         std::fprintf(stderr, "[clip] %s: system clipboard, %zu bytes\n", op, n);
     } else {
-        const char* why = sysclip::LastError();
+        // The reason is passed in, not fetched, so a copy — which never touches
+        // the Binder path — cannot pick up the last paste's error and print it
+        // as if it explained why the copy went to a file. The copy had no other
+        // destination; only a paste has a reason worth showing.
         std::fprintf(stderr, "[clip] %s: file, %zu bytes%s%s\n", op, n,
                      (why && *why) ? " — " : "", (why && *why) ? why : "");
     }
@@ -55,7 +58,7 @@ void Set(const char* text) {
     // what is left to try. This still gives text a way out of the process —
     // `cat` the path — and it is what ImGui's own copy handler lands on.
     g_used_system = false;
-    Report("copy", false, g_text.size());
+    Report("copy", false, g_text.size());   // no reason: copy only ever writes the file
     // Whole-file replace through a temp, same as the config: a reader that
     // catches us mid-write would otherwise get a truncated string rather than
     // the old one.
@@ -84,7 +87,7 @@ const char* Get() {
     // of the file is that something outside this process can put text there
     // while it runs, and a cache would never see it.
     FILE* f = std::fopen(kPath, "rb");
-    if (!f) { Report("paste", false, 0); return g_text.c_str(); }
+    if (!f) { Report("paste", false, 0, sysclip::LastError()); return g_text.c_str(); }
 
     std::string in;
     char buf[4096];
@@ -99,7 +102,7 @@ const char* Get() {
     // to paste.
     while (!in.empty() && (in.back() == '\n' || in.back() == '\r')) in.pop_back();
     g_text = std::move(in);
-    Report("paste", false, g_text.size());
+    Report("paste", false, g_text.size(), sysclip::LastError());
     return g_text.c_str();
 }
 
