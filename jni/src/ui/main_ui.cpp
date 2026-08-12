@@ -388,16 +388,12 @@ void DrawWindow(UiState* state) {
         paste_pending = false;
         chrome::LastItem(14.0f);
 
-        // A phone has no Ctrl+C, so the two operations get buttons. They are
-        // also the only way in or out for anyone without a keyboard attached.
-        const float w = (ImGui::GetContentRegionAvail().x -
-                         ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-        const bool copied = ImGui::Button(ICON_FA_COPY u8"  复制", ImVec2(w, 0));
-        chrome::LastItem();
-        ripple::TouchLastItem();
-        if (copied) { clipboard::Set(buf); last_len = (int)std::strlen(buf); }
-        ImGui::SameLine();
-        const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴", ImVec2(w, 0));
+        // A phone has no Ctrl+V, so paste gets a button. There is no copy
+        // button: writing to the Android clipboard never worked and was
+        // removed, and a button that silently only wrote a file would be
+        // claiming to do something it does not.
+        const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴系统剪贴板",
+                                          ImVec2(-FLT_MIN, 0));
         chrome::LastItem();
         ripple::TouchLastItem();
         if (pasted) {
@@ -408,22 +404,22 @@ void DrawWindow(UiState* state) {
             std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());  // for the inactive one
         }
 
-        // Which clipboard actually answered, and how much came back. A paste
-        // that quietly came from somewhere other than where the user copied is
-        // the worst way this can fail, so it is never left implicit — and an
-        // empty clipboard has to look different from a broken one.
+        // Where the text actually came from, and how much. A paste that quietly
+        // came from somewhere other than where the user copied is the worst way
+        // this can fail, so it is never left implicit — and an empty clipboard
+        // has to look different from a broken one.
         if (last_len >= 0) {
             if (clipboard::UsedSystem()) {
                 if (last_len == 0) ImGui::TextDisabled(u8"系统剪贴板是空的");
                 else               ImGui::TextDisabled(u8"系统剪贴板  ·  %d 个字符", last_len);
             } else {
                 const char* why = clipboard::SystemError();
-                ImGui::TextDisabled(u8"文件回退  ·  %d 个字符", last_len);
+                ImGui::TextDisabled(u8"来自文件  ·  %d 个字符", last_len);
                 if (why && *why) ImGui::TextDisabled(u8"系统剪贴板不可用：%s", why);
                 ImGui::TextDisabled("%s", clipboard::Path());
             }
         } else {
-            ImGui::TextDisabled(u8"点粘贴读取系统剪贴板");
+            ImGui::TextDisabled(u8"从别处复制后点这里取过来");
         }
     }
 

@@ -40,8 +40,9 @@ void Report(const char* op, bool system_path, size_t n) {
     if (system_path) {
         std::fprintf(stderr, "[clip] %s: system clipboard, %zu bytes\n", op, n);
     } else {
-        std::fprintf(stderr, "[clip] %s: FILE FALLBACK, %zu bytes (%s)\n",
-                     op, n, sysclip::LastError());
+        const char* why = sysclip::LastError();
+        std::fprintf(stderr, "[clip] %s: file, %zu bytes%s%s\n", op, n,
+                     (why && *why) ? " — " : "", (why && *why) ? why : "");
     }
     std::fflush(stderr);
 }
@@ -49,11 +50,12 @@ void Report(const char* op, bool system_path, size_t n) {
 void Set(const char* text) {
     if (!text) text = "";
     g_text = text;
-    // The real clipboard first. Writing to it is permitted outright — the
-    // service's own check returns allowed for OP_WRITE_CLIPBOARD without
-    // needing focus — so this is the path that should normally win.
-    g_used_system = sysclip::WriteText(text);
-    Report("copy", g_used_system, g_text.size());
+    // File only. Writing to the Android clipboard was built and abandoned; see
+    // the note at the foot of clipboard_system.h for what was ruled out and
+    // what is left to try. This still gives text a way out of the process —
+    // `cat` the path — and it is what ImGui's own copy handler lands on.
+    g_used_system = false;
+    Report("copy", false, g_text.size());
     // Whole-file replace through a temp, same as the config: a reader that
     // catches us mid-write would otherwise get a truncated string rather than
     // the old one.
@@ -102,9 +104,9 @@ const char* Get() {
 }
 
 void Install() {
-    // Unconditional, at startup, on the same channel the copy and paste lines
-    // use. It settles two things at once that otherwise have to be guessed at
-    // from a device I cannot reach: that this really is the new binary, and
+    // Unconditional, at startup, on the same channel copy and paste report on.
+    // It settles two things that otherwise have to be guessed at from a device
+    // the developer cannot reach: that the binary running is the new one, and
     // that stderr reaches the terminal at all. Without it, "nothing printed"
     // has three explanations and no way to tell them apart.
     std::fprintf(stderr, "[clip] ready, file fallback at %s\n", kPath);
