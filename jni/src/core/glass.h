@@ -31,6 +31,11 @@ struct GlassRect {
     // do; further apart than this they are left alone, so the neck thins out
     // and lets go on its own rather than being switched off. 0 = no merging.
     float merge = 0.0f;
+    // Panes sharing a group are one body: merged into a single field and drawn
+    // in one pass with one set of material settings. Separate groups are drawn
+    // separately, which is what lets a modal sit over the window with its own
+    // clarity instead of inheriting the window's.
+    int   group = 0;
 };
 
 constexpr int kMaxGlassRects = 8;
@@ -48,14 +53,23 @@ struct GlassGroup {
     float shapes[kMaxMergedShapes * 4] = {};     // xy = centre, zw = half size
 };
 
-// Packs submitted rects into one merged group. Returns false when there is
-// nothing to draw. Panes past kMaxMergedShapes are dropped; a slot with a
+// The most groups a frame may carry. Each costs a full pass, so this is small
+// on purpose: the window is one, a modal over it is another.
+constexpr int kMaxGlassGroups = 4;
+
+// Packs the rects belonging to `group` into one merged body, and reports the
+// first of them so the caller can take the shared material settings from it —
+// the ones the shader has room for only once per pass. Returns false when the
+// group is empty. Panes past kMaxMergedShapes are dropped; a slot with a
 // non-positive half-width is how the shader knows where the list ends.
-inline bool BuildGlassGroup(const GlassRect* rects, int count, GlassGroup* out) {
+inline bool BuildGlassGroup(const GlassRect* rects, int count, GlassGroup* out,
+                            int group = 0, const GlassRect** lead = nullptr) {
     int n = 0;
     for (int i = 0; i < count && n < kMaxMergedShapes; ++i) {
         const GlassRect& r = rects[i];
+        if (r.group != group) continue;
         if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
+        if (lead && n == 0) *lead = &r;
         const float hw = r.w * 0.5f, hh = r.h * 0.5f;
         out->shapes[n * 4 + 0] = r.x + hw;
         out->shapes[n * 4 + 1] = r.y + hh;

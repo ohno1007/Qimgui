@@ -184,27 +184,31 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, 1, &m_DS, 0, nullptr);
 
-    // One pass for the whole group: the fragment shader's distance field is
-    // their smooth union, so a pane cannot be drawn on its own without losing
-    // the neck it shares with its neighbours.
-    GlassGroup g;
-    if (!BuildGlassGroup(rects, count, &g)) return;
+    // One pass per group, and one group is one body: the fragment shader's
+    // distance field is the smooth union of its panes, so a pane cannot be
+    // drawn on its own without losing the neck it shares with its neighbours.
+    // Groups are what let a modal sit over the window with its own clarity.
+    for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
+        GlassGroup g;
+        const GlassRect* lead = nullptr;
+        if (!BuildGlassGroup(rects, count, &g, gi, &lead) || !lead) continue;
 
-    const GlassRect& r = rects[0];   // shared material settings
-    Push p{};
-    p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
-    p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
-    p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
-    p.params[2] = r.bend;     p.params[3] = r.alpha;
-    p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
-    p.params2[0] = r.blur;
-    p.params2[1] = r.lightX; p.params2[2] = r.lightY;
-    p.params2[3] = r.merge;
-    for (int i = 0; i < kMaxMergedShapes * 4; ++i) p.shapes[i] = g.shapes[i];
-    vkCmdPushConstants(cmd, m_Layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(p), &p);
-    vkCmdDraw(cmd, 4, 1, 0, 0);
+        const GlassRect& r = *lead;   // shared material settings
+        Push p{};
+        p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
+        p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
+        p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
+        p.params[2] = r.bend;     p.params[3] = r.alpha;
+        p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
+        p.params2[0] = r.blur;
+        p.params2[1] = r.lightX; p.params2[2] = r.lightY;
+        p.params2[3] = r.merge;
+        for (int i = 0; i < kMaxMergedShapes * 4; ++i) p.shapes[i] = g.shapes[i];
+        vkCmdPushConstants(cmd, m_Layout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(p), &p);
+        vkCmdDraw(cmd, 4, 1, 0, 0);
+    }
 }
 
 void GlassVK::Shutdown() {

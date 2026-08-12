@@ -353,6 +353,44 @@ void DrawWindow(UiState* state) {
     }
 
     ImGui::Spacing();
+    ImGui::SeparatorText(u8"弹窗");
+    {
+        // One of each kind, so all three are reachable without a device build.
+        static std::string last;
+        const float w3 = (ImGui::GetContentRegionAvail().x -
+                          ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
+
+        if (ImGui::Button(ICON_FA_CIRCLE_INFO u8" 确认", ImVec2(w3, 0)))
+            dialog::Open(dialog::KindConfirm, u8"确认操作",
+                         u8"这条会以液体玻璃的形式挂在灵动岛下面，"
+                         u8"由一块胶囊和两颗小胶囊组成，彼此粘连。");
+        chrome::LastItem(); ripple::TouchLastItem();
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_LOCK u8" 卡密", ImVec2(w3, 0)))
+            dialog::Open(dialog::KindLicense, u8"输入授权卡密");
+        chrome::LastItem(); ripple::TouchLastItem();
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_WAND u8" 自定义", ImVec2(w3, 0)))
+            dialog::Open(dialog::KindCustom, u8"自定义弹窗",
+                         u8"标题、正文和两颗按钮的文字都可以自己给。",
+                         u8"好的", u8"算了");
+        chrome::LastItem(); ripple::TouchLastItem();
+
+        // Answers are taken once, on the frame they are given, so whoever
+        // opened a dialog is the one that reads it.
+        if (!state->pending_exit) {
+            const dialog::Result r = dialog::Take();
+            if (r == dialog::ResultOk) {
+                const char* key = dialog::Input();
+                last = (key && *key) ? std::string(u8"确定 · ") + key : u8"确定";
+            } else if (r == dialog::ResultCancel) {
+                last = u8"取消";
+            }
+        }
+        if (!last.empty()) ImGui::TextDisabled(u8"上次回答：%s", last.c_str());
+    }
+
+    ImGui::Spacing();
     ImGui::SeparatorText(u8"剪贴板");
     {
         static char buf[512] = "";

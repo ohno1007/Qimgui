@@ -173,6 +173,11 @@ struct UiState {
     GlassRect glass_rects[kMaxGlassRects];
     int       glass_count = 0;
 
+    // The exit confirmation is up and its answer is still wanted. Held here
+    // rather than as a static so the sidebar does not have to own a piece of
+    // dialog state that outlives its own frame.
+    bool pending_exit = false;
+
     // Exit fragmentation animation: when the 退出 button is pressed, the
     // UI dissolves into drifting particles and the process keeps running until
     // the animation has played out (~1.2 s). DrawUi owns these.
@@ -217,6 +222,50 @@ void LastItem(float rounding = -1.0f);
 // covering both — Checkbox, Combo, SliderFloat. The step belongs to the frame.
 void LastItemFrame(const char* label, float rounding = -1.0f);
 } // namespace chrome
+
+// ─── Modal dialogs ───────────────────────────────────────────────────────
+// A modal made of the same liquid glass, in its own pane group so it can be
+// clearer than the window it covers — a sheet laid over another sheet has to
+// read as thinner, or the two stack into something opaque.
+//
+// It is three bodies, not one panel: a capsule carrying the text, and two
+// smaller capsules beneath it for the answers, close enough that the field
+// joins them. They start collapsed on the Dynamic Island and spring out from
+// it, which is where the separation happens — one blob becoming three.
+//
+// One at a time. Opening while one is up replaces it.
+namespace dialog {
+
+enum Kind {
+    KindConfirm = 0,   // a question and two answers
+    KindLicense,       // a field for a licence key, with paste rather than OK
+    KindCustom,        // whatever the caller labels the two buttons
+};
+
+enum Result {
+    ResultNone = 0,
+    ResultOk,
+    ResultCancel,
+};
+
+// `body` may be null for KindLicense, where the field takes its place. `ok` and
+// `cancel` may be null for anything but KindCustom, which is the point of it.
+// All four strings are copied, so none of them has to outlive the call.
+void Open(Kind kind, const char* title, const char* body = nullptr,
+          const char* ok = nullptr, const char* cancel = nullptr);
+void Close();
+
+// True while it is up or still animating, which is what callers should gate
+// their own input on.
+bool IsOpen();
+
+// The answer, once, on the frame it is given. Reading it clears it.
+Result Take();
+
+// What was typed, for KindLicense. Valid until the next Open.
+const char* Input();
+
+} // namespace dialog
 
 // Re-applies the glass palette over whatever base theme is loaded. Called at
 // startup and again after anything that calls StyleColorsDark/Light/Classic,

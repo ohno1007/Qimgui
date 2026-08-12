@@ -335,9 +335,14 @@ void GlassGL::Draw(GLuint screenTex, int screenW, int screenH,
     glUniform2f(m_LocScreen, (float)screenW, (float)screenH);
     glUniform2f(m_LocSurface, (float)surfaceW, (float)surfaceH);
 
-    GlassGroup g;
-    if (BuildGlassGroup(rects, count, &g)) {
-        const GlassRect& r = rects[0];
+    // One pass per group. Two at most in practice — the window, and a modal
+    // over it that wants its own clarity — and an empty group costs a filter
+    // and nothing else.
+    for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
+        GlassGroup g;
+        const GlassRect* lead = nullptr;
+        if (!BuildGlassGroup(rects, count, &g, gi, &lead) || !lead) continue;
+        const GlassRect& r = *lead;
         glUniform4f(m_LocParams, r.rounding, r.edgeWidth, r.bend, r.alpha);
         glUniform4f(m_LocTint, r.tintR, r.tintG, r.tintB, r.tintA);
         glUniform4f(m_LocParams2, r.blur, r.lightX, r.lightY, r.merge);

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace aimgui {
@@ -452,6 +453,12 @@ constexpr float kBridgeSnap = 31.0f;   // reachable: max retreat opens the slot 
 constexpr float kNavFollow = 0.85f;
 constexpr float kNavLagMax = 34.0f;
 
+// The Dynamic Island's resting shape. At file scope because the modal hangs off
+// it and springs out of it, so both need the same numbers.
+constexpr float kIslandW   = 280.0f;
+constexpr float kIslandH   = 56.0f;
+constexpr float kIslandTop = 28.0f;
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────
 void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // Wide enough that the labels clear the lensed band on both sides. The
@@ -572,8 +579,18 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 14));
     const bool exit_pressed = ImGui::Button(ICON_FA_POWER u8"  退出", ImVec2(-1, 0));
     chrome::LastItem();
-    if (exit_pressed) {
-        if (!state->exit_anim_active) {
+    // Asks first now. The window coming apart into dust is not something to do
+    // on a mistaken tap, and the modal is the natural place to put the question.
+    if (exit_pressed && !state->exit_anim_active) {
+        dialog::Open(dialog::KindConfirm, u8"退出 AImGui",
+                     u8"窗口会碎成粒子飘散，设置会先保存。");
+        state->pending_exit = true;
+    }
+    if (state->pending_exit) {
+        const dialog::Result r = dialog::Take();
+        if (r == dialog::ResultCancel) state->pending_exit = false;
+        if (r == dialog::ResultOk) {
+            state->pending_exit = false;
             // UV normalisation must use the *snapshot texture* dimensions —
             // which equal io.DisplaySize because the renderer sizes its
             // scene image to that. state->display_w/h are the physical
@@ -760,7 +777,9 @@ void DrawContent(UiState* state, Page page) {
     DrawPage(state, page);
     // Pips + preview frame only (input handled before Begin in DrawUi).
     DrawResizeGrip(state);
-    ContentGesture("##content", state);
+    // A modal owns the input while it is up; without this a press that the
+    // dialog is about to answer also starts a scroll or a window drag.
+    if (!dialog::IsOpen()) ContentGesture("##content", state);
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
@@ -945,6 +964,201 @@ void UpdateSpring(float* pos, float* vel, float target, float dt) {
 
 } // namespace
 
+// ─── Modal dialogs ───────────────────────────────────────────────────────
+namespace dialog {
+
+// Drawn last, over everything. Declared here rather than in the header because
+// only DrawUi calls it — the outside world only opens and reads.
+void Draw(UiState* state);
+
+namespace {
+
+// The body's width, capped to the display. The two answers split it, so this
+// also sets how wide a button gets.
+constexpr float kBodyW      = 620.0f;
+constexpr float kSideMargin = 26.0f;
+constexpr float kBtnH       = 68.0f;
+constexpr float kPadX       = 34.0f;
+constexpr float kPadY       = 26.0f;
+constexpr float kHangGap    = 24.0f;   // below the island it hangs from
+
+// The two gaps are chosen on opposite sides of the same threshold. A smooth
+// union closes over only once the merge radius passes twice the gap, so at 14
+// the body and the answers are joined by a neck, and at 26 the two answers are
+// not — which is the whole difference between one control and two.
+constexpr float kMerge  = 34.0f;
+constexpr float kRowGap = 14.0f;
+constexpr float kBtnGap = 26.0f;
+
+struct State {
+    bool        open  = false;
+    int         kind  = KindConfirm;
+    std::string title, body, ok, cancel;
+    char        input[256] = "";
+    float       t = 0.0f, vel = 0.0f;   // 0 collapsed on the island, 1 open
+    int         result = ResultNone;
+};
+State g;
+
+ImVec4 Lerp(const ImVec4& a, const ImVec4& b, float u) {
+    return ImVec4(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u,
+                  a.z + (b.z - a.z) * u, a.w + (b.w - a.w) * u);
+}
+
+void Answer(int result) {
+    g.result = result;
+    g.open   = false;
+    haptic::Step();
+}
+
+} // namespace
+
+void Open(Kind kind, const char* title, const char* body,
+          const char* ok, const char* cancel) {
+    g.kind   = kind;
+    g.title  = title  ? title  : "";
+    g.body   = body   ? body   : "";
+    g.ok     = ok     ? ok     : (kind == KindLicense ? u8"粘贴" : u8"确定");
+    g.cancel = cancel ? cancel : u8"取消";
+    g.input[0] = '\0';
+    g.result = ResultNone;
+    g.open   = true;
+    haptic::Step();
+}
+
+void Close()      { g.open = false; }
+bool IsOpen()     { return g.open || g.t > 0.002f; }
+const char* Input() { return g.input; }
+
+Result Take() {
+    const int r = g.result;
+    g.result = ResultNone;
+    return (Result)r;
+}
+
+// Drawn last, over everything, and it submits its own pane group so it can be
+// clearer than the window underneath. Called from DrawUi.
+void Draw(UiState* state) {
+    ImGuiIO& io = ImGui::GetIO();
+    const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
+    UpdateSpring(&g.t, &g.vel, g.open ? 1.0f : 0.0f, dt);
+    if (!IsOpen()) return;
+
+    const float u  = g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t);
+    const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
+
+    // Where it ends up.
+    const float avail = dw - 2.0f * kSideMargin;
+    const float bodyW = avail < kBodyW ? avail : kBodyW;
+    const float lineH = ImGui::GetTextLineHeightWithSpacing();
+    const float bodyH = kPadY * 2.0f + lineH * (g.kind == KindLicense ? 3.4f : 3.0f);
+    const float x0    = (dw - bodyW) * 0.5f + state->island_tilt.x;
+    const float y0    = kIslandTop + kIslandH + kHangGap + state->island_tilt.y;
+    const float btnW  = (bodyW - kBtnGap) * 0.5f;
+    const float btnY  = y0 + bodyH + kRowGap;
+
+    const ImVec4 fBody(x0, y0, bodyW, bodyH);
+    const ImVec4 fLeft(x0, btnY, btnW, kBtnH);
+    const ImVec4 fRight(x0 + bodyW - btnW, btnY, btnW, kBtnH);
+
+    // Where it comes from: the island itself. At u = 0 all three are that one
+    // capsule, so the field has a single body; the separation into three is the
+    // opening animation rather than something drawn on top of it.
+    const ImVec4 seed(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
+                      kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
+
+    const ImVec4 rBody  = Lerp(seed, fBody,  u);
+    const ImVec4 rLeft  = Lerp(seed, fLeft,  u);
+    const ImVec4 rRight = Lerp(seed, fRight, u);
+
+    // The panes. Group 1, so the window's own group keeps its settings and this
+    // one can be thinner — a sheet over a sheet has to read as thinner or the
+    // two stack into something opaque.
+    if (state->screen_texture_id && state->glass_count + 3 <= kMaxGlassRects) {
+        GlassRect base{};
+        base.group     = 1;
+        base.alpha     = 1.0f;
+        base.rounding  = kBtnH * 0.5f;   // capsule answers, rounded body
+        base.edgeWidth = 40.0f;
+        base.blur      = 5.0f;
+        base.merge     = kMerge;
+        base.tintA     = state->glass_clarity * 0.45f;
+        base.lightX    = state->glass_light_x;
+        base.lightY    = state->glass_light_y;
+        const ImVec4 rects[3] = { rBody, rLeft, rRight };
+        for (const ImVec4& r : rects) {
+            GlassRect p = base;
+            p.x = r.x; p.y = r.y; p.w = r.z; p.h = r.w;
+            state->glass_rects[state->glass_count++] = p;
+        }
+    }
+
+    // Content and hit areas, in a transparent full-screen window so it sits
+    // over everything and can swallow what lands outside.
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##modal", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                 ImGuiWindowFlags_NoBringToFrontOnFocus |
+                 ImGuiWindowFlags_NoScrollbar);
+
+    // Modal in the only sense that matters here: a press anywhere else is
+    // eaten rather than reaching the window behind.
+    ImGui::SetCursorScreenPos(ImVec2(0, 0));
+    ImGui::InvisibleButton("##swallow", io.DisplaySize);
+
+    // Text lags the shape a little, so the words arrive on a surface that is
+    // already there rather than growing with it.
+    const float text_a = u < 0.55f ? 0.0f : (u - 0.55f) / 0.45f;
+    if (text_a > 0.01f) {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, text_a);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        ImGui::SetCursorScreenPos(ImVec2(rBody.x + kPadX, rBody.y + kPadY));
+        ImGui::BeginGroup();
+        ImGui::PushFont(nullptr, 30.0f);
+        ImGui::TextUnformatted(g.title.c_str());
+        ImGui::PopFont();
+        ImGui::Spacing();
+        if (g.kind == KindLicense) {
+            ImGui::SetNextItemWidth(rBody.z - kPadX * 2.0f);
+            ImGui::InputTextWithHint("##key", u8"输入卡密", g.input, sizeof(g.input));
+            chrome::LastItem(14.0f);
+        } else {
+            ImGui::PushTextWrapPos(rBody.x + rBody.z - kPadX);
+            ImGui::TextUnformatted(g.body.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::EndGroup();
+
+        // The answers: the glass is already their background, so the button is
+        // only a hit area and the label is centred on it by hand.
+        auto answer = [&](const char* id, const ImVec4& r, const char* label,
+                          int result) {
+            ImGui::SetCursorScreenPos(ImVec2(r.x, r.y));
+            const bool hit = ImGui::InvisibleButton(id, ImVec2(r.z, r.w));
+            ripple::TouchLastItem();
+            const ImVec2 ts = ImGui::CalcTextSize(label);
+            dl->AddText(ImVec2(r.x + (r.z - ts.x) * 0.5f,
+                               r.y + (r.w - ts.y) * 0.5f),
+                        ImGui::GetColorU32(ImGuiCol_Text), label);
+            if (hit) Answer(result);
+        };
+        answer("##no", rLeft, g.cancel.c_str(), ResultCancel);
+        answer("##yes", rRight, g.ok.c_str(), ResultOk);
+
+        ImGui::PopStyleVar();
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+}
+
+} // namespace dialog
 
 // Liquid glass now lives in the renderers (core/glass_{gl,vk}.cpp, from
 // core/shaders/glass.frag). Drawing it here meant displacing the UVs of a
@@ -1059,9 +1273,6 @@ void DrawUi(UiState* state, bool* keep_running) {
     const float t = state->expand;
     const float lt = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
 
-    constexpr float kIslandW   = 280.0f;
-    constexpr float kIslandH   = 56.0f;
-    constexpr float kIslandTop = 28.0f;
     // The companion circle. The gap is deliberately under half the merge
     // radius, because a smooth union closes at the midline only past 2*gap —
     // so at rest the two are joined by a thread rather than being separate,
@@ -1545,6 +1756,10 @@ void DrawUi(UiState* state, bool* keep_running) {
 
     // Foreground overlays: ripples on every clickable widget.
     ripple::DrawAll();
+
+    // Last, so its panes land on top of the window's and its full-screen hit
+    // area is above everything it has to swallow.
+    dialog::Draw(state);
 
     // On the click frame the particles still need advancing/drawing so the
     // visual is continuous with the next frame, but the UI under them is
