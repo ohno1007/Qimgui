@@ -155,6 +155,36 @@ bool SkipBundle(void* p) {
     return g.setDataPos(p, g.getDataPos(p) + 4 + len) == 0;
 }
 
+// A Java String (utf-16 on the wire), through the NDK's own reader.
+bool ReadJavaString(void* p, std::string* out) {
+    struct A {
+        static bool Alloc(void* d, int32_t len, char** buf) {
+            auto* s = (std::string*)d;
+            if (len < 0) { *buf = nullptr; return true; }
+            if (len > kMaxField) { *buf = nullptr; return false; }
+            s->assign((size_t)len, '\0');
+            *buf = s->data();
+            return true;
+        }
+    };
+    out->clear();
+    if (g.readString(p, out, (void*)&A::Alloc) != 0) return false;
+    // The allocator is handed a length that counts the terminator.
+    while (!out->empty() && out->back() == '\0') out->pop_back();
+    return true;
+}
+
+// Java's exception header is the code and then the message — Parcel.writeException
+// does writeInt(code) followed immediately by writeString(e.getMessage()). Reading
+// only the code and discarding the parcel throws away the one thing that says what
+// actually went wrong on the far side, which is the difference between "-2" and
+// the sentence describing which field of which class failed to unparcel.
+std::string ReadExceptionMessage(void* p) {
+    std::string msg;
+    if (!ReadJavaString(p, &msg)) return "";
+    return msg;
+}
+
 // TextUtils.writeToParcel: an int for whether the text carries spans, then the
 // text itself. Only the text is wanted, and it comes first either way, so the
 // span records that would follow a spanned string are never walked.
@@ -242,9 +272,12 @@ bool DoRead(std::string* out) {
         if (g.readInt32(rep, &v) != 0) break;
         if (v != 0) {
             // The service refusing is the interesting case and reads nothing
-            // like a layout mismatch, so it is worded as itself.
-            g_error = "service refused (" + std::to_string(v) + ")";
-            LOGI("[clip] read: service threw %d", v);
+            // like a layout mismatch, so it is worded as itself — with the
+            // message the service already sent along behind the code.
+            const std::string msg = ReadExceptionMessage(rep);
+            g_error = "service refused (" + std::to_string(v) + ")" +
+                      (msg.empty() ? "" : ": " + msg);
+            LOGI("[clip] read: service threw %d: %s", v, msg.c_str());
             step = nullptr;
             break;
         }
@@ -270,18 +303,10 @@ bool DoRead(std::string* out) {
         if (g.readInt32(rep, &mimeCount) != 0) break;
         if (mimeCount > 64) break;
         for (int32_t i = 0; i < mimeCount; ++i) {
-            std::string mime;
             // Mime types are Java Strings (utf-16 on the wire), unlike the
             // String8s above, so the NDK's own reader is right for them.
-            struct A { static bool Alloc(void* d, int32_t len, char** buf) {
-                auto* s = (std::string*)d;
-                if (len < 0) { *buf = nullptr; return true; }
-                if (len > kMaxField) { *buf = nullptr; return false; }
-                s->assign((size_t)len, '\0');
-                *buf = s->data();
-                return true;
-            } };
-            if (g.readString(rep, &mime, (void*)&A::Alloc) != 0) { mimeCount = -1; break; }
+            std::string mime;
+            if (!ReadJavaString(rep, &mime)) { mimeCount = -1; break; }
         }
         if (mimeCount < 0) break;
 
@@ -370,9 +395,14 @@ bool DoWrite(const char* text) {
     if (st == 0 && rep) {
         int32_t exc = -1;
         ok = (g.readInt32(rep, &exc) == 0 && exc == 0);
-        if (!ok) { g_error = "write refused (" + std::to_string(exc) + ")";
-                   LOGI("[clip] write: service threw %d", exc); }
-        else     LOGI("[clip] write: ok");
+        if (!ok) {
+            const std::string msg = ReadExceptionMessage(rep);
+            g_error = "write refused (" + std::to_string(exc) + ")" +
+                      (msg.empty() ? "" : ": " + msg);
+            LOGI("[clip] write: service threw %d: %s", exc, msg.c_str());
+        } else {
+            LOGI("[clip] write: ok");
+        }
     } else {
         g_error = "transact " + std::to_string(st);
         LOGI("[clip] write: transact failed, status %d", st);
