@@ -1559,6 +1559,14 @@ void Draw(UiState* state) {
                                     (wmax.y - wmin.y) + kClipSlack * 2.0f));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    // No border. The style's is 1px globally, and the main window's push of zero
+    // has already been popped by the time this runs — so this window drew a
+    // rectangle around its own box, which the glass has no reason to have. It
+    // went unnoticed while the window covered the screen and its border ran off
+    // the edges; sizing the window to the three bodies put the line right around
+    // them. The pane draws its own edge stroke on the real silhouette, which is
+    // the shape that actually exists.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
     // In front, but only on frames where saying so costs nothing.
     //
@@ -1675,7 +1683,7 @@ void Draw(UiState* state) {
     }
 
     ImGui::End();
-    ImGui::PopStyleVar();
+    ImGui::PopStyleVar(2);   // WindowPadding + WindowBorderSize
     ImGui::PopStyleColor();
 }
 
