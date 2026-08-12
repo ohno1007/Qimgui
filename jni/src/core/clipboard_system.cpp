@@ -438,24 +438,33 @@ bool DoRead(std::string* out) {
 // so the remaining move is to stop reasoning and let the device score the
 // candidates: whichever variant it consumes exactly is the right one, and the
 // unread count for each of the others says how far off it was.
+// Perturbation, not substitution.
+//
+// The last run showed why removing a field proves nothing: drop the mime string
+// and both sides read 28 fewer bytes, so the difference stays 28. But that cuts
+// the other way and gives a clean probe. Grow one field by a known amount and
+// the difference only moves if the service is NOT reading that field — a field
+// it does read absorbs the growth on both sides and leaves the difference
+// alone. So whichever variant reports something other than 28 names the field
+// that is being skipped, and by how much.
 enum Variant {
-    kBaseline = 0,   // exactly what AOSP specifies
-    kNoMime,         // mime list empty — tests whether the list is read at all
-    kFourTyped,      // four trailing typed objects instead of five
-    kSixTyped,       // six
-    kNoHtml,         // no htmlText field
-    kLabelUtf16,     // label as a Java String rather than a String8
+    kBaseline = 0,   // reference: reports 28
+    kLabelBig,       // label String8 eight bytes longer
+    kMimeBig,        // mime String16 eight bytes longer
+    kMimeTwo,        // a second mime entry, twenty-eight bytes
+    kTextBig,        // item text four bytes longer
+    kSixTyped,       // a sixth trailing typed object, four bytes
     kVariantCount
 };
 
 const char* VariantName(int v) {
     switch (v) {
-    case kBaseline:   return "baseline";
-    case kNoMime:     return "no-mime";
-    case kFourTyped:  return "4-typed";
-    case kSixTyped:   return "6-typed";
-    case kNoHtml:     return "no-html";
-    case kLabelUtf16: return "label-utf16";
+    case kBaseline: return "baseline";
+    case kLabelBig: return "label+8";
+    case kMimeBig:  return "mime+8";
+    case kMimeTwo:  return "mime x2";
+    case kTextBig:  return "text+4";
+    case kSixTyped: return "typed+1";
     }
     return "?";
 }
@@ -471,23 +480,16 @@ bool DoWriteVariant(const char* text, int variant) {
 
     g.writeInt32(in, 1);                 // ClipData is present
     L.Mark(in, "present");
-    if (variant == kLabelUtf16) {
-        g.writeInt32(in, 1);             // not spanned
-        const char* kLabel = "AImGui";
-        g.writeString(in, kLabel, (int32_t)std::strlen(kLabel));
-    } else {
-        WriteCharSequence(in, "AImGui"); // ClipDescription.mLabel
-    }
+    // 6 chars -> String8 of 12 bytes; 14 -> 20.
+    WriteCharSequence(in, variant == kLabelBig ? "AImGuiAImGuiAI" : "AImGui");
     L.Mark(in, "label");
-    const char* kMime = "text/plain";
-    if (variant == kNoMime) {
-        g.writeInt32(in, 0);             // empty list
-        L.Mark(in, "mimeN");
-    } else {
-        g.writeInt32(in, 1);             // one mime type
-        L.Mark(in, "mimeN");
+    // 10 chars -> String16 of 28 bytes; 14 -> 36.
+    const char* kMime = (variant == kMimeBig) ? "text/plainXXXX" : "text/plain";
+    const int32_t nMime = (variant == kMimeTwo) ? 2 : 1;
+    g.writeInt32(in, nMime);
+    L.Mark(in, "mimeN");
+    for (int32_t i = 0; i < nMime; ++i)
         g.writeString(in, kMime, (int32_t)std::strlen(kMime));
-    }
     L.Mark(in, "mime");
     // extras may be null — ClipDescription's constructor just stores whatever
     // readPersistableBundle returns.
@@ -513,13 +515,13 @@ bool DoWriteVariant(const char* text, int variant) {
     g.writeInt32(in, 0);                 // no icon
     g.writeInt32(in, 1);                 // one item
     L.Mark(in, "icon+count");
-    WriteCharSequence(in, text);         // item[0].mText
+    std::string body = text ? text : "";
+    if (variant == kTextBig) body += "....";
+    WriteCharSequence(in, body.c_str());  // item[0].mText
     L.Mark(in, "itemText");
-    if (variant != kNoHtml) WriteString8(in, nullptr);   // htmlText
+    WriteString8(in, nullptr);            // htmlText
     L.Mark(in, "html");
-    int typed = 5;
-    if (variant == kFourTyped) typed = 4;
-    if (variant == kSixTyped)  typed = 6;
+    const int typed = (variant == kSixTyped) ? 6 : 5;
     for (int i = 0; i < typed; ++i) g.writeInt32(in, 0);  // intent, sender, uri,
                                                           // activityInfo, textLinks
     L.Mark(in, "typed");
@@ -550,7 +552,7 @@ bool DoWriteVariant(const char* text, int variant) {
         g_error = "transact " + std::to_string(st);
         LOGI("[clip] write: transact failed, status %d", st);
     }
-    if (g.deleteParcel) g.deleteParcel(rep);
+    if (rep && g.deleteParcel) g.deleteParcel(rep);
     // After the parcel, for the same reason as the read path.
     g.decStrong(svc);
     return ok;
