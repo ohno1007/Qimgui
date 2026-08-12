@@ -293,6 +293,12 @@ void LastItemFrame(const char* label, float rounding = -1.0f);
 // joins them. They start collapsed on the island's capsule and spring out from
 // it, which is where the separation happens — one blob becoming three.
 //
+// Modal in name only, deliberately. It claims the three bodies it draws and
+// leaves the rest of the app live — the window can still be dragged, the nav
+// column still answers, the island still opens. It reached across the whole
+// screen once, and the cost was everything behind it going dead, which is not
+// what asking a question should do.
+//
 // One at a time. Opening while one is up replaces it.
 namespace dialog {
 
@@ -315,8 +321,13 @@ void Open(Kind kind, const char* title, const char* body = nullptr,
           const char* ok = nullptr, const char* cancel = nullptr);
 void Close();
 
-// True while it is up or still animating, which is what callers should gate
-// their own input on.
+// True while it is up or still animating.
+//
+// Not a reason to gate your own input. It reaches over the window rather than
+// taking it away: it claims the three bodies it draws and leaves the rest of the
+// app live, so the nav column, the sliders and the island all keep working while
+// a question is on screen. Anything that does want to stand down while one is up
+// can ask, but nothing has to.
 bool IsOpen();
 
 // The answer, once, on the frame it is given. Reading it clears it.

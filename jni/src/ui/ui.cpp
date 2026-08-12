@@ -842,9 +842,13 @@ void DrawContent(UiState* state, Page page) {
     DrawPage(state, page);
     // Pips + preview frame only (input handled before Begin in DrawUi).
     DrawResizeGrip(state);
-    // A modal owns the input while it is up; without this a press that the
-    // dialog is about to answer also starts a scroll or a window drag.
-    if (!dialog::IsOpen()) ContentGesture("##content", state);
+    // No longer gated on a dialog being up. It was, because a full-screen modal
+    // meant a press the dialog was about to answer also started a window drag;
+    // the modal now covers its own three bodies and nothing else, so a drag
+    // beginning outside them was never meant for it — and taking the window's
+    // own gestures away for the length of a question is most of what made the
+    // app feel seized up.
+    ContentGesture("##content", state);
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
@@ -1196,7 +1200,10 @@ void SpringTo(float* pos, float* vel, float target, float dt, float omega,
 // there is no per-button colour to change. Shape is what is left, and shape is
 // what a jelly would do anyway.
 ImVec4 Squash(const ImVec4& r, float p) {
-    const float s  = 1.0f - 0.035f * p;
+    // Five percent. On a 54px capsule three and a half was under two pixels of
+    // travel — technically there and effectively not, which is indistinguishable
+    // from the press doing nothing at all.
+    const float s  = 1.0f - 0.05f * p;
     const float cx = r.x + r.z * 0.5f;
     const float cy = r.y + r.w * 0.5f;
     return ImVec4(cx - r.z * s * 0.5f, cy - r.w * s * 0.5f, r.z * s, r.w * s);
@@ -1454,11 +1461,20 @@ void Draw(UiState* state) {
     const ImVec4 rLeft  = Lerp(seed, fLeft,  u);
     const ImVec4 rRight = Lerp(seed, fRight, u);
 
-    // The whole of it, for the exit dissolve to seed particles over as well as
-    // over the window. Published from here because these three rects are the
-    // only place the modal's real extent exists.
-    state->modal_rect = ImVec4(rBody.x, rBody.y, rBody.z,
-                               (rRight.y + rRight.w) - rBody.y);
+    // The extent of all three, which is what both the exit dissolve and the
+    // content window below need. A real union rather than the body's box: the
+    // answers take a different share of the lean and can stand outside it.
+    const ImVec4 bs[3] = { rBody, rLeft, rRight };
+    ImVec2 bmin(bs[0].x, bs[0].y), bmax(bs[0].x + bs[0].z, bs[0].y + bs[0].w);
+    for (int i = 1; i < 3; ++i) {
+        if (bs[i].x < bmin.x) bmin.x = bs[i].x;
+        if (bs[i].y < bmin.y) bmin.y = bs[i].y;
+        if (bs[i].x + bs[i].z > bmax.x) bmax.x = bs[i].x + bs[i].z;
+        if (bs[i].y + bs[i].w > bmax.y) bmax.y = bs[i].y + bs[i].w;
+    }
+    // Published for the exit dissolve, so the question comes apart with the
+    // window instead of blinking out of existence beside it.
+    state->modal_rect = ImVec4(bmin.x, bmin.y, bmax.x - bmin.x, bmax.y - bmin.y);
 
     // The panes. In the shell's group while it shares this body — that is what
     // buys the join: one distance field, so they run together and let go by
@@ -1508,58 +1524,67 @@ void Draw(UiState* state) {
         }
     }
 
-    // Content and hit areas, in a transparent full-screen window so it sits
-    // over everything and can swallow what lands outside.
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(io.DisplaySize);
+    // Content and hit areas, in a transparent window that covers the three
+    // bodies and nothing else.
+    //
+    // It used to cover the screen with an invisible button across all of it, so
+    // that a press landing anywhere else was eaten. That is what "modal" usually
+    // buys, and here it cost far more than it bought: a window covering the
+    // screen is hovered everywhere, and hover in ImGui goes to exactly one
+    // window, so nothing behind it could be pressed — no nav entries, no
+    // sliders, none of their ripples or squash. The question is worth asking
+    // without taking the app away while it is asked.
+    //
+    // Sized from the bodies rather than from the display for the same reason
+    // ImGui hit-tests by window rect first: anything outside this rect has to be
+    // somebody else's.
+    //
+    // Over the settled layout as well as the animated one, because the text is
+    // wrapped for the body's final width and a body only two thirds of the way
+    // out is narrower than its own words. ImGui clips — and culls items — at the
+    // window rect, so sizing to the animated union alone would cut the title
+    // through the last half of every opening and, worse, cull the answers'
+    // hit areas. Still nothing like the screen: the resting layout is 540 wide.
+    constexpr float kClipSlack = 6.0f;
+    ImVec2 wmin = bmin, wmax = bmax;
+    const ImVec4 fs[3] = { fBody, fLeft, fRight };
+    for (const ImVec4& r : fs) {
+        if (r.x < wmin.x) wmin.x = r.x;
+        if (r.y < wmin.y) wmin.y = r.y;
+        if (r.x + r.z > wmax.x) wmax.x = r.x + r.z;
+        if (r.y + r.w > wmax.y) wmax.y = r.y + r.w;
+    }
+    ImGui::SetNextWindowPos(ImVec2(wmin.x - kClipSlack, wmin.y - kClipSlack));
+    ImGui::SetNextWindowSize(ImVec2((wmax.x - wmin.x) + kClipSlack * 2.0f,
+                                    (wmax.y - wmin.y) + kClipSlack * 2.0f));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    // In front, explicitly, every frame it is up.
+
+    // In front, but only on frames where saying so costs nothing.
     //
     // This used to carry NoBringToFrontOnFocus, which does more than its name
     // says: ImGui's CreateNewWindow push_front()s such a window into g.Windows,
-    // and g.Windows runs back-to-front, so the flag puts the window at the very
+    // and g.Windows runs back-to-front, so the flag pins the window at the very
     // *back* of the display order for good — it is the flag a full-screen
-    // dockspace host uses to stay behind everything. FindHoveredWindowEx walks
-    // that list from the front and takes the first hit, so the main window won
-    // everywhere it overlapped and the answers were unclickable wherever the
-    // window covered them. Which is anywhere, for a window at its default size.
-    // Being drawn last was never the same as being in front.
-    if (g.t < 0.05f) ImGui::SetNextWindowFocus();
+    // dockspace host uses to stay behind everything, and FocusWindow's
+    // display-front call is skipped by a test on the same flag. Since
+    // FindHoveredWindowEx walks that list from the front and takes the first
+    // hit, the main window won every pixel and the answers were unhittable
+    // wherever it covered them. Being drawn last was never the same as being in
+    // front.
+    //
+    // Asking for focus is how a window gets to the front through the public API,
+    // and clicking the window behind sends it back — ImGui focuses on click — so
+    // the ask has to be repeated. But focusing steals the active id from
+    // whatever it was on, which would drop a slider mid-drag, so it is only
+    // repeated while nothing owns the mouse.
+    if (!ImGui::IsAnyItemActive()) ImGui::SetNextWindowFocus();
     ImGui::Begin("##modal", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
-                 ImGuiWindowFlags_NoScrollbar);
-
-    // Modal in the only sense that matters here: a press anywhere else is
-    // eaten rather than reaching the window behind.
-    //
-    // AllowOverlap is not optional. Without it this covers the screen, claims
-    // the hover and takes the active id on press, and the answers below it can
-    // never be hovered or clicked — which is exactly what happened.
-    ImGui::SetNextItemAllowOverlap();
-    ImGui::SetCursorScreenPos(ImVec2(0, 0));
-    ImGui::InvisibleButton("##swallow", io.DisplaySize);
-
-    // A modal owns the question, not the app's chrome. Now that it is genuinely
-    // in front, the main window is hovered nowhere and its own tap handlers
-    // cannot fire, so the one gesture that matters is passed through by hand: a
-    // press on the shell, and on none of the three bodies, opens the next rest
-    // state. Being unable to put the window away while an answer is pending is
-    // what "the UI has seized up" looks like — and it is also the only way to
-    // watch the card grow and press the modal out of its way.
-    if (u > 0.6f && ImGui::IsMouseClicked(0)) {
-        const ImVec2 m  = io.MousePos;
-        const ImVec4& s = state->shell_rect;
-        auto in = [&m](const ImVec4& r) {
-            return m.x >= r.x && m.y >= r.y && m.x <= r.x + r.z && m.y <= r.y + r.w;
-        };
-        if (in(s) && !in(rBody) && !in(rLeft) && !in(rRight) &&
-            state->stage < UiState::StageWindow) {
-            ++state->stage;
-            haptic::Step();
-        }
-    }
+                 ImGuiWindowFlags_NoScrollbar |
+                 ImGuiWindowFlags_NoScrollWithMouse |
+                 ImGuiWindowFlags_NoFocusOnAppearing);
 
     // With no mirror there are no panes, and the words would be sitting on
     // nothing at all. Draw the three bodies as plain fills instead — the same
