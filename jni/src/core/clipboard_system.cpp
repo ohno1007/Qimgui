@@ -246,6 +246,27 @@ void WriteCallerTail(void* in) {
     g.writeInt32(in, 0);    // deviceId (DEVICE_ID_DEFAULT)
 }
 
+struct Layout {
+    const char* name[20];
+    int32_t     at[20];
+    int         n = 0;
+    int32_t     base = 0;
+    void Mark(void* p, const char* what) {
+        if (n < 20) { name[n] = what; at[n] = g.getDataPos(p) - base; ++n; }
+    }
+    void Dump(const char* tag) const {
+        std::string s;
+        char buf[64];
+        for (int i = 0; i < n; ++i) {
+            std::snprintf(buf, sizeof(buf), "%s=%d ", name[i], at[i]);
+            s += buf;
+        }
+        std::fprintf(stderr, "[clip] %s layout: %s\n", tag, s.c_str());
+        std::fflush(stderr);
+        LOGI("[clip] %s layout: %s", tag, s.c_str());
+    }
+};
+
 bool DoRead(std::string* out) {
     void* svc = OpenService();
     if (!svc) return false;
@@ -266,6 +287,7 @@ bool DoRead(std::string* out) {
     // some particular field and then silently at every field after it, so
     // "it did not work" is useless — which one stopped is the whole diagnosis.
     const char* step = "exception header";
+    Layout L;
     bool ok = false;
     int32_t v = 0;
     do {
@@ -294,14 +316,22 @@ bool DoRead(std::string* out) {
             break;
         }
 
+        // The same marks the write path reports, taken here on a ClipData the
+        // device itself produced. The write side matches AOSP exactly and is
+        // still 28 bytes too long, so AOSP is not what this device speaks —
+        // and a successful read is the only place its real layout is visible.
+        L.base = g.getDataPos(rep);
+
         step = "description label";
         std::string label;
         if (!ReadCharSequence(rep, &label)) break;
+        L.Mark(rep, "label");
 
         step = "mime types";
         int32_t mimeCount = 0;
         if (g.readInt32(rep, &mimeCount) != 0) break;
         if (mimeCount > 64) break;
+        L.Mark(rep, "mimeN");
         for (int32_t i = 0; i < mimeCount; ++i) {
             // Mime types are Java Strings (utf-16 on the wire), unlike the
             // String8s above, so the NDK's own reader is right for them.
@@ -309,18 +339,26 @@ bool DoRead(std::string* out) {
             if (!ReadJavaString(rep, &mime)) { mimeCount = -1; break; }
         }
         if (mimeCount < 0) break;
+        L.Mark(rep, "mime");
+        LOGI("[clip] read: label=\"%s\" mimeN=%d", label.c_str(), mimeCount);
+        std::fprintf(stderr, "[clip] read: label=\"%s\" (%zu bytes) mimeN=%d\n",
+                     label.c_str(), label.size(), mimeCount);
 
         step = "extras bundle";
         if (!SkipBundle(rep)) break;
+        L.Mark(rep, "extras");
         step = "timestamp";
         int64_t ts = 0;
         if (g.readInt64(rep, &ts) != 0) break;
+        L.Mark(rep, "stamp");
         step = "styled flag";
         if (g.readInt32(rep, &v) != 0) break;
         step = "classification";
         if (g.readInt32(rep, &v) != 0) break;
+        L.Mark(rep, "styled+class");
         step = "confidences bundle";
         if (!SkipBundle(rep)) break;
+        L.Mark(rep, "confid");
         step = "icon presence";
         if (g.readInt32(rep, &v) != 0) break;
         // A presence flag can only be 0 or 1. Anything else is not a clip with
@@ -333,8 +371,11 @@ bool DoRead(std::string* out) {
         int32_t items = 0;
         if (g.readInt32(rep, &items) != 0) break;
         if (items <= 0 || items > 64) { step = "item count (out of range, layout drift)"; break; }
+        L.Mark(rep, "icon+count");
         step = "item text";
         ok = ReadCharSequence(rep, out);
+        L.Mark(rep, "itemText");
+        L.Dump("read");
     } while (false);
 
     if (!ok && step) {
@@ -362,26 +403,6 @@ bool DoRead(std::string* out) {
 // should have been consumed exactly, which means one of the assumptions about
 // what libbinder_ndk actually emits is wrong, and no amount of further counting
 // will say which. So the parcel reports its own shape.
-struct Layout {
-    const char* name[20];
-    int32_t     at[20];
-    int         n = 0;
-    int32_t     base = 0;
-    void Mark(void* p, const char* what) {
-        if (n < 20) { name[n] = what; at[n] = g.getDataPos(p) - base; ++n; }
-    }
-    void Dump() const {
-        std::string s;
-        char buf[64];
-        for (int i = 0; i < n; ++i) {
-            std::snprintf(buf, sizeof(buf), "%s=%d ", name[i], at[i]);
-            s += buf;
-        }
-        std::fprintf(stderr, "[clip] write layout: %s\n", s.c_str());
-        std::fflush(stderr);
-        LOGI("[clip] write layout: %s", s.c_str());
-    }
-};
 
 bool DoWrite(const char* text) {
     void* svc = OpenService();
@@ -434,7 +455,7 @@ bool DoWrite(const char* text) {
     L.Mark(in, "typed5");
     WriteCallerTail(in);
     L.Mark(in, "tail");
-    L.Dump();
+    L.Dump("write");
 
     void* rep = nullptr;
     const int32_t st = g.transact(svc, kSetPrimaryClip, &in, &rep, 0);
