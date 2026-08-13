@@ -8,75 +8,64 @@
 
 namespace aimgui {
 
-// State shared between main loop and the UI layer. The main loop owns
-// the struct, hands a pointer to DrawUi() each frame; UI sets *request_*
-// flags, main consumes / clears them next frame.
+// State shared between the main loop and the UI layer. The main loop owns the
+// struct and hands a pointer to DrawUi() each frame; the UI sets request_*
+// flags, main consumes and clears them next frame.
 struct UiState {
     const char* renderer_name = nullptr;
 
-    // Anti-recording: surface created with the skipScreenshot flag so
-    // it doesn't show up in screen captures / casts.
+    // Anti-recording: the surface carries skipScreenshot, so it does not appear
+    // in captures or casts.
     bool permeate_record         = false;
     bool request_permeate_toggle = false;
 
-    // Whether the live mirror is allowed to hide this window from captures.
-    //
-    // It has to hide it from *its own* capture or the mirror feeds the window
-    // back into itself and the glass saturates. But SurfaceFlinger's
-    // skipScreenshot is one flag, not one per capture: it cannot tell our
-    // virtual display apart from the user pressing screenshot. So this is a
-    // genuine either/or, and it is a setting rather than a hidden side effect
-    // of turning the glass on — which is what made "anti-record is off, why
-    // can't I screenshot the UI" so mystifying.
+    // Whether the live mirror may hide this window from captures. It has to hide
+    // it from *its own* capture or the mirror feeds the window back into itself
+    // and the glass saturates — but skipScreenshot is one flag, not one per
+    // capture, so this is a genuine either/or and belongs to the user rather
+    // than being a hidden side effect of turning the glass on.
     bool mirror_hides_window = true;
 
     // Frame-rate cap. 0 = vsync (panel refresh).
     int target_fps = 0;
 
-    // Which nav entry is showing. Lives here rather than as a static inside
-    // DrawSidebar so it can be persisted with everything else.
+    // Which nav entry is showing. Here rather than a static in DrawSidebar so it
+    // is persisted with everything else.
     int nav_page = 0;
 
     // Vibration on taps and stage changes. Off is a legitimate preference, and
-    // it is also what a device with no reachable vibrator ends up looking like.
+    // also what a device with no reachable vibrator looks like.
     bool haptics_enabled = true;
 
-    // Current visible display size in ImGui coordinates, so the Dynamic
-    // Island can re-center itself on portrait↔landscape rotation.
+    // Visible display size in ImGui coordinates, so the island can re-centre
+    // itself on rotation.
     int display_w = 0;
     int display_h = 0;
 
     // ── Dynamic Island ───────────────────────────────────────────────
-    // Three resting states rather than two: the pill, a compact card, and
-    // the full window. One tap moves up a step, so the island can be opened
-    // far enough to read at a glance without committing to the whole window.
+    // Three rest states, not two: the pill, a compact card, and the full
+    // window. One tap moves up a step, so the island can be opened far enough
+    // to read at a glance without committing to the whole window.
     //
-    // `stage` is the target; `expand` is the animated value chasing it
-    // through a spring, at 0.0 / 0.5 / 1.0, and `expand_vel` is that
-    // spring's velocity — also what drives the squash-and-stretch, since a
-    // fast-moving spring is exactly when a jelly should deform.
+    // `stage` is the target; `expand` is the spring chasing it at 0.0 / 0.5 /
+    // 1.0, and `expand_vel` also drives the squash-and-stretch — a fast-moving
+    // spring is exactly when a jelly should deform.
     enum Stage { StageIsland = 0, StageCard = 1, StageWindow = 2 };
     int   stage       = StageWindow;
     bool  collapsed   = false;   // derived: stage == StageIsland
     float expand      = 1.0f;
     float expand_vel  = 0.0f;
 
-    // The rest state the shell is actually animating towards, which is `stage`
-    // except while a modal is being re-issued.
-    //
-    // A modal can be part of the island's body or a sheet of its own, and it
-    // can only change which by retracting to nothing and coming back — the swap
-    // is invisible on that one frame and nowhere else. The volume key can flip
-    // the stage from outside ImGui at any moment, so the shell waits the third
-    // of a second that takes rather than moving through it.
+    // What the shell is actually animating towards, which is `stage` except
+    // while a modal is being re-issued: a modal can only change which body it
+    // belongs to on the frame it has retracted to nothing, so the shell waits
+    // the third of a second that takes rather than moving through it.
     int   stage_shown = StageWindow;
 
-    // What the three rest states show. Every one of these is optional; leave it
-    // null and the built-in default is used. Icons come from ui/icons.h and are
-    // just strings, so they concatenate with text: ICON_FA_BOLT "  就绪".
-    //
-    // These are borrowed pointers read during DrawUi, so whatever they point at
-    // has to outlive the frame — a literal, or a buffer the caller keeps.
+    // What the three rest states show. All optional — leave one null for the
+    // built-in default. Icons are plain strings, so they concatenate with text:
+    // ICON_FA_BOLT "  就绪". Borrowed pointers read during DrawUi, so whatever
+    // they point at has to outlive the frame.
     const char* island_text = nullptr;   // null → live frame rate
     const char* island_icon = nullptr;   // drawn ahead of the text
     const char* dot_text    = nullptr;   // the companion circle; null → island_icon
@@ -84,181 +73,147 @@ struct UiState {
     const char* card_icon   = nullptr;
     const char* card_body   = nullptr;   // null → the built-in status block
 
-    // Where the companion circle ended up this frame, published by DrawUi so
-    // its content can be drawn on the foreground list — it sits outside the
-    // ImGui window and so is not reachable through the layout. radius 0 = gone.
+    // Where the companion circle ended up, published by DrawUi so its content
+    // can go on the foreground list — it sits outside the ImGui window and is
+    // not reachable through the layout. radius 0 = gone.
     ImVec2 dot_center = ImVec2(0, 0);
     float  dot_radius = 0.0f;
 
-    // The shell — pill, card or full window — exactly as it stands this frame,
-    // and the island's own capsule wherever it currently is (which is not the
-    // top centre in Live2D builds, where it follows the dragged ball). Both
-    // published by DrawUi for the modal: it is drawn out of the island's
-    // capsule, and it is the shell's bottom edge that presses it down.
+    // The shell as it stands this frame, and the island's capsule wherever it
+    // currently is (the dragged ball, in Live2D builds). Published for the
+    // modal, which is drawn out of the capsule and pressed down by the shell.
     ImVec4 shell_rect  = ImVec4(0, 0, 0, 0);
     ImVec4 island_rect = ImVec4(0, 0, 0, 0);
 
-    // Where the shell will come to rest for the stage that has been asked for,
-    // which is not where it is while it is on its way there.
-    //
-    // The modal is pressed down by this rather than by the live rect, and the
-    // difference is the whole behaviour: a shell that is mid-collapse is briefly
-    // enormous, and a modal held clear of *that* would be flung down the screen
-    // and hauled back up again. Pressed by the rest state it moves once, between
-    // two settled places, and the shell sweeping over it on the way is an
-    // absorption — which is what a passing body should do to a smaller one.
+    // Where the shell will come to rest for the stage that has been asked for.
+    // The modal is pressed by this rather than by the live rect: a shell
+    // mid-collapse is briefly enormous, and a modal held clear of *that* would
+    // be flung down the screen and hauled back. Pressed by the rest state it
+    // moves once, between two settled places.
     ImVec4 shell_rest_rect = ImVec4(0, 0, 0, 0);
 
-    // The modal's whole body, published by dialog::Draw, so the exit dissolve
-    // can seed particles over it as well as over the window — otherwise the
-    // question blinks out of existence while the window it was asked about
-    // comes apart. Zero size when no modal is up.
+    // The modal's whole body, published by dialog::Draw so the exit dissolve
+    // seeds particles over it too. Zero size when no modal is up.
     ImVec4 modal_rect = ImVec4(0, 0, 0, 0);
 
     // How far the shell has closed ranks for a modal sharing its body, 0..1.
-    //
     // One merged body gets four shapes — Vulkan's guaranteed push-constant
-    // budget, not a number anyone chose — and the modal is three of them. So for
-    // the two to be one field at all, the shell has to come down to a single
-    // shape: no parted nav column, no companion dot. Ramped rather than
-    // switched, because at zero slot width the four parted shapes tile the
-    // window exactly, so the handover happens at the one moment it cannot be
-    // seen. Stays at zero when the modal is a sheet of its own, where the shell
-    // keeps everything it had.
+    // budget — and the modal is three of them, so the shell has to come down to
+    // one: no parted nav column, no companion dot. Zero when the modal is a
+    // sheet of its own, where the shell keeps everything it had.
     float modal_close = 0.0f;
 
-
-    // Live2D floating "ball": when collapsed the character is the visual and
-    // can be dragged anywhere; this is its centre in screen px. Re-clamped to
-    // the display each frame. (-1,-1) = uninitialised → placed on first use.
+    // Live2D floating "ball": when collapsed the character is the visual and can
+    // be dragged anywhere. Centre in screen px, re-clamped each frame.
+    // (-1,-1) = uninitialised, placed on first use.
     ImVec2 ball_pos = ImVec2(-1.0f, -1.0f);
-    // Model-size multiplier for the ball, adjustable from the UI.
     float  ball_scale = 1.0f;
 
-    // Remembered full-window pos / size so the window springs back to
-    // wherever the user last dragged it.
+    // Remembered full-window pos and size, so the window springs back to
+    // wherever it was last dragged. content_moving marks the frames where a
+    // content drag owns the position rather than ImGui.
     ImVec2 last_full_pos  = ImVec2(60, 100);
-    // True while a drag in the content is moving the window, during which
-    // last_full_pos is authoritative rather than mirroring ImGui's own.
     bool   content_moving = false;
     ImVec2 last_full_size = ImVec2(900, 620);
 
-    // Bottom-right resize handle: a drag previews a thick rounded frame at
-    // the target size without changing the live window; on release the
-    // window springs from its current size to that target.
+    // Bottom-right resize handle: a drag previews a frame at the target size
+    // without changing the live window, and on release the window springs to it.
     bool   resizing               = false;
     ImVec2 resize_target_size     = ImVec2(900, 620);
     ImVec2 resize_anim_vel        = ImVec2(0, 0);
     ImVec2 resize_drag_start_mouse = ImVec2(0, 0);
     ImVec2 resize_drag_start_size  = ImVec2(900, 620);
 
-    // Post-process bloom intensity, applied at composite. 0 = bloom off.
+    // Post-process bloom intensity, applied at composite. 0 = off.
     float bloom_intensity = 0.0f;
 
-    // How much of a wash sits over the refracted screen. 0 is bare glass, 1 is
-    // an opaque panel; the useful range is the bottom third, which is why the
-    // slider stops well short of the top.
-    //
-    // This carries the whole wash. ImGui used to paint a 5% sheet of its own on
-    // top, but that fill is always a window-shaped rectangle and would bridge
-    // the slot between parted panes — so the default here absorbs it.
+    // How much wash sits over the refracted screen. 0 is bare glass, 1 an opaque
+    // panel; the useful range is the bottom third, which is why the slider stops
+    // well short of the top. This carries the *whole* wash — ImGui paints none,
+    // because any fill of its own would be a window-shaped rectangle and would
+    // bridge the slot between parted panes.
     float glass_clarity = 0.11f;
 
-    // Device lean from the accelerometer, roughly -1..1 per axis. Both zero
-    // when the panel is flat, and when no sensor is reachable at all — so
-    // everything reading these degrades to standing still rather than to a
-    // special case.
+    // Device lean, roughly -1..1 per axis. Both zero when the panel is flat and
+    // when no sensor is reachable, so everything reading them degrades to
+    // standing still rather than to a special case.
     float  tilt_x = 0.0f;
     float  tilt_y = 0.0f;
-    // Where the lean has carried the island, and the spring chasing it. The
-    // spring is what gives the island weight: the accelerometer is already
-    // low-passed, but a value that merely follows the lean reads as a readout
-    // rather than as something being tipped around.
+    // Where the lean has carried the island, through a spring — the spring is
+    // what gives it weight, since a value that merely follows the sensor reads
+    // as a readout rather than as something being tipped around.
     ImVec2 island_tilt     = ImVec2(0, 0);
     ImVec2 island_tilt_vel = ImVec2(0, 0);
 
     // Key-light direction for the glass, in screen space. Steered by the
-    // accelerometer so the rim highlight sweeps as the panel leans; stays at
-    // the fixed up-and-left default wherever no sensor is reachable.
+    // accelerometer, fixed up-and-left where no sensor is reachable.
     float glass_light_x = -0.6f;
     float glass_light_y = -0.8f;
 
-    // How far the nav column's free edges are lagging behind the window, px.
-    // The column is a separate body: drag the window and it is left behind,
-    // stop and it springs back through. Nothing about the merge itself is
-    // animated — surface tension is a constant. It is the distance that moves,
-    // and whether the two run together follows from that, which is the only
-    // way it reads as proximity rather than as a scripted effect.
+    // How far the nav column is lagging behind the window, px. The column is a
+    // separate body: drag the window and it is left behind, stop and it springs
+    // back through. Nothing about the merge is animated — surface tension is a
+    // constant, the distance is what moves, and contact follows from that.
     ImVec2 glass_nav_lag     = ImVec2(0, 0);
     ImVec2 glass_nav_lag_vel = ImVec2(0, 0);
-    // The lag actually applied this frame — faded in with the stage. Both the
-    // pane and the widgets standing on it read this one value, or they would
-    // drift apart during the island-to-window transition.
+    // The lag actually applied this frame, faded in with the stage. Pane and
+    // widgets read this one value or they drift apart mid-transition.
     ImVec2 glass_nav_offset  = ImVec2(0, 0);
     ImVec2 glass_prev_pos    = ImVec2(0, 0);
     bool   glass_pos_valid   = false;
-    // Edge detection for the feedback pulses: the last rest state a pulse was
-    // fired for, and whether the strand was joined when we last looked.
+    // Edge detection for the feedback pulses.
     int    haptic_last_stage = StageWindow;
     bool   strand_joined     = true;
 
-    // Live screen mirror: SurfaceFlinger composites the screen into buffers
-    // we own, giving sampleable pixels for a refracting backdrop. The frame
-    // counter is a liveness signal — if it stops rising, frames stopped
-    // arriving.
+    // Live screen mirror: SurfaceFlinger composites the screen into buffers we
+    // own, which is what makes a refracting backdrop possible. The frame counter
+    // is a liveness signal — if it stops rising, frames stopped arriving.
     bool     screen_mirror         = false;
     bool     screen_mirror_running = false;
     uint64_t screen_mirror_frames  = 0;
     int      screen_mirror_w       = 0;
     int      screen_mirror_h       = 0;
-    // ImTextureID for the newest mirrored frame, 0 when unavailable. Sampling
-    // this is what makes a refracting backdrop possible at all.
-    unsigned long long screen_texture_id = 0;
+    unsigned long long screen_texture_id = 0;   // newest frame, 0 = unavailable
+
     // Panes to refract this frame, rebuilt by DrawUi and consumed by the main
-    // loop right after. Held here rather than passed around because the main
-    // loop is what talks to the renderer.
+    // loop right after — it is the main loop that talks to the renderer.
     GlassRect glass_rects[kMaxGlassRects];
     int       glass_count = 0;
 
-    // The exit confirmation is up and its answer is still wanted. Held here
-    // rather than as a static so the sidebar does not have to own a piece of
-    // dialog state that outlives its own frame.
+    // The exit confirmation is up and its answer still wanted. Here rather than
+    // a static so the sidebar does not own dialog state that outlives its frame.
     bool pending_exit = false;
 
-    // Exit fragmentation animation: when the 退出 button is pressed, the
-    // UI dissolves into drifting particles and the process keeps running until
-    // the animation has played out (~1.2 s). DrawUi owns these.
+    // Exit animation: the UI dissolves into drifting particles and the process
+    // keeps running until they have played out (~1.2 s). DrawUi owns these.
     bool  exit_anim_active      = false;
-    bool  exit_anim_first_frame = false; // click-frame grace; cleared at end of DrawUi
+    bool  exit_anim_first_frame = false;   // click-frame grace, cleared in DrawUi
     float exit_anim_start       = 0.0f;
 
-    // Opaque ImTextureID-compatible handle to last frame's scene snapshot,
-    // updated by main loop from IRenderer::GetSceneSnapshotID(). Lets the
-    // dissolve particles sample the real UI as a texture.
+    // Last frame's scene snapshot, from IRenderer::GetSceneSnapshotID(), so the
+    // dissolve particles can sample the real UI as a texture.
     unsigned long long scene_snapshot_id = 0;
 };
 
 void DrawUi(UiState* state, bool* keep_running);
 
 namespace ripple {
-// Records an MD3 ripple at the last drawn item if it was just activated.
-// Call right after any clickable widget (Selectable / Button / Combo /
-// Checkbox / CollapsingHeader / ...) that you want to ripple.
+// Records a ripple at the last drawn item if it was just activated. Call right
+// after any clickable widget that should ripple.
 void TouchLastItem();
 } // namespace ripple
 
 // ─── Control chrome ──────────────────────────────────────────────────────
 // The sheet announces a shape by its edge and by what it does to the light
-// passing through, never by filling itself in. Controls drawn as flat coloured
-// slabs speak the opposite grammar and read as stickers on the glass, so they
-// are drawn here instead: a contact shadow to lift them, a wash barely strong
-// enough to separate them, and a rim that is bright along the top where the
-// key light falls and dim along the bottom — the same up-and-left key the
-// pane's own shader uses.
+// through it, never by filling itself in. Controls drawn as flat coloured slabs
+// speak the opposite grammar and read as stickers, so they are drawn here
+// instead: a contact shadow to lift them, a wash barely strong enough to
+// separate them, and a rim bright along the top and dim along the bottom, on
+// the same up-and-left key the pane's own shader uses.
 //
-// Everything is drawn *after* the widget, which works only because there is no
-// heavy fill to cover its label. That is what keeps this from needing draw-list
-// channel splitting at every call site.
+// Drawn *after* the widget, which works only because there is no heavy fill to
+// cover its label — and is what keeps this from needing channel splitting at
+// every call site.
 namespace chrome {
 // rounding < 0 means a capsule (half the height).
 void Rect(const ImVec2& a, const ImVec2& b, float rounding,
@@ -266,40 +221,26 @@ void Rect(const ImVec2& a, const ImVec2& b, float rounding,
 // For widgets whose whole item rect is the frame — Button, ProgressBar.
 void LastItem(float rounding = -1.0f);
 // For widgets that put their label to the right and report an item rect
-// covering both — Checkbox, Combo, SliderFloat. The step belongs to the frame.
+// covering both — Checkbox, Combo, SliderFloat. The frame is what gets the step.
 void LastItemFrame(const char* label, float rounding = -1.0f);
 } // namespace chrome
 
 // ─── Modal dialogs ───────────────────────────────────────────────────────
-// A modal made of the same liquid glass, drawn out of the Dynamic Island's
-// capsule and hanging just below it — which is where it lives whatever the
-// shell is doing.
+// Three bodies of the same liquid glass — a capsule for the text and two
+// smaller ones for the answers — drawn out of the Dynamic Island's capsule and
+// hanging below it, which is where they live whatever the shell is doing.
 //
-// Whether it is *part of* the shell depends on what the shell currently is.
-// Beside the island or the card it shares their body: one merged field, so they
-// run together and let go by distance like everything else here, and a card
-// growing downwards presses the modal out of its way. Over a full window it
-// cannot — a window contains the island's spot, and a smooth union swallows a
-// shape inside another one completely, so merging there would delete the modal
-// rather than join it. There it is a sheet of its own, and thinner than what it
-// covers.
+// Whether they are *part of* the shell depends on what the shell is. Beside the
+// island or the card they share its body: one merged field, so they neck and
+// let go by distance, and a card growing downwards presses them out of its way.
+// Over a full window they cannot — a window contains the island's spot, and a
+// smooth union swallows a shape that lies inside another one, so merging there
+// would delete the modal rather than join it. There it is a thinner sheet of
+// its own, which sharing costs it: one group is one pass and one material.
 //
-// Sharing costs it that thinness: one group is one pass and one set of
-// settings, so while it is part of the island's body the pair thins together
-// instead, which reads as the island receding behind the question.
-//
-// It is three bodies, not one panel: a capsule carrying the text, and two
-// smaller capsules beneath it for the answers, close enough that the field
-// joins them. They start collapsed on the island's capsule and spring out from
-// it, which is where the separation happens — one blob becoming three.
-//
-// Modal in name only, deliberately. It claims the three bodies it draws and
-// leaves the rest of the app live — the window can still be dragged, the nav
-// column still answers, the island still opens. It reached across the whole
-// screen once, and the cost was everything behind it going dead, which is not
-// what asking a question should do.
-//
-// One at a time. Opening while one is up replaces it.
+// Modal in name only, deliberately: it claims the three bodies it draws and
+// leaves the rest of the app live. One at a time; opening while one is up
+// replaces it.
 namespace dialog {
 
 enum Kind {
@@ -314,20 +255,15 @@ enum Result {
     ResultCancel,
 };
 
-// `body` may be null for KindLicense, where the field takes its place. `ok` and
+// `body` may be null for KindLicense, where the field takes its place; `ok` and
 // `cancel` may be null for anything but KindCustom, which is the point of it.
-// All four strings are copied, so none of them has to outlive the call.
+// All four are copied, so none has to outlive the call.
 void Open(Kind kind, const char* title, const char* body = nullptr,
           const char* ok = nullptr, const char* cancel = nullptr);
 void Close();
 
-// True while it is up or still animating.
-//
-// Not a reason to gate your own input. It reaches over the window rather than
-// taking it away: it claims the three bodies it draws and leaves the rest of the
-// app live, so the nav column, the sliders and the island all keep working while
-// a question is on screen. Anything that does want to stand down while one is up
-// can ask, but nothing has to.
+// True while it is up or still animating. Not a reason to gate your own input —
+// it reaches over the window rather than taking it away.
 bool IsOpen();
 
 // The answer, once, on the frame it is given. Reading it clears it.
@@ -339,8 +275,7 @@ const char* Input();
 } // namespace dialog
 
 // Re-applies the glass palette over whatever base theme is loaded. Called at
-// startup and again after anything that calls StyleColorsDark/Light/Classic,
-// which would otherwise put ImGui's own slab colours back.
+// startup, and again after anything that calls StyleColorsDark/Light/Classic.
 void ApplyGlassPalette();
 
 } // namespace aimgui

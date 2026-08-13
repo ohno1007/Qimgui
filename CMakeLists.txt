@@ -86,9 +86,21 @@ target_include_directories(aimgui_core
 target_link_libraries(aimgui_core PUBLIC imgui aimgui_platform)
 
 # ── Executable ───────────────────────────────────────────────────────────
+# ui/ is one layer split by what each file owns: ui.cpp is the shell (the
+# island/card/window body and the glass panes it submits), and the rest are the
+# pieces it draws with. ui_internal.h is what they share; ui/ui.h is the only
+# surface anything outside this directory sees.
 add_executable(AImGui
     ${JNI}/src/main.cpp
     ${JNI}/src/ui/ui.cpp
+    ${JNI}/src/ui/theme.cpp
+    ${JNI}/src/ui/sidebar.cpp
+    ${JNI}/src/ui/content.cpp
+    ${JNI}/src/ui/gestures.cpp
+    ${JNI}/src/ui/dialog.cpp
+    ${JNI}/src/ui/chrome.cpp
+    ${JNI}/src/ui/ripple.cpp
+    ${JNI}/src/ui/dissolve.cpp
     ${JNI}/src/ui/main_ui.cpp)
 target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
