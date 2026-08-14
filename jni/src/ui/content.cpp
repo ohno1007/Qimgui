@@ -99,13 +99,13 @@ void DrawIslandContent(const UiState* state) {
 // The dot sits outside the ImGui window, so its content goes on the foreground
 // list rather than through the layout.
 void DrawDotContent(const UiState* state, float alpha) {
-    if (state->dot_radius < 6.0f || alpha <= 0.01f) return;
+    if (g_ui.dot_radius < 6.0f || alpha <= 0.01f) return;
     const char* txt = state->dot_text ? state->dot_text : state->island_icon;
     if (!txt || !*txt) return;
     const ImVec2 ts = ImGui::CalcTextSize(txt);
     ImGui::GetForegroundDrawList()->AddText(
-        ImVec2(state->dot_center.x - ts.x * 0.5f,
-               state->dot_center.y - ts.y * 0.5f),
+        ImVec2(g_ui.dot_center.x - ts.x * 0.5f,
+               g_ui.dot_center.y - ts.y * 0.5f),
         ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)), txt);
 }
 

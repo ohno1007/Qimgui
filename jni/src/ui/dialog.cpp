@@ -242,7 +242,7 @@ void Draw(UiState* state) {
             g.pending = false;
         }
     }
-    if (!IsOpen()) { state->modal_rect = ImVec4(0, 0, 0, 0); return; }
+    if (!IsOpen()) { g_ui.modal_rect = ImVec4(0, 0, 0, 0); return; }
 
     const float u  = g.t < 0.0f ? 0.0f : (g.t > 1.0f ? 1.0f : g.t);
     const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
@@ -310,8 +310,8 @@ void Draw(UiState* state) {
     // modal's lean is the only thing that opens and closes the gap.
     const float dh_m  = state->display_h > 0 ? (float)state->display_h
                                              : io.DisplaySize.y;
-    const ImVec4& sh  = state->shell_rect;        // live, for the swallow test
-    const ImVec4& sr  = state->shell_rest_rect;   // settled, for the press
+    const ImVec4& sh  = g_ui.shell_rect;        // live, for the swallow test
+    const ImVec4& sr  = g_ui.shell_rest_rect;   // settled, for the press
     const float rest  = kIslandTop + kIslandH;
     const float total = bodyH + kRowGap + kBtnH;   // everything below the line
     float want = rest;
@@ -350,10 +350,10 @@ void Draw(UiState* state) {
     // At u = 0 all three bodies are the island's capsule, so the field has a
     // single body and the separation into three *is* the opening. Read from
     // where the island actually is: with Live2D it follows the dragged ball.
-    const ImVec4 seed = (state->island_rect.z > 2.0f)
-        ? state->island_rect
-        : ImVec4(dw * 0.5f - kIslandW * 0.5f + state->island_tilt.x,
-                 kIslandTop + state->island_tilt.y, kIslandW, kIslandH);
+    const ImVec4 seed = (g_ui.island_rect.z > 2.0f)
+        ? g_ui.island_rect
+        : ImVec4(dw * 0.5f - kIslandW * 0.5f + g_ui.island_tilt.x,
+                 kIslandTop + g_ui.island_tilt.y, kIslandW, kIslandH);
 
     const ImVec4 rBody  = Lerp(seed, fBody,  u);
     const ImVec4 rLeft  = Lerp(seed, fLeft,  u);
@@ -371,7 +371,7 @@ void Draw(UiState* state) {
     }
     // For the exit dissolve, so the question comes apart with the window rather
     // than blinking out beside it.
-    state->modal_rect = ImVec4(bmin.x, bmin.y, bmax.x - bmin.x, bmax.y - bmin.y);
+    g_ui.modal_rect = ImVec4(bmin.x, bmin.y, bmax.x - bmin.x, bmax.y - bmin.y);
 
     // ── Panes ────────────────────────────────────────────────────────────
     // In the shell's group while it shares this body, which is what buys the

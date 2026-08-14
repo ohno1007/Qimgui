@@ -11,6 +11,7 @@
 #include "ui/main_ui.h"
 
 #include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
+#include "ui/ui_internal.h" // g_ui.pending_exit — whose answer this is
 #include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -378,7 +379,7 @@ void DrawWindow(UiState* state) {
 
         // Answers are taken once, on the frame they are given, so whoever
         // opened a dialog is the one that reads it.
-        if (!state->pending_exit) {
+        if (!g_ui.pending_exit) {
             const dialog::Result r = dialog::Take();
             if (r == dialog::ResultOk) {
                 const char* key = dialog::Input();

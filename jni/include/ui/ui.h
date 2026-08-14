@@ -48,19 +48,11 @@ struct UiState {
     // to read at a glance without committing to the whole window.
     //
     // `stage` is the target; `expand` is the spring chasing it at 0.0 / 0.5 /
-    // 1.0, and `expand_vel` also drives the squash-and-stretch — a fast-moving
-    // spring is exactly when a jelly should deform.
+    // 1.0.
     enum Stage { StageIsland = 0, StageCard = 1, StageWindow = 2 };
     int   stage       = StageWindow;
     bool  collapsed   = false;   // derived: stage == StageIsland
     float expand      = 1.0f;
-    float expand_vel  = 0.0f;
-
-    // What the shell is actually animating towards, which is `stage` except
-    // while a modal is being re-issued: a modal can only change which body it
-    // belongs to on the frame it has retracted to nothing, so the shell waits
-    // the third of a second that takes rather than moving through it.
-    int   stage_shown = StageWindow;
 
     // What the three rest states show. All optional — leave one null for the
     // built-in default. Icons are plain strings, so they concatenate with text:
@@ -73,36 +65,6 @@ struct UiState {
     const char* card_icon   = nullptr;
     const char* card_body   = nullptr;   // null → the built-in status block
 
-    // Where the companion circle ended up, published by DrawUi so its content
-    // can go on the foreground list — it sits outside the ImGui window and is
-    // not reachable through the layout. radius 0 = gone.
-    ImVec2 dot_center = ImVec2(0, 0);
-    float  dot_radius = 0.0f;
-
-    // The shell as it stands this frame, and the island's capsule wherever it
-    // currently is (the dragged ball, in Live2D builds). Published for the
-    // modal, which is drawn out of the capsule and pressed down by the shell.
-    ImVec4 shell_rect  = ImVec4(0, 0, 0, 0);
-    ImVec4 island_rect = ImVec4(0, 0, 0, 0);
-
-    // Where the shell will come to rest for the stage that has been asked for.
-    // The modal is pressed by this rather than by the live rect: a shell
-    // mid-collapse is briefly enormous, and a modal held clear of *that* would
-    // be flung down the screen and hauled back. Pressed by the rest state it
-    // moves once, between two settled places.
-    ImVec4 shell_rest_rect = ImVec4(0, 0, 0, 0);
-
-    // The modal's whole body, published by dialog::Draw so the exit dissolve
-    // seeds particles over it too. Zero size when no modal is up.
-    ImVec4 modal_rect = ImVec4(0, 0, 0, 0);
-
-    // How far the shell has closed ranks for a modal sharing its body, 0..1.
-    // One merged body gets four shapes — Vulkan's guaranteed push-constant
-    // budget — and the modal is three of them, so the shell has to come down to
-    // one: no parted nav column, no companion dot. Zero when the modal is a
-    // sheet of its own, where the shell keeps everything it had.
-    float modal_close = 0.0f;
-
     // Live2D floating "ball": when collapsed the character is the visual and can
     // be dragged anywhere. Centre in screen px, re-clamped each frame.
     // (-1,-1) = uninitialised, placed on first use.
@@ -110,19 +72,9 @@ struct UiState {
     float  ball_scale = 1.0f;
 
     // Remembered full-window pos and size, so the window springs back to
-    // wherever it was last dragged. content_moving marks the frames where a
-    // content drag owns the position rather than ImGui.
+    // wherever it was last dragged.
     ImVec2 last_full_pos  = ImVec2(60, 100);
-    bool   content_moving = false;
     ImVec2 last_full_size = ImVec2(900, 620);
-
-    // Bottom-right resize handle: a drag previews a frame at the target size
-    // without changing the live window, and on release the window springs to it.
-    bool   resizing               = false;
-    ImVec2 resize_target_size     = ImVec2(900, 620);
-    ImVec2 resize_anim_vel        = ImVec2(0, 0);
-    ImVec2 resize_drag_start_mouse = ImVec2(0, 0);
-    ImVec2 resize_drag_start_size  = ImVec2(900, 620);
 
     // Post-process bloom intensity, applied at composite. 0 = off.
     float bloom_intensity = 0.0f;
@@ -139,31 +91,11 @@ struct UiState {
     // standing still rather than to a special case.
     float  tilt_x = 0.0f;
     float  tilt_y = 0.0f;
-    // Where the lean has carried the island, through a spring — the spring is
-    // what gives it weight, since a value that merely follows the sensor reads
-    // as a readout rather than as something being tipped around.
-    ImVec2 island_tilt     = ImVec2(0, 0);
-    ImVec2 island_tilt_vel = ImVec2(0, 0);
 
     // Key-light direction for the glass, in screen space. Steered by the
     // accelerometer, fixed up-and-left where no sensor is reachable.
     float glass_light_x = -0.6f;
     float glass_light_y = -0.8f;
-
-    // How far the nav column is lagging behind the window, px. The column is a
-    // separate body: drag the window and it is left behind, stop and it springs
-    // back through. Nothing about the merge is animated — surface tension is a
-    // constant, the distance is what moves, and contact follows from that.
-    ImVec2 glass_nav_lag     = ImVec2(0, 0);
-    ImVec2 glass_nav_lag_vel = ImVec2(0, 0);
-    // The lag actually applied this frame, faded in with the stage. Pane and
-    // widgets read this one value or they drift apart mid-transition.
-    ImVec2 glass_nav_offset  = ImVec2(0, 0);
-    ImVec2 glass_prev_pos    = ImVec2(0, 0);
-    bool   glass_pos_valid   = false;
-    // Edge detection for the feedback pulses.
-    int    haptic_last_stage = StageWindow;
-    bool   strand_joined     = true;
 
     // Live screen mirror: SurfaceFlinger composites the screen into buffers we
     // own, which is what makes a refracting backdrop possible. The frame counter
@@ -182,13 +114,10 @@ struct UiState {
 
     // The exit confirmation is up and its answer still wanted. Here rather than
     // a static so the sidebar does not own dialog state that outlives its frame.
-    bool pending_exit = false;
 
     // Exit animation: the UI dissolves into drifting particles and the process
     // keeps running until they have played out (~1.2 s). DrawUi owns these.
     bool  exit_anim_active      = false;
-    bool  exit_anim_first_frame = false;   // click-frame grace, cleared in DrawUi
-    float exit_anim_start       = 0.0f;
 
     // Last frame's scene snapshot, from IRenderer::GetSceneSnapshotID(), so the
     // dissolve particles can sample the real UI as a texture.

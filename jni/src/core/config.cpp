@@ -142,7 +142,6 @@ void Load(UiState* state) {
     // The spring has to start where the stage says, or the window plays its
     // whole opening animation every launch.
     state->expand = (float)state->stage * 0.5f;
-    state->resize_target_size = state->last_full_size;
 
     Remember(state);
     // Spelled out because these now decide what happens before the first frame

@@ -21,6 +21,10 @@
 #include <cstdio>
 
 namespace aimgui {
+
+// The one instance. Declared in ui_internal.h.
+Shell g_ui;
+
 namespace {
 
 // The slot between the nav column and the content, the surface tension across
@@ -57,9 +61,9 @@ void DrawUi(UiState* state, bool* keep_running) {
 
     // Past the click frame the window stops rendering entirely and the
     // particles — which sample the frozen pre-click snapshot — replace it.
-    if (state->exit_anim_active && !state->exit_anim_first_frame) {
+    if (state->exit_anim_active && !g_ui.exit_anim_first_frame) {
         const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - state->exit_anim_start) / 1.35f;
+        const float t01     = (now - g_ui.exit_anim_start) / 1.35f;
         const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
 
         // This path returns before the pane submission below, so the count has
@@ -120,33 +124,41 @@ void DrawUi(UiState* state, bool* keep_running) {
     }
 #endif
 
-    // First, so the NoMove flag below sees an up-to-date state->resizing.
+    // Seeded here rather than by whoever loaded the settings: the ui layer owns
+    // this spring, so a size restored from config is picked up on the first
+    // frame instead of being sprung away from.
+    if (!g_ui.resize_valid) {
+        g_ui.resize_target_size = state->last_full_size;
+        g_ui.resize_valid = true;
+    }
+
+    // First, so the NoMove flag below sees an up-to-date g_ui.resizing.
     HandleResizeInput(state, io);
 
-    if (!state->resizing) {
-        UpdateSpring(&state->last_full_size.x, &state->resize_anim_vel.x,
-                     state->resize_target_size.x, dt);
-        UpdateSpring(&state->last_full_size.y, &state->resize_anim_vel.y,
-                     state->resize_target_size.y, dt);
+    if (!g_ui.resizing) {
+        UpdateSpring(&state->last_full_size.x, &g_ui.resize_anim_vel.x,
+                     g_ui.resize_target_size.x, dt);
+        UpdateSpring(&state->last_full_size.y, &g_ui.resize_anim_vel.y,
+                     g_ui.resize_target_size.y, dt);
     } else {
         // Hold the live window at its pre-drag size; the preview frame reads
         // from resize_target_size.
-        state->last_full_size = state->resize_drag_start_size;
+        state->last_full_size = g_ui.resize_drag_start_size;
     }
 
     state->collapsed = (state->stage == UiState::StageIsland);
     // One pulse per rest state actually changing, not per frame animating.
-    if (state->stage != state->haptic_last_stage) {
-        state->haptic_last_stage = state->stage;
+    if (state->stage != g_ui.haptic_last_stage) {
+        g_ui.haptic_last_stage = state->stage;
         haptic::Step();
     }
     // The shell holds still while a modal is being re-issued: a modal can only
     // change which body it belongs to on the frame it has retracted to nothing,
     // and a shell moving across that frame is what would make it visible. So the
     // stage is taken but not acted on until the retract finishes.
-    if (!dialog::StageMismatch(state->stage)) state->stage_shown = state->stage;
-    const float target = (float)state->stage_shown * 0.5f;
-    UpdateSpring(&state->expand, &state->expand_vel, target, dt);
+    if (!dialog::StageMismatch(state->stage)) g_ui.stage_shown = state->stage;
+    const float target = (float)g_ui.stage_shown * 0.5f;
+    UpdateSpring(&state->expand, &g_ui.expand_vel, target, dt);
     const float t = state->expand;
     const float lt = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
 
@@ -167,11 +179,11 @@ void DrawUi(UiState* state, bool* keep_running) {
     // question is drawn out of it after.
     {
         const float d = dt * 5.5f;
-        state->modal_close += dialog::JoinedShell() ? d : -d;
-        if (state->modal_close < 0.0f) state->modal_close = 0.0f;
-        if (state->modal_close > 1.0f) state->modal_close = 1.0f;
+        g_ui.modal_close += dialog::JoinedShell() ? d : -d;
+        if (g_ui.modal_close < 0.0f) g_ui.modal_close = 0.0f;
+        if (g_ui.modal_close > 1.0f) g_ui.modal_close = 1.0f;
     }
-    const float mclose = state->modal_close;
+    const float mclose = g_ui.modal_close;
 
     // What should sit centred on screen is the pair, so the island shifts left
     // by half the dot's reach for as long as the dot is there.
@@ -183,9 +195,9 @@ void DrawUi(UiState* state, bool* keep_running) {
     // this moves win_pos, the velocity it produces feeds the same lag a drag
     // does and the dot swings behind the tilt for free.
     const float tilt_w = 1.0f - (lt < 0.55f ? lt / 0.55f : 1.0f);
-    UpdateSpring(&state->island_tilt.x, &state->island_tilt_vel.x,
+    UpdateSpring(&g_ui.island_tilt.x, &g_ui.island_tilt_vel.x,
                  state->tilt_x * kTiltRange * tilt_w, dt);
-    UpdateSpring(&state->island_tilt.y, &state->island_tilt_vel.y,
+    UpdateSpring(&g_ui.island_tilt.y, &g_ui.island_tilt_vel.y,
                  state->tilt_y * kTiltRange * tilt_w, dt);
 
     const ImVec2 island_base = l2d_active
@@ -205,18 +217,18 @@ void DrawUi(UiState* state, bool* keep_running) {
             if (*v < lo) { *v = lo; if (*vel < 0.0f) *vel = 0.0f; }
             if (*v > hi) { *v = hi; if (*vel > 0.0f) *vel = 0.0f; }
         };
-        hold(&state->island_tilt.x, &state->island_tilt_vel.x,
+        hold(&g_ui.island_tilt.x, &g_ui.island_tilt_vel.x,
              margin - island_base.x, dw - margin - pair_w - island_base.x);
-        hold(&state->island_tilt.y, &state->island_tilt_vel.y,
+        hold(&g_ui.island_tilt.y, &g_ui.island_tilt_vel.y,
              margin - island_base.y, dh_ - margin - kIslandH - island_base.y);
     }
 
-    const ImVec2 island_pos(island_base.x + state->island_tilt.x,
-                            island_base.y + state->island_tilt.y);
+    const ImVec2 island_pos(island_base.x + g_ui.island_tilt.x,
+                            island_base.y + g_ui.island_tilt.y);
     const ImVec2 island_size(kIslandW, kIslandH);
     // Published for the modal, which is drawn out of this capsule. With Live2D
     // it is the ball's position, not the top centre.
-    state->island_rect = ImVec4(island_pos.x, island_pos.y, kIslandW, kIslandH);
+    g_ui.island_rect = ImVec4(island_pos.x, island_pos.y, kIslandW, kIslandH);
 
     // The card: enough to read at a glance, small enough that the island still
     // reads as having opened rather than the window as having arrived. Kept on
@@ -233,9 +245,9 @@ void DrawUi(UiState* state, bool* keep_running) {
     // Where the shell will settle for the stage that has been *asked for*, so a
     // modal committing to a new attachment is already pressed by the destination
     // rather than by the shape the shell is passing through.
-    state->shell_rest_rect =
+    g_ui.shell_rest_rect =
         state->stage == UiState::StageIsland
-            ? state->island_rect
+            ? g_ui.island_rect
             : (state->stage == UiState::StageCard
                    ? ImVec4(card_pos.x, card_pos.y, card_size.x, card_size.y)
                    : ImVec4(state->last_full_pos.x, state->last_full_pos.y,
@@ -279,7 +291,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     // spring settles. Overshoot alone reads as a bounce; the deformation is what
     // makes it read as soft.
     {
-        float j = state->expand_vel * 0.055f;
+        float j = g_ui.expand_vel * 0.055f;
         if (j >  0.16f) j =  0.16f;
         if (j < -0.16f) j = -0.16f;
         const ImVec2 c(win_pos.x + win_size.x * 0.5f, win_pos.y + win_size.y * 0.5f);
@@ -292,7 +304,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     // The shell as it finally stands, squash included. Published here rather
     // than in the pane block below, which is skipped when the mirror is off —
     // the modal still has to know where the shell is.
-    state->shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
+    g_ui.shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
 
     // Clear of the card's rest: the spring overshoots past 0.5 on its way there,
     // and a threshold any closer would flash the title bar during the bounce.
@@ -306,7 +318,7 @@ void DrawUi(UiState* state, bool* keep_running) {
         // A content drag moves the window, so on those frames this position is
         // authoritative; otherwise ImGui owns it and this is initial placement.
         ImGui::SetNextWindowPos(state->last_full_pos,
-                                state->content_moving ? ImGuiCond_Always
+                                g_ui.content_moving ? ImGuiCond_Always
                                                       : ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(state->last_full_size, ImGuiCond_Always);
         ImGui::SetNextWindowSizeConstraints(ImVec2(700, 560), ImVec2(FLT_MAX, FLT_MAX));
@@ -362,22 +374,22 @@ void DrawUi(UiState* state, bool* keep_running) {
         // merge threshold turns that into contact.
         {
             const float dt = ImGui::GetIO().DeltaTime;
-            if (state->glass_pos_valid) {
-                state->glass_nav_lag.x -= (win_pos.x - state->glass_prev_pos.x) * kNavFollow;
-                state->glass_nav_lag.y -= (win_pos.y - state->glass_prev_pos.y) * kNavFollow;
+            if (g_ui.glass_pos_valid) {
+                g_ui.glass_nav_lag.x -= (win_pos.x - g_ui.glass_prev_pos.x) * kNavFollow;
+                g_ui.glass_nav_lag.y -= (win_pos.y - g_ui.glass_prev_pos.y) * kNavFollow;
             }
-            state->glass_prev_pos  = win_pos;
-            state->glass_pos_valid = true;
-            UpdateSpring(&state->glass_nav_lag.x, &state->glass_nav_lag_vel.x, 0.0f, dt);
-            UpdateSpring(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, 0.0f, dt);
+            g_ui.glass_prev_pos  = win_pos;
+            g_ui.glass_pos_valid = true;
+            UpdateSpring(&g_ui.glass_nav_lag.x, &g_ui.glass_nav_lag_vel.x, 0.0f, dt);
+            UpdateSpring(&g_ui.glass_nav_lag.y, &g_ui.glass_nav_lag_vel.y, 0.0f, dt);
             // Bounded, and the velocity dropped at the stop, or the spring winds
             // up against the cap and fires the column across the slot on release.
             auto hold = [](float* v, float* vel, float lim) {
                 if (*v < -lim) { *v = -lim; if (*vel < 0.0f) *vel = 0.0f; }
                 if (*v >  lim) { *v =  lim; if (*vel > 0.0f) *vel = 0.0f; }
             };
-            hold(&state->glass_nav_lag.x, &state->glass_nav_lag_vel.x, kNavLagMax);
-            hold(&state->glass_nav_lag.y, &state->glass_nav_lag_vel.y, kNavLagMax);
+            hold(&g_ui.glass_nav_lag.x, &g_ui.glass_nav_lag_vel.x, kNavLagMax);
+            hold(&g_ui.glass_nav_lag.y, &g_ui.glass_nav_lag_vel.y, kNavLagMax);
         }
 
         // Below the full-window stage there is nothing to part, and mclose
@@ -401,8 +413,8 @@ void DrawUi(UiState* state, bool* keep_running) {
             const float win_b   = win_pos.y + win_size.y;
             // Faded in with the stage and published for DrawSidebar, so pane and
             // widgets move by exactly one value.
-            const ImVec2 lag(state->glass_nav_lag.x * split, state->glass_nav_lag.y * split);
-            state->glass_nav_offset = lag;
+            const ImVec2 lag(g_ui.glass_nav_lag.x * split, g_ui.glass_nav_lag.y * split);
+            g_ui.glass_nav_offset = lag;
 
             // Enough overlap that the title and content are unambiguously one
             // body. Kept small: the column's slot is measured from this edge, so
@@ -438,9 +450,9 @@ void DrawUi(UiState* state, bool* keep_running) {
             // Letting go and finding its way back are the two moments the eye can
             // miss, so both get a nudge. Hysteresis, or it chatters while the
             // spring settles on the threshold.
-            const bool joined = state->strand_joined ? neck > 0.06f : neck > 0.35f;
-            if (joined != state->strand_joined) {
-                state->strand_joined = joined;
+            const bool joined = g_ui.strand_joined ? neck > 0.06f : neck > 0.35f;
+            if (joined != g_ui.strand_joined) {
+                g_ui.strand_joined = joined;
                 haptic::Snap();
             }
             strand.w = slot + kStrandGrip * neck;
@@ -457,7 +469,7 @@ void DrawUi(UiState* state, bool* keep_running) {
             state->glass_rects[state->glass_count++] = a;
             state->glass_rects[state->glass_count++] = strand;
         } else {
-            state->glass_nav_offset = ImVec2(0, 0);
+            g_ui.glass_nav_offset = ImVec2(0, 0);
             GlassRect r = base;
             r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
             if (dot_t > 0.02f) {
@@ -467,16 +479,16 @@ void DrawUi(UiState* state, bool* keep_running) {
                 GlassRect dot = base;
                 dot.w = dot.h = kDotD * dot_t;
                 dot.x = win_pos.x + win_size.x + kDotGap
-                        + state->glass_nav_lag.x * dot_t;
+                        + g_ui.glass_nav_lag.x * dot_t;
                 dot.y = win_pos.y + win_size.y * 0.5f - dot.h * 0.5f
-                        + state->glass_nav_lag.y * dot_t;
+                        + g_ui.glass_nav_lag.y * dot_t;
                 r.merge = dot.merge = kDotMerge;
-                state->dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
-                state->dot_radius = dot.w * 0.5f;
+                g_ui.dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
+                g_ui.dot_radius = dot.w * 0.5f;
                 state->glass_rects[state->glass_count++] = r;
                 state->glass_rects[state->glass_count++] = dot;
             } else {
-                state->dot_radius = 0.0f;
+                g_ui.dot_radius = 0.0f;
                 state->glass_rects[state->glass_count++] = r;
             }
         }
@@ -511,7 +523,7 @@ void DrawUi(UiState* state, bool* keep_running) {
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse |
                              ImGuiWindowFlags_NoSavedSettings |
                              ImGuiWindowFlags_NoResize;
-    if (!show_chrome || state->resizing) {
+    if (!show_chrome || g_ui.resizing) {
         flags |= ImGuiWindowFlags_NoMove;
     }
     if (!show_chrome) {
@@ -605,13 +617,13 @@ void DrawUi(UiState* state, bool* keep_running) {
     // On the click frame the particles advance while the real UI is still under
     // them, so the surface itself is what appears to come apart. After this
     // frame the early-return path above takes over.
-    if (state->exit_anim_active && state->exit_anim_first_frame) {
+    if (state->exit_anim_active && g_ui.exit_anim_first_frame) {
         const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - state->exit_anim_start) / 1.35f;
+        const float t01     = (now - g_ui.exit_anim_start) / 1.35f;
         const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
         dissolve::Step(dt, clamped,
                       (ImTextureID)(uintptr_t)state->scene_snapshot_id);
-        state->exit_anim_first_frame = false;
+        g_ui.exit_anim_first_frame = false;
     }
 }
 

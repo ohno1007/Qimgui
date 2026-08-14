@@ -51,8 +51,8 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     // slab trails the window and springs back. Without this the pane would slide
     // out from under them and the outward throw would have to be capped short.
     const ImVec2 nav_origin = ImGui::GetCursorScreenPos();
-    ImGui::SetCursorScreenPos(ImVec2(nav_origin.x + state->glass_nav_offset.x,
-                                     nav_origin.y + state->glass_nav_offset.y));
+    ImGui::SetCursorScreenPos(ImVec2(nav_origin.x + g_ui.glass_nav_offset.x,
+                                     nav_origin.y + g_ui.glass_nav_offset.y));
 
     // The border is a rectangle around the child, which cuts across the pane
     // and re-draws the seam the parting just removed.
@@ -125,13 +125,13 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
     if (exit_pressed && !state->exit_anim_active) {
         dialog::Open(dialog::KindConfirm, u8"退出 AImGui",
                      u8"窗口会碎成粒子飘散，设置会先保存。");
-        state->pending_exit = true;
+        g_ui.pending_exit = true;
     }
-    if (state->pending_exit) {
+    if (g_ui.pending_exit) {
         const dialog::Result r = dialog::Take();
-        if (r == dialog::ResultCancel) state->pending_exit = false;
+        if (r == dialog::ResultCancel) g_ui.pending_exit = false;
         if (r == dialog::ResultOk) {
-            state->pending_exit = false;
+            g_ui.pending_exit = false;
             // UVs normalise against the *snapshot texture*, which is
             // io.DisplaySize — display_w/h are physical pixels and would
             // mis-map most particles off-frame.
@@ -141,7 +141,7 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             // is a region where the question simply stops existing.
             ImVec2 dp = state->last_full_pos;
             ImVec2 ds = state->last_full_size;
-            const ImVec4& m = state->modal_rect;
+            const ImVec4& m = g_ui.modal_rect;
             if (m.z > 2.0f && m.w > 2.0f) {
                 const float x1 = (dp.x + ds.x > m.x + m.z) ? dp.x + ds.x : m.x + m.z;
                 const float y1 = (dp.y + ds.y > m.y + m.w) ? dp.y + ds.y : m.y + m.w;
@@ -152,8 +152,8 @@ void DrawSidebar(Page& current, bool* keep_running, UiState* state) {
             dissolve::Begin(dp, ds, io2.DisplaySize.x, io2.DisplaySize.y);
             haptic::Heavy();
             state->exit_anim_active      = true;
-            state->exit_anim_first_frame = true;
-            state->exit_anim_start       = (float)ImGui::GetTime();
+            g_ui.exit_anim_first_frame = true;
+            g_ui.exit_anim_start       = (float)ImGui::GetTime();
         }
     }
     ripple::TouchLastItem();

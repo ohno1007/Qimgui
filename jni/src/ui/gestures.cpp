@@ -100,10 +100,10 @@ void ContentGesture(const char* id, UiState* state) {
         } else if (d->mode == Mode::Move) {
             state->last_full_pos.x += io.MouseDelta.x;
             state->last_full_pos.y += io.MouseDelta.y;
-            state->content_moving = true;
+            g_ui.content_moving = true;
         }
     } else {
-        state->content_moving = false;
+        g_ui.content_moving = false;
         if (d->active && d->mode == Mode::Scroll) {
             // On the frame of release, work the throw out from the window of
             // recent samples: total distance over total time. Frames where the
@@ -167,22 +167,22 @@ void HandleResizeInput(UiState* state, const ImGuiIO& io) {
     const bool inside = io.MousePos.x >= grip_min.x && io.MousePos.x < grip_max.x &&
                         io.MousePos.y >= grip_min.y && io.MousePos.y < grip_max.y;
 
-    if (io.MouseClicked[0] && !state->resizing && inside) {
-        state->resizing                = true;
-        state->resize_drag_start_mouse = io.MousePos;
-        state->resize_drag_start_size  = state->last_full_size;
-        state->resize_target_size      = state->last_full_size;
+    if (io.MouseClicked[0] && !g_ui.resizing && inside) {
+        g_ui.resizing                = true;
+        g_ui.resize_drag_start_mouse = io.MousePos;
+        g_ui.resize_drag_start_size  = state->last_full_size;
+        g_ui.resize_target_size      = state->last_full_size;
     }
-    if (state->resizing && io.MouseDown[0]) {
-        const ImVec2 d(io.MousePos.x - state->resize_drag_start_mouse.x,
-                       io.MousePos.y - state->resize_drag_start_mouse.y);
-        state->resize_target_size = ImVec2(
-            std::max(700.0f, state->resize_drag_start_size.x + d.x),
-            std::max(560.0f, state->resize_drag_start_size.y + d.y));
+    if (g_ui.resizing && io.MouseDown[0]) {
+        const ImVec2 d(io.MousePos.x - g_ui.resize_drag_start_mouse.x,
+                       io.MousePos.y - g_ui.resize_drag_start_mouse.y);
+        g_ui.resize_target_size = ImVec2(
+            std::max(700.0f, g_ui.resize_drag_start_size.x + d.x),
+            std::max(560.0f, g_ui.resize_drag_start_size.y + d.y));
     }
-    if (state->resizing && !io.MouseDown[0]) {
-        state->resizing        = false;
-        state->resize_anim_vel = ImVec2(0, 0);
+    if (g_ui.resizing && !io.MouseDown[0]) {
+        g_ui.resizing        = false;
+        g_ui.resize_anim_vel = ImVec2(0, 0);
     }
 }
 
@@ -195,7 +195,7 @@ void DrawResizeGrip(const UiState* state) {
     const bool inside = ImGui::IsMouseHoveringRect(grip_min, grip_max);
     ImDrawList* fg = ImGui::GetForegroundDrawList();
     const ImU32 col = ImGui::GetColorU32(
-        state->resizing ? ImGuiCol_ResizeGripActive
+        g_ui.resizing ? ImGuiCol_ResizeGripActive
                         : (inside ? ImGuiCol_ResizeGripHovered : ImGuiCol_ResizeGrip));
 
     for (int i = 0; i < 3; ++i) {
@@ -205,10 +205,10 @@ void DrawResizeGrip(const UiState* state) {
                     col, 3.0f);
     }
 
-    if (state->resizing) {
+    if (g_ui.resizing) {
         const ImVec2 a = state->last_full_pos;
-        const ImVec2 b(a.x + state->resize_target_size.x,
-                       a.y + state->resize_target_size.y);
+        const ImVec2 b(a.x + g_ui.resize_target_size.x,
+                       a.y + g_ui.resize_target_size.y);
         fg->AddRect(a, b,
                     ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.95f)),
                     12.0f, 5.0f, 0);
