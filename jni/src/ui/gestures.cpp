@@ -9,37 +9,22 @@
 
 namespace aimgui {
 
-// ─── Content gestures ────────────────────────────────────────────────────
-// A drag in the content means either "scroll the page" or "move the window",
-// decided from the first few pixels of travel:
-//
-//   mostly vertical, and the page has somewhere to scroll  -> scroll
-//   anything else                                          -> move the window
-//
-// So a short page drags the window from anywhere in it, a long page scrolls,
-// and a sideways drag moves the window either way. Decided once and held until
-// release — a gesture that changes meaning halfway through feels broken.
 void ContentGesture(const char* id, UiState* state) {
     enum class Mode { Undecided, Scroll, Move, Widget };
 
-    // Throw speed over a short window of recent motion, not a running average.
-    // An average includes the frames just before the finger lifts, and those
-    // lie: a finger that pauses before letting go reads as no throw at all, and
-    // one that drifts back a pixel flips the sign.
     constexpr int   kVelSamples = 8;
-    constexpr float kVelWindow  = 0.09f;   // seconds of history that count
+    constexpr float kVelWindow  = 0.09f;
     struct Drag {
         bool   active   = false;
         Mode   mode     = Mode::Undecided;
         ImVec2 start    = ImVec2(0, 0);
-        float  velocity = 0.0f;   // scroll momentum, px/s
+        float  velocity = 0.0f;
         float  dy[kVelSamples] = {};
         float  dt[kVelSamples] = {};
         int    head  = 0;
         int    count = 0;
     };
-    // Keyed by id: the sidebar and the content pane both scroll and must not
-    // share momentum or a decision.
+
     static std::vector<std::pair<const char*, Drag>> states;
     Drag* d = nullptr;
     for (auto& e : states) if (e.first == id) { d = &e.second; break; }
@@ -57,22 +42,13 @@ void ContentGesture(const char* id, UiState* state) {
             d->count  = 0;
             d->head   = 0;
             d->velocity = 0.0f;
-            // A press that lands on a widget belongs to that widget for the
-            // whole gesture; taking it back partway would need ClearActiveID,
-            // which is not in the vendored public headers, and stealing a
-            // slider's drag halfway would be worse than not scrolling.
+
             d->mode   = ImGui::IsAnyItemActive() ? Mode::Widget : Mode::Undecided;
         }
 
         float dx = io.MousePos.x - d->start.x;
         float dy = io.MousePos.y - d->start.y;
 
-        // A touch point that moves further than this between two frames is not
-        // a finger travelling — at 120 Hz nothing human covers it in 8ms. It is
-        // the press and the position arriving on different frames, which leaves
-        // `start` sitting wherever the pointer happened to be last. Re-seed
-        // from the real position instead of reading the jump as a throw, which
-        // is how a tap sometimes came out as a scroll.
         constexpr float kTeleport = 140.0f;
         if (d->mode == Mode::Undecided &&
             (std::fabs(io.MouseDelta.x) > kTeleport || std::fabs(io.MouseDelta.y) > kTeleport)) {
@@ -80,10 +56,6 @@ void ContentGesture(const char* id, UiState* state) {
             dx = dy = 0.0f;
         }
 
-        // Android's own touch slop is 8dp, which on this panel is nearer thirty
-        // pixels than six. Six is under a tenth of a millimetre: no finger
-        // presses that precisely, so a tap that drifted while landing was being
-        // read as a drag and the button under it never got its release.
         constexpr float kSlop = 26.0f;
         if (d->mode == Mode::Undecided && (std::fabs(dx) > kSlop || std::fabs(dy) > kSlop)) {
             const bool vertical  = std::fabs(dy) > std::fabs(dx);
@@ -105,11 +77,7 @@ void ContentGesture(const char* id, UiState* state) {
     } else {
         g_ui.content_moving = false;
         if (d->active && d->mode == Mode::Scroll) {
-            // On the frame of release, work the throw out from the window of
-            // recent samples: total distance over total time. Frames where the
-            // finger had already stopped contribute their duration but no
-            // distance, so a pause before letting go damps the throw towards
-            // zero on its own instead of needing a rule.
+
             if (d->count > 0) {
                 float sum_dy = 0.0f, sum_dt = 0.0f;
                 for (int i = 0; i < d->count && sum_dt < kVelWindow; ++i) {
@@ -120,9 +88,7 @@ void ContentGesture(const char* id, UiState* state) {
                 d->velocity = sum_dt > 1e-4f ? sum_dy / sum_dt : 0.0f;
                 d->count = 0;
             }
-            // Then glide on, shedding speed exponentially, coming to rest in
-            // about a second so it reads as friction rather than the list being
-            // yanked away.
+
             d->velocity *= std::exp(-4.5f * dt);
             if (std::fabs(d->velocity) > 8.0f) {
                 ImGui::SetScrollY(ImGui::GetScrollY() + d->velocity * dt);
@@ -149,17 +115,6 @@ ImVec2 GripMax(const UiState* state) {
                   state->last_full_pos.y + state->last_full_size.y);
 }
 
-// Resize input is detected BEFORE Begin so that the ImGuiWindowFlags_NoMove
-// can be applied this very frame to stop ImGui from also interpreting the
-// touch as a window-drag-start. Without this, a press on the grip would
-// kick off both the grip drag (our code) and the main window's title-bar
-// move (ImGui's built-in), and the window would slide around under the
-// finger as the size grew.
-//
-// Hit-test is done with raw math (not ImGui::IsMouseHoveringRect) — that
-// helper defaults to clipping against the *current window*'s ClipRect, and
-// we're called outside any Begin/End so its clip rect is empty / wrong,
-// which silently produces "no hit" forever.
 void HandleResizeInput(UiState* state, const ImGuiIO& io) {
     const ImVec2 grip_min = GripMin(state);
     const ImVec2 grip_max = GripMax(state);
@@ -186,8 +141,6 @@ void HandleResizeInput(UiState* state, const ImGuiIO& io) {
     }
 }
 
-// Visual-only: pips at the corner + preview frame while resizing. Input
-// is handled by HandleResizeInput at the top of DrawUi.
 void DrawResizeGrip(const UiState* state) {
     const ImVec2 grip_min = GripMin(state);
     const ImVec2 grip_max = GripMax(state);
@@ -214,4 +167,4 @@ void DrawResizeGrip(const UiState* state) {
                     12.0f, 5.0f, 0);
     }
 }
-} // namespace aimgui
+}

@@ -15,8 +15,6 @@ namespace aimgui {
 
 namespace {
 
-// Push-constant payload shared by the blur (uses .dir) and composite
-// (uses .intensity) pipelines. Threshold pipeline ignores it.
 struct PushConsts {
     float dir_x;
     float dir_y;
@@ -185,9 +183,7 @@ bool CreateFullscreenPipeline(VkDevice device, VkRenderPass rp, VkPipelineLayout
     cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     if (blend) {
-        // Straight-alpha "over": RGB over dest, alpha = src + dst*(1-src).
-        // Mirrors the GL composite-over path so UI+bloom sits on top of the
-        // Live2D model already in the framebuffer.
+
         cba.blendEnable = VK_TRUE;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -250,7 +246,7 @@ void SetFullViewport(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
     vkCmdSetScissor(cmd, 0, 1, &sc);
 }
 
-} // namespace
+}
 
 bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool,
                    VkFormat fmt, uint32_t w, uint32_t h) {
@@ -262,7 +258,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
     m_BW = w / 2; m_BH = h / 2;
     if (m_BW < 16 || m_BH < 16) return false;
 
-    // Render passes.
     if (!CreateColorRenderPass(device, fmt, VK_ATTACHMENT_LOAD_OP_CLEAR, &m_SceneRP)) {
         LOGE("scene render pass"); Shutdown(); return false;
     }
@@ -270,7 +265,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("blur render pass"); Shutdown(); return false;
     }
 
-    // Images + views + framebuffers.
     if (!CreateImage2D(device, phys, fmt, m_W, m_H, &m_SceneImage, &m_SceneView, &m_SceneMem) ||
         !CreateFramebuffer(device, m_SceneRP, m_SceneView, m_W, m_H, &m_SceneFB)) {
         LOGE("scene image/FB"); Shutdown(); return false;
@@ -288,7 +282,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         }
     }
 
-    // Sampler.
     VkSamplerCreateInfo si{};
     si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     si.magFilter = VK_FILTER_LINEAR;
@@ -302,7 +295,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("sampler"); Shutdown(); return false;
     }
 
-    // Descriptor set layouts.
     VkDescriptorSetLayoutBinding b1{ 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                      1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
     VkDescriptorSetLayoutCreateInfo dli{};
@@ -323,7 +315,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("DSL2"); Shutdown(); return false;
     }
 
-    // Pipeline layouts.
     VkPushConstantRange pc{};
     pc.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pc.offset = 0;
@@ -343,7 +334,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("PLB"); Shutdown(); return false;
     }
 
-    // Shader modules.
     m_VS       = CreateShaderModule(device, bloom_vk_spv::kVS,           sizeof(bloom_vk_spv::kVS));
     m_FSThresh = CreateShaderModule(device, bloom_vk_spv::kFS_Threshold, sizeof(bloom_vk_spv::kFS_Threshold));
     m_FSBlur   = CreateShaderModule(device, bloom_vk_spv::kFS_Blur,      sizeof(bloom_vk_spv::kFS_Blur));
@@ -352,13 +342,11 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("shader modules"); Shutdown(); return false;
     }
 
-    // Pipelines for the blur RP.
     if (!CreateFullscreenPipeline(device, m_BlurRP, m_PLA, m_VS, m_FSThresh, &m_PipeThresh) ||
         !CreateFullscreenPipeline(device, m_BlurRP, m_PLA, m_VS, m_FSBlur,   &m_PipeBlur)) {
         LOGE("blur pipelines"); Shutdown(); return false;
     }
 
-    // Descriptor sets.
     VkDescriptorSetAllocateInfo dai{};
     dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = pool;
@@ -387,10 +375,7 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
 
 void BloomVK::RegisterImGuiSnapshot() {
     if (!m_Ready || m_PrevSceneView == VK_NULL_HANDLE) return;
-    // ImGui's Vulkan impl gives us a descriptor set bound to (view, layout)
-    // suitable for use as ImTextureID. Since ImGui v1.92.x the backend owns
-    // the sampler internally, so AddTexture no longer takes a VkSampler (our
-    // m_Sampler is still used directly for the bloom passes above).
+
     m_PrevSceneImGuiDS = ImGui_ImplVulkan_AddTexture(
         m_PrevSceneView,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -409,9 +394,9 @@ bool BloomVK::BindToSwapchainRenderPass(VkRenderPass swapchainRP) {
     if (!CreateFullscreenPipeline(m_Device, swapchainRP, m_PLB, m_VS, m_FSComp, &m_PipeComp)) {
         LOGE("composite pipeline"); return false;
     }
-    // Alpha-blended variant used when a Live2D model backdrop is present.
+
     if (!CreateFullscreenPipeline(m_Device, swapchainRP, m_PLB, m_VS, m_FSComp,
-                                  &m_PipeCompOver, /*blend=*/true)) {
+                                  &m_PipeCompOver, true)) {
         LOGE("composite-over pipeline"); return false;
     }
     return true;
@@ -420,9 +405,7 @@ bool BloomVK::BindToSwapchainRenderPass(VkRenderPass swapchainRP) {
 void BloomVK::SetModelBackground(VkImageView modelView) {
     if (!m_Ready || m_DSModelBg == VK_NULL_HANDLE) return;
     if (modelView == VK_NULL_HANDLE) return;
-    // The composite shader samples two bindings (scene, bloom); for the plain
-    // backdrop we bind the model image to both and draw with intensity 0, so
-    // the output is just the model colour with its own alpha.
+
     WriteSampledImage(m_Device, m_DSModelBg, 0, modelView, m_Sampler);
     WriteSampledImage(m_Device, m_DSModelBg, 1, modelView, m_Sampler);
 }
@@ -430,10 +413,10 @@ void BloomVK::SetModelBackground(VkImageView modelView) {
 void BloomVK::RecordModelBackground(VkCommandBuffer cmd) {
     if (!m_Ready || m_PipeComp == VK_NULL_HANDLE || m_DSModelBg == VK_NULL_HANDLE) return;
     SetFullViewport(cmd, m_W, m_H);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipeComp); // opaque write
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipeComp);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PLB, 0, 1, &m_DSModelBg, 0, nullptr);
     PushConsts pc{};
-    pc.intensity = 0.0f; // no bloom contribution — pure model colour
+    pc.intensity = 0.0f;
     vkCmdPushConstants(cmd, m_PLB, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
@@ -474,24 +457,12 @@ void BloomVK::EndSceneAndBlur(VkCommandBuffer cmd) {
         vkCmdEndRenderPass(cmd);
     };
 
-    // These five passes only produce the bloom term, which the composite
-    // scales by m_Intensity. At zero intensity the result is multiplied away,
-    // so skip them entirely — this makes the UI's bloom slider an actual
-    // performance switch rather than just a visual one.
-    //
-    // Only safe once the blur images have been written at least once: the
-    // composite samples blur[0] unconditionally, and the blur render pass is
-    // what moves those images out of UNDEFINED into SHADER_READ_ONLY_OPTIMAL.
-    // Sampling an UNDEFINED image is invalid usage, so the first pass through
-    // always runs even at zero intensity.
     if (m_Intensity <= 0.001f && m_BlurInitialized) return;
 
     PushConsts pc{};
 
-    // 1) threshold: scene -> blur[0]
     blur_pass(m_BlurFB[0], m_PipeThresh, m_DSThresh, pc);
 
-    // 2) Two iterations of separable Gaussian for a wider, softer glow.
     for (int iter = 0; iter < 2; ++iter) {
         pc.dir_x = 1.0f / (float)m_BW;
         pc.dir_y = 0.0f;
@@ -516,8 +487,6 @@ void BloomVK::RecordCompositeDraw(VkCommandBuffer cmd) {
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-// True at most once per snapshot interval; rate-limits the full-surface copy
-// below.
 bool BloomVK::SnapshotDue() {
     const auto now = std::chrono::steady_clock::now();
     if (now - m_LastSnapshot < std::chrono::milliseconds(200)) return false;
@@ -527,17 +496,10 @@ bool BloomVK::SnapshotDue() {
 
 void BloomVK::RecordSnapshotCopy(VkCommandBuffer cmd) {
     if (!m_Ready || m_PrevSceneImage == VK_NULL_HANDLE) return;
-    if (m_SnapshotFrozen) return; // keep serving the pre-dissolve snapshot
+    if (m_SnapshotFrozen) return;
 
-    // Full-surface vkCmdCopyImage — on a 1080x2400 phone the square surface
-    // makes that 2400*2400*4 = 23 MB. Recording it every frame burned ~2.7 GB/s
-    // of memory bandwidth continuously to serve a 1.2 s animation that plays
-    // once, at exit. Refresh at ~5 Hz instead; a snapshot up to 200 ms old is
-    // invisible mid-dissolve.
     if (!SnapshotDue()) return;
 
-    // scene image: SHADER_READ_ONLY (after RP) -> TRANSFER_SRC
-    // prev image:  SHADER_READ_ONLY (or UNDEFINED first time) -> TRANSFER_DST
     VkImageMemoryBarrier b[2]{};
     b[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     b[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -572,8 +534,6 @@ void BloomVK::RecordSnapshotCopy(VkCommandBuffer cmd) {
         m_PrevSceneImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1, &region);
 
-    // Transition both images back so the next frame's scene RP /
-    // fragment-shader sample finds them where they expect.
     b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     b[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -595,9 +555,6 @@ void BloomVK::RecordSnapshotCopy(VkCommandBuffer cmd) {
 void BloomVK::Shutdown() {
     if (m_Device == VK_NULL_HANDLE) return;
 
-    // Return descriptor sets to the pool so RebuildSwapchain doesn't slowly
-    // exhaust it. The pool was created with FREE_DESCRIPTOR_SET_BIT in
-    // renderer_vk.cpp.
     VkDescriptorSet sets[5]{ m_DSThresh, m_DSBlurH, m_DSBlurV, m_DSComp, m_DSModelBg };
     uint32_t n = 0;
     for (auto s : sets) if (s != VK_NULL_HANDLE) sets[n++] = s;
@@ -624,8 +581,7 @@ void BloomVK::Shutdown() {
     if (m_PrevSceneView)   vkDestroyImageView(m_Device, m_PrevSceneView, nullptr);
     if (m_PrevSceneImage)  vkDestroyImage(m_Device, m_PrevSceneImage, nullptr);
     if (m_PrevSceneMem)    vkFreeMemory(m_Device, m_PrevSceneMem, nullptr);
-    // m_PrevSceneImGuiDS is owned by imgui's pool; it'll be freed when
-    // ImGui_ImplVulkan_Shutdown tears that pool down.
+
     for (int i = 0; i < 2; ++i) {
         if (m_BlurFB[i])     vkDestroyFramebuffer(m_Device, m_BlurFB[i], nullptr);
         if (m_BlurView[i])   vkDestroyImageView(m_Device, m_BlurView[i], nullptr);
@@ -635,8 +591,7 @@ void BloomVK::Shutdown() {
     if (m_SceneRP)     vkDestroyRenderPass(m_Device, m_SceneRP, nullptr);
     if (m_BlurRP)      vkDestroyRenderPass(m_Device, m_BlurRP, nullptr);
 
-    // Descriptor sets are freed with the pool.
     *this = BloomVK();
 }
 
-} // namespace aimgui
+}

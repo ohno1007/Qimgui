@@ -7,10 +7,6 @@
 
 namespace aimgui {
 
-// MD3 ripples. TouchLastItem captures the tap position and rect of the item
-// just drawn if it was activated; DrawAll paints each as an expanding clipped
-// white tint on the foreground list, once a frame after everything that could
-// have recorded one.
 namespace ripple {
 
 namespace {
@@ -22,12 +18,11 @@ struct Entry {
     float   start;
 };
 std::vector<Entry> g_ripples;
-} // namespace
+}
 
 void TouchLastItem() {
     if (!ImGui::IsItemActivated()) return;
-    // Every rippling control is also every pressable control, so this is the
-    // one place a tap pulse belongs — adding it per widget would miss some.
+
     haptic::Tap();
     Entry e;
     e.id       = ImGui::GetItemID();
@@ -47,7 +42,7 @@ void DrawAll() {
         const float t = (now - it->start) / duration;
         if (t >= 1.0f) { it = v.erase(it); continue; }
 
-        const float ease   = 1.0f - (1.0f - t) * (1.0f - t); // quadratic ease-out
+        const float ease   = 1.0f - (1.0f - t) * (1.0f - t);
         const float dx     = it->rect_max.x - it->rect_min.x;
         const float dy     = it->rect_max.y - it->rect_min.y;
         const float max_r  = std::sqrt(dx * dx + dy * dy);
@@ -64,5 +59,5 @@ void DrawAll() {
     }
 }
 
-} // namespace ripple
-} // namespace aimgui
+}
+}

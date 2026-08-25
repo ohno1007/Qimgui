@@ -19,12 +19,11 @@ namespace aimgui::kbd_input {
 
 namespace {
 
-// ─── Linux KEY_* → ImGuiKey + ASCII mapping ───────────────────────────
 struct KeyMapping {
     int      linux_code;
     ImGuiKey imgui_key;
-    char     ascii;       // 0 if no plain ASCII character
-    char     ascii_shift; // 0 if no shifted character
+    char     ascii;
+    char     ascii_shift;
 };
 
 constexpr KeyMapping kMap[] = {
@@ -81,7 +80,6 @@ const KeyMapping* Lookup(int linux_code) {
     return nullptr;
 }
 
-// ─── Pending event queue ──────────────────────────────────────────────
 struct PendingEvent {
     enum Kind { Char, Key } kind;
     union {
@@ -98,7 +96,6 @@ std::vector<int>          g_fds;
 std::vector<std::thread>  g_threads;
 std::atomic<int>          g_volume_presses{0};
 
-// ─── Probe whether a /dev/input/eventX device looks like a keyboard ──
 bool LooksLikeKeyboard(int fd) {
     uint8_t bits[(KEY_MAX / 8) + 1] = {};
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) < 0) return false;
@@ -108,23 +105,16 @@ bool LooksLikeKeyboard(int fd) {
     int letters = 0;
     for (int k = KEY_A; k <= KEY_Z; ++k) if (has(k)) ++letters;
     if (letters >= 20) return true;
-    // Also accept the volume / power gpio-keys device — needed for the
-    // volume-key UI-toggle shortcut.
+
     if (has(KEY_VOLUMEUP) || has(KEY_VOLUMEDOWN)) return true;
     return false;
 }
 
-// ─── Reader thread ────────────────────────────────────────────────────
 void ReaderLoop(int fd) {
     bool shift = false;
     input_event ev[16];
     while (g_running.load(std::memory_order_relaxed)) {
-        // Sleep in poll() until the device actually has something to give.
-        // The fd is O_NONBLOCK, so without this the loop spun on EAGAIN and
-        // a 5 ms usleep — 200 wakeups/second, per matching input device,
-        // forever, with nothing happening. LooksLikeKeyboard() accepts every
-        // device exposing a volume key, so that was several threads' worth.
-        // The timeout only bounds how long Shutdown() takes to be noticed.
+
         struct pollfd pfd{};
         pfd.fd     = fd;
         pfd.events = POLLIN;
@@ -145,9 +135,8 @@ void ReaderLoop(int fd) {
         for (size_t i = 0; i < count; ++i) {
             if (ev[i].type != EV_KEY) continue;
             const bool down  = (ev[i].value != 0);
-            const bool press = (ev[i].value == 1); // not repeat (=2)
+            const bool press = (ev[i].value == 1);
 
-            // Volume keys → UI-visibility toggle (don't queue as text input).
             if (press && (ev[i].code == KEY_VOLUMEUP ||
                           ev[i].code == KEY_VOLUMEDOWN)) {
                 g_volume_presses.fetch_add(1, std::memory_order_relaxed);
@@ -177,7 +166,7 @@ void ReaderLoop(int fd) {
     }
 }
 
-} // namespace
+}
 
 void Init() {
     if (g_running.exchange(true)) return;
@@ -200,7 +189,7 @@ void Init() {
 void Shutdown() {
     g_running.store(false);
     for (int fd : g_fds) ::close(fd);
-    for (auto& t : g_threads) if (t.joinable()) t.detach(); // read() may be blocked
+    for (auto& t : g_threads) if (t.joinable()) t.detach();
     g_threads.clear();
     g_fds.clear();
     std::lock_guard<std::mutex> lk(g_mtx);
@@ -221,4 +210,4 @@ int ConsumeVolumePresses() {
     return g_volume_presses.exchange(0, std::memory_order_relaxed);
 }
 
-} // namespace aimgui::kbd_input
+}

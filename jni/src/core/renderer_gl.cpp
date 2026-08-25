@@ -57,17 +57,14 @@ public:
         if (m_Context == EGL_NO_CONTEXT || m_Surface == EGL_NO_SURFACE) return false;
         if (!eglMakeCurrent(m_Display, m_Surface, m_Surface, m_Context)) return false;
 
-        // Lock to vsync: the panel becomes the frame clock. eglSwapBuffers
-        // blocks until the next vblank, giving a flat FPS curve at the
-        // panel refresh rate with zero CPU spin.
         eglSwapInterval(m_Display, 1);
 
         glViewport(0, 0, width, height);
         glClearColor(0.f, 0.f, 0.f, 0.f);
 
         if (!ImGui_ImplOpenGL3_Init("#version 300 es")) return false;
-        m_Bloom.Init(width, height); // best-effort; renderer still works if it fails
-        m_Glass.Init();              // ditto
+        m_Bloom.Init(width, height);
+        m_Glass.Init();
         return true;
     }
 
@@ -83,9 +80,7 @@ public:
         OutlineText(ImGui::GetDrawData(), kTextOutlineRadius);
         if (m_Bloom.Ready()) {
             if (m_ScenePreDraw) {
-                // Draw the Live2D model as a background straight onto FB0 so it
-                // is NOT part of the bloomed scene; the UI+bloom composites over
-                // it. (BeginScene renders UI-only into the bloom scene FBO.)
+
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glViewport(0, 0, m_Width, m_Height);
                 glClearColor(0.f, 0.f, 0.f, 0.f);
@@ -109,7 +104,6 @@ public:
     }
 
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }
-
 
     void DrawGlass() {
         if (m_GlassCount > 0 && m_BackdropTex)
@@ -156,13 +150,6 @@ public:
         m_GlassW = displayW; m_GlassH = displayH;
     }
 
-    // Wraps one of the screen mirror's AHardwareBuffers as a texture via
-    // EGLImage. As on Vulkan there is no copy: the texture aliases the memory
-    // SurfaceFlinger composited into.
-    //
-    // Cached by buffer pointer — AImageReader cycles the same few buffers
-    // round-robin, and rebuilding an EGLImage per frame would mean creating and
-    // destroying one 120 times a second.
     unsigned long long ImportHardwareBuffer(AHardwareBuffer* ahb, int w, int h) override {
         (void)w; (void)h;
         if (!ahb) return 0;
@@ -207,9 +194,7 @@ public:
         if (m_BackdropTex == 0) {
             glGenTextures(1, &m_BackdropTex);
             glBindTexture(GL_TEXTURE_2D, m_BackdropTex);
-            // Linear + clamp: the capture is deliberately tiny and gets
-            // stretched over the window, so the bilinear filter is doing a
-            // lot of the smoothing for us.
+
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -236,8 +221,7 @@ private:
     EGLContext m_Context = EGL_NO_CONTEXT;
     int m_Width = 0;
     int m_Height = 0;
-    // One imported mirror buffer. Nothing here owns pixels — only the GL and
-    // EGL objects wrapping SurfaceFlinger's memory.
+
     struct AhbEntry {
         AHardwareBuffer* ahb = nullptr;
         EGLImageKHR      img = EGL_NO_IMAGE_KHR;
@@ -254,10 +238,10 @@ private:
     void (*m_ScenePreDraw)() = nullptr;
 };
 
-} // namespace
+}
 
 std::unique_ptr<IRenderer> MakeGLRenderer() {
     return std::unique_ptr<IRenderer>(new GLRenderer());
 }
 
-} // namespace aimgui
+}

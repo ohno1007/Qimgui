@@ -5,23 +5,15 @@
 
 namespace aimgui {
 
-// Refracts the live screen through a set of panes, for the Vulkan backend.
-// Compiled from jni/src/core/shaders/glass.{vert,frag} into glass_vk_spv.h;
-// the OpenGL backend carries an ES translation of the same fragment shader.
 class GlassVK {
 public:
-    // `colorFormat` and `renderPass` are the target being drawn into — the
-    // scene pass when bloom is active, otherwise the swapchain's.
+
     bool Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPass);
     void Shutdown();
     bool Ready() const { return m_Ready; }
 
-    // Points the sampler at the newest mirrored frame. Cheap to call per frame
-    // with an unchanged view; the descriptor is only rewritten when it moves.
     void SetScreenImage(VkImageView view);
 
-    // `screenW/H` is the visible display, which the panes sample against;
-    // `surfaceW/H` is the render target, which is the square surface.
     void Record(VkCommandBuffer cmd, int screenW, int screenH,
                 int surfaceW, int surfaceH,
                 const GlassRect* rects, int count);
@@ -41,4 +33,4 @@ private:
     VkImageView           m_ScreenView = VK_NULL_HANDLE;
 };
 
-} // namespace aimgui
+}

@@ -23,15 +23,6 @@ bool BitSet(const unsigned long* bits, int bit) {
     return (bits[bit / kPerLong] >> (bit % kPerLong)) & 1ul;
 }
 
-// First /dev/input node that advertises FF_RUMBLE *and* is named like a
-// vibrator.
-//
-// The name test is not fussiness. This walks every input node on the device,
-// which includes the touchscreen, and opening those read-write with a blocking
-// open is a good way to sit down next to a driver that does not expect it. So:
-// O_NONBLOCK, so the open cannot be the thing that hangs; and a name check, so
-// a panel that advertises feedback for its own haptics is not the one we grab
-// and hold open for the life of the process.
 int OpenRumbleDevice() {
     DIR* d = opendir("/dev/input");
     if (!d) return -1;
@@ -71,12 +62,11 @@ void WriteInt(int fd, int v) {
     if (fd < 0) return;
     char buf[24];
     const int n = std::snprintf(buf, sizeof(buf), "%d\n", v);
-    // Nothing useful to do if it fails, and this is feedback: dropping a buzz
-    // must never disturb the frame it happened on.
+
     (void)!write(fd, buf, (size_t)n);
 }
 
-} // namespace
+}
 
 bool Haptics::Init() {
     if ((m_Fd = OpenRumbleDevice()) >= 0) {
@@ -124,9 +114,7 @@ void Haptics::Pulse(int ms, float strength) {
 
     switch (m_Mode) {
     case Mode::Evdev: {
-        // The effect is re-uploaded under the same id rather than a new one
-        // each time: ids are a small fixed pool in the driver, and leaking one
-        // per tap runs it dry within a minute of ordinary use.
+
         ff_effect e{};
         e.type = FF_RUMBLE;
         e.id   = (int16_t)m_EffectId;
@@ -165,18 +153,15 @@ void Fire(int ms, float strength) {
     if (!g_dev || (g_on && !*g_on)) return;
     g_dev->Pulse(ms, strength);
 }
-} // namespace
+}
 
 void Install(Haptics* device, const bool* enabled) { g_dev = device; g_on = enabled; }
 
-// Deliberately short and unequal. A tap the same weight as a stage change tells
-// the hand nothing; what makes feedback legible is that the events feel unlike
-// one another, not that any of them is strong.
 void Tap()   { Fire(9,  0.42f); }
 void Step()  { Fire(18, 0.70f); }
 void Snap()  { Fire(12, 0.55f); }
 void Heavy() { Fire(34, 1.00f); }
 
-} // namespace haptic
+}
 
-} // namespace aimgui
+}

@@ -18,7 +18,6 @@ void main() {
 }
 )GLSL";
 
-// Extract pixels brighter than a soft luminance threshold.
 constexpr const char* kFSThreshold = R"GLSL(#version 300 es
 precision mediump float;
 uniform sampler2D uScene;
@@ -33,7 +32,6 @@ void main() {
 }
 )GLSL";
 
-// Separable 9-tap Gaussian (sigma ~ 2.5). uDir is one texel along the blur axis.
 constexpr const char* kFSBlur = R"GLSL(#version 300 es
 precision mediump float;
 uniform sampler2D uImage;
@@ -59,8 +57,6 @@ void main() {
 }
 )GLSL";
 
-// Additive composite: scene + bloom * intensity. Alpha is taken from scene
-// so the overlay window stays transparent where ImGui didn't draw.
 constexpr const char* kFSComposite = R"GLSL(#version 300 es
 precision mediump float;
 uniform sampler2D uScene;
@@ -120,7 +116,7 @@ bool MakeColorAttachment(GLuint fbo, GLuint tex, int w, int h) {
     return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
-} // namespace
+}
 
 bool BloomGL::Init(int width, int height) {
     m_Width  = width;
@@ -147,8 +143,6 @@ bool BloomGL::Init(int width, int height) {
         }
     }
 
-    // Snapshot texture (no FBO needed — it's only ever a copy target +
-    // sample source for the dissolve particles).
     glGenTextures(1, &m_PrevSceneTex);
     glBindTexture(GL_TEXTURE_2D, m_PrevSceneTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_Width, m_Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -219,22 +213,16 @@ void BloomGL::BeginScene() {
 void BloomGL::EndSceneAndComposite() {
     if (!m_Ready) return;
 
-    // Post passes own their pipeline state.
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_SCISSOR_TEST);
     glBindVertexArray(m_QuadVAO);
 
-    // The threshold + blur chain only feeds the bloom term, which the
-    // composite scales by uIntensity. At zero intensity its result is
-    // multiplied away, so skip all five passes and composite the scene
-    // alone — this is what makes the UI's bloom slider an actual
-    // performance switch rather than just a visual one.
     const bool bloom_on = m_Intensity > 0.001f;
 
     if (bloom_on) {
-        // 1) Threshold: scene (full res) -> blur[0] (half res)
+
         glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[0]);
         glViewport(0, 0, m_BlurW, m_BlurH);
         glUseProgram(m_ProgThreshold);
@@ -243,9 +231,8 @@ void BloomGL::EndSceneAndComposite() {
         glUniform1i(m_LocThreshScene, 0);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        // 2) Two iterations of H + V Gaussian for a wider, softer bloom.
         for (int iter = 0; iter < 2; ++iter) {
-            // Horizontal: blur[0] -> blur[1]
+
             glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[1]);
             glUseProgram(m_ProgBlur);
             glActiveTexture(GL_TEXTURE0);
@@ -254,7 +241,6 @@ void BloomGL::EndSceneAndComposite() {
             glUniform2f(m_LocBlurDir, 1.0f / (float)m_BlurW, 0.0f);
             glDrawArrays(GL_TRIANGLES, 0, 6);
 
-            // Vertical: blur[1] -> blur[0]
             glBindFramebuffer(GL_FRAMEBUFFER, m_BlurFBO[0]);
             glBindTexture(GL_TEXTURE_2D, m_BlurTex[1]);
             glUniform2f(m_LocBlurDir, 0.0f, 1.0f / (float)m_BlurH);
@@ -262,12 +248,10 @@ void BloomGL::EndSceneAndComposite() {
         }
     }
 
-    // 4) Composite scene + bloom into the default framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, m_Width, m_Height);
     if (m_OverDest) {
-        // Blend UI+bloom "over" the background (Live2D model) already in FB0,
-        // keeping straight alpha (RGB over, alpha = src + dst*(1-src)).
+
         glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
                             GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -291,16 +275,6 @@ void BloomGL::EndSceneAndComposite() {
     glActiveTexture(GL_TEXTURE0);
     if (m_OverDest) glDisable(GL_BLEND);
 
-    // Snapshot the just-rendered scene into m_PrevSceneTex so the dissolve
-    // particles can sample what the UI looked like before it came apart.
-    // Skipped while frozen so they keep sampling the pre-dissolve UI
-    // throughout the exit animation.
-    //
-    // This is a full-surface copy (on a 1080x2400 phone the square surface
-    // makes that 2400*2400*4 = 23 MB). Doing it every frame burned ~2.7 GB/s
-    // of memory bandwidth continuously to serve a 1.2 s animation that plays
-    // once, at exit. Refresh it at ~5 Hz instead: particles then sample a UI
-    // image up to 200 ms old, which is invisible mid-dissolve.
     if (!m_SnapshotFrozen && SnapshotDue()) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, m_SceneFBO);
         glBindTexture(GL_TEXTURE_2D, m_PrevSceneTex);
@@ -330,4 +304,4 @@ void BloomGL::Shutdown() {
     m_Ready = false;
 }
 
-} // namespace aimgui
+}

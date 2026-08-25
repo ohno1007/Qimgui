@@ -8,25 +8,18 @@
 
 namespace aimgui {
 
-// The exit animation: the window turns to dust and is carried off.
-//
-// Dust rather than falling shards, and the difference is where the energy
-// appears to come from — shards read as gravity acting on something solid,
-// dust as the thing ceasing to be solid at all. So gravity is weak and mostly
-// sideways, the particles are small and many, each shrinks as it goes, and they
-// leave in a wave from one corner rather than all at once.
 namespace dissolve {
 
 struct Particle {
     ImVec2 pos;
     ImVec2 vel;
     float  size;
-    float  delay;     // staggered so the cloud peels away rather than bursting
+    float  delay;
     float  spin;
     float  rot;
-    float  sway;      // phase of the lateral drift, so no two wander alike
-    ImVec2 uv0, uv1;  // patch of the snapshot this particle carries
-    ImU32  color;     // fallback if there is no snapshot to sample
+    float  sway;
+    ImVec2 uv0, uv1;
+    ImU32  color;
 };
 
 std::vector<Particle> g_parts;
@@ -46,8 +39,6 @@ void Begin(const ImVec2& origin, const ImVec2& size,
            float display_w, float display_h) {
     g_parts.clear();
 
-    // Particle size is fixed rather than scaled to the window: dust should look
-    // the same regardless of how big the thing that turned into it was.
     constexpr float kCell = 9.0f;
     const int nx = (int)(size.x / kCell) + 1;
     const int ny = (int)(size.y / kCell) + 1;
@@ -70,18 +61,10 @@ void Begin(const ImVec2& origin, const ImVec2& size,
             p.uv0  = ImVec2(x / display_w, y / display_h);
             p.uv1  = ImVec2((x + kCell) / display_w, (y + kCell) / display_h);
 
-            // The wave runs from the bottom-left to the top-right, so the
-            // window visibly comes apart in a direction instead of everywhere
-            // at once.
             const float u = (float)i / (float)nx;
             const float v = (float)j / (float)ny;
             p.delay = (u * 0.55f + (1.0f - v) * 0.45f) * 0.34f + Frand(0.0f, 0.05f);
 
-            // Outward from the centre in every direction, with a mild upward
-            // bias. Throwing everything upwards and letting gravity bring it
-            // back is what made this read as debris being tossed; dust leaves
-            // in the direction it happened to be facing and simply keeps
-            // going, slower and slower.
             const float cx = (x - (origin.x + size.x * 0.5f)) / (size.x * 0.5f);
             const float cy = (y - (origin.y + size.y * 0.5f)) / (size.y * 0.5f);
             const float spread = Frand(40.0f, 130.0f);
@@ -96,12 +79,8 @@ void Begin(const ImVec2& origin, const ImVec2& size,
     }
 }
 
-// Advance and draw. `t01` runs 0..1 over the animation; `snapshot_tex`, when
-// present, lets each particle carry the piece of UI it was cut from.
 void Step(float dt, float t01, ImTextureID snapshot_tex) {
-    // Barely there. Enough that the cloud settles rather than expanding
-    // forever, far too little to pull anything back down — the moment
-    // particles visibly fall, this stops being dust and becomes debris.
+
     constexpr float kGravity = 42.0f;
 
     ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -110,7 +89,7 @@ void Step(float dt, float t01, ImTextureID snapshot_tex) {
     for (auto& p : g_parts) {
         const float local = t01 - p.delay;
         if (local <= 0.0f) {
-            // Not yet gone: still part of the intact surface.
+
             if (snapshot_tex) {
                 const ImVec2 a(p.pos.x - p.size * 0.5f, p.pos.y - p.size * 0.5f);
                 const ImVec2 b(p.pos.x + p.size * 0.5f, p.pos.y + p.size * 0.5f);
@@ -128,21 +107,16 @@ void Step(float dt, float t01, ImTextureID snapshot_tex) {
         }
 
         p.vel.y += kGravity * dt;
-        // Heavy drag: particles shed most of their speed in the first moments
-        // and then hang, drifting. That deceleration is the whole read — it is
-        // what says the pieces are light enough for the air to hold them.
+
         const float drag = std::exp(-3.2f * dt);
         p.vel.x *= drag;
         p.vel.y *= drag;
-        // A slow lateral wander on top, each particle on its own phase, so the
-        // cloud keeps moving after it has stopped travelling.
+
         p.sway += dt * 1.7f;
         p.pos.x += (p.vel.x + std::sin(p.sway) * 22.0f) * dt;
         p.pos.y += (p.vel.y + std::cos(p.sway * 0.7f) * 9.0f) * dt;
         p.rot   += p.spin * dt;
 
-        // Shrink and fade together over the particle's own lifetime, so it
-        // thins out to nothing rather than blinking off at full size.
         const float life = local / 0.95f;
         if (life >= 1.0f) continue;
         const float fade = 1.0f - life;
@@ -179,5 +153,5 @@ void Step(float dt, float t01, ImTextureID snapshot_tex) {
     if (snapshot_tex) dl->PopTexture();
 }
 
-} // namespace dissolve
-} // namespace aimgui
+}
+}

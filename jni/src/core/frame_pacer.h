@@ -5,9 +5,6 @@
 
 namespace aimgui {
 
-// Drift-corrected frame pacer. SetTargetFps(0) means "use vsync" (Wait()
-// becomes a no-op); any positive target installs a fixed-period deadline
-// and sleep_until's the calling thread up to it.
 class FramePacer {
 public:
     void SetTargetFps(int fps) {
@@ -30,4 +27,4 @@ private:
     std::chrono::steady_clock::time_point m_NextDeadline{};
 };
 
-} // namespace aimgui
+}

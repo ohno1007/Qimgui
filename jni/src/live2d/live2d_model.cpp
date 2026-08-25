@@ -30,7 +30,7 @@ namespace aimgui {
 namespace live2d {
 
 namespace {
-// Read an entire file into a heap buffer allocated with the Cubism allocator.
+
 csmByte* ReadFile(const csmString& path, csmSizeInt* outSize) {
     std::FILE* fp = std::fopen(path.GetRawString(), "rb");
     if (!fp) { LOGW("open failed: %s", path.GetRawString()); return nullptr; }
@@ -49,7 +49,7 @@ csmByte* ReadFile(const csmString& path, csmSizeInt* outSize) {
     if (buf) *outSize = static_cast<csmSizeInt>(size);
     return buf;
 }
-} // namespace
+}
 
 Model::Model() : CubismUserModel() {}
 
@@ -106,30 +106,25 @@ void Model::SetupModel(ICubismModelSetting* setting) {
     csmSizeInt size = 0;
     csmByte* buf = nullptr;
 
-    // .moc3
     if (std::strlen(setting->GetModelFileName()) > 0) {
         buf = ReadModelFile(csmString(setting->GetModelFileName()), &size);
-        if (buf) { LoadModel(buf, size, /*shouldCheckMocConsistency=*/true); CSM_FREE(buf); }
+        if (buf) { LoadModel(buf, size, true); CSM_FREE(buf); }
     }
 
-    // physics
     if (std::strlen(setting->GetPhysicsFileName()) > 0) {
         buf = ReadModelFile(csmString(setting->GetPhysicsFileName()), &size);
         if (buf) { LoadPhysics(buf, size); CSM_FREE(buf); }
     }
 
-    // pose
     if (std::strlen(setting->GetPoseFileName()) > 0) {
         buf = ReadModelFile(csmString(setting->GetPoseFileName()), &size);
         if (buf) { LoadPose(buf, size); CSM_FREE(buf); }
     }
 
-    // eye blink
     if (setting->GetEyeBlinkParameterCount() > 0) {
         _eyeBlink = CubismEyeBlink::Create(setting);
     }
 
-    // breath
     _breath = CubismBreath::Create();
     csmVector<CubismBreath::BreathParameterData> breathParams;
     breathParams.PushBack(CubismBreath::BreathParameterData(
@@ -144,12 +139,10 @@ void Model::SetupModel(ICubismModelSetting* setting) {
         CubismFramework::GetIdManager()->GetId(ParamBreath), 0.5f, 0.5f, 3.2345f, 0.5f));
     _breath->SetParameters(breathParams);
 
-    // eye-blink target ids
     for (csmInt32 i = 0; i < setting->GetEyeBlinkParameterCount(); ++i) {
         _eyeBlinkIds.PushBack(setting->GetEyeBlinkParameterId(i));
     }
 
-    // lip-sync target ids (from the model3.json LipSync group)
     for (csmInt32 i = 0; i < setting->GetLipSyncParameterCount(); ++i) {
         _lipSyncIds.PushBack(setting->GetLipSyncParameterId(i));
     }
@@ -179,7 +172,7 @@ void Model::SetupTextures() {
             ok = LoadTextureVk(_ctx, path.GetRawString(), _textures[i]);
         }
         if (!ok) { LOGW("texture load failed: %s", name); continue; }
-        // Cubism appends textures in binding order.
+
         renderer->BindTexture(_textures[i]);
     }
     renderer->IsPremultipliedAlpha(true);
@@ -195,15 +188,12 @@ void Model::ReleaseTextures() {
 void Model::Update(float dt, float dragX, float dragY, float reaction, float lipRms) {
     if (!_loaded || _model == nullptr) return;
 
-    _model->LoadParameters();     // restore last frame's saved state
+    _model->LoadParameters();
     _model->SaveParameters();
 
     if (_eyeBlink) _eyeBlink->UpdateParameters(_model, dt);
     if (_breath)   _breath->UpdateParameters(_model, dt);
 
-    // Look-at: steer the head + eyes toward the tap point (added on top of the
-    // breath idle so it still breathes). Applied before physics so the hair /
-    // accessories swing in response.
     CubismIdManager* idm = CubismFramework::GetIdManager();
     _model->AddParameterValue(idm->GetId(ParamAngleX),     dragX * 30.0f);
     _model->AddParameterValue(idm->GetId(ParamAngleY),     dragY * 30.0f);
@@ -212,14 +202,12 @@ void Model::Update(float dt, float dragX, float dragY, float reaction, float lip
     _model->AddParameterValue(idm->GetId(ParamEyeBallX),   dragX);
     _model->AddParameterValue(idm->GetId(ParamEyeBallY),   dragY);
 
-    // Tap reaction: a quick decaying head wobble + tiny body sway.
     if (reaction > 0.0f) {
         float wobble = std::sin(reaction * 3.14159265f * 3.0f) * reaction;
         _model->AddParameterValue(idm->GetId(ParamAngleZ),     wobble * 25.0f);
         _model->AddParameterValue(idm->GetId(ParamBodyAngleX), wobble * 8.0f);
     }
 
-    // Lip-sync: open the mouth to the current voice amplitude.
     if (lipRms > 0.0f) {
         if (_lipSyncIds.GetSize() > 0) {
             for (csmUint32 i = 0; i < _lipSyncIds.GetSize(); ++i)
@@ -246,5 +234,5 @@ void Model::Draw(CubismMatrix44& matrix) {
     renderer->DrawModel();
 }
 
-} // namespace live2d
-} // namespace aimgui
+}
+}

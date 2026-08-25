@@ -22,13 +22,13 @@ namespace audio {
 namespace {
 
 struct Player {
-    std::mutex               mtx;         // guards start/stop transitions
-    std::vector<int16_t>     pcm;         // interleaved samples
+    std::mutex               mtx;
+    std::vector<int16_t>     pcm;
     int                      channels = 1;
     int                      rate     = 44100;
     AAudioStream*            stream   = nullptr;
     std::thread              worker;
-    std::atomic<size_t>      cursor{0};   // frames written so far
+    std::atomic<size_t>      cursor{0};
     std::atomic<size_t>      frames{0};
     std::atomic<bool>        playing{false};
     std::atomic<bool>        stopReq{false};
@@ -40,7 +40,6 @@ struct Player {
 
 Player g_p;
 
-// Parse a little-endian 16-bit PCM WAV. Fills pcm/channels/rate.
 bool ParseWav(const uint8_t* d, size_t n, std::vector<int16_t>& out,
               int& channels, int& rate) {
     if (n < 44 || std::memcmp(d, "RIFF", 4) != 0 || std::memcmp(d + 8, "WAVE", 4) != 0)
@@ -65,7 +64,7 @@ bool ParseWav(const uint8_t* d, size_t n, std::vector<int16_t>& out,
         } else if (std::memcmp(id, "data", 4) == 0) {
             data = body; dataLen = sz;
         }
-        p += 8 + sz + (sz & 1);  // chunks are word-aligned
+        p += 8 + sz + (sz & 1);
     }
     if (fmt != 1 || bits != 16 || ch < 1 || sr < 8000 || !data || dataLen < 2) {
         LOGW("unsupported WAV (fmt=%d bits=%d ch=%d sr=%d)", fmt, bits, ch, sr);
@@ -78,7 +77,7 @@ bool ParseWav(const uint8_t* d, size_t n, std::vector<int16_t>& out,
     return true;
 }
 
-} // namespace
+}
 
 bool Playing() { return g_p.playing.load(); }
 
@@ -88,20 +87,20 @@ float Rms() {
     size_t total = g_p.frames.load();
     if (total == 0 || c >= total) return 0.0f;
     int ch = g_p.channels;
-    // A short window around the play cursor.
-    size_t win = (size_t)(g_p.rate / 40);          // ~25 ms
+
+    size_t win = (size_t)(g_p.rate / 40);
     if (win < 64) win = 64;
     size_t start = c > win ? c - win : 0;
     size_t end = c;
     double acc = 0.0; size_t cnt = 0;
     for (size_t f = start; f < end; ++f) {
-        int32_t s = g_p.pcm[f * ch];               // channel 0 is enough
+        int32_t s = g_p.pcm[f * ch];
         acc += (double)s * (double)s;
         ++cnt;
     }
     if (cnt == 0) return 0.0f;
     float rms = (float)std::sqrt(acc / (double)cnt) / 32768.0f;
-    // Perceptual boost: speech RMS is low; scale + clamp for a lively mouth.
+
     float v = rms * 3.0f;
     return v > 1.0f ? 1.0f : v;
 }
@@ -138,7 +137,7 @@ bool PlayMemory(const void* wav, unsigned long size) {
     if (!ParseWav(static_cast<const uint8_t*>(wav), (size_t)size, pcm, ch, rate))
         return false;
 
-    Stop();  // stop any current clip
+    Stop();
 
     std::lock_guard<std::mutex> lk(g_p.mtx);
     g_p.pcm = std::move(pcm);
@@ -171,7 +170,7 @@ bool PlayMemory(const void* wav, unsigned long size) {
         while (!g_p.stopReq.load() && i < total) {
             int n = (int)((total - i) < (size_t)block ? (total - i) : (size_t)block);
             aaudio_result_t w = AAudioStream_write(st, &g_p.pcm[i * ch], n,
-                                                   200LL * 1000 * 1000); // 200ms
+                                                   200LL * 1000 * 1000);
             if (w < 0) break;
             i += (w > 0 ? (size_t)w : (size_t)n);
             g_p.cursor.store(i);
@@ -181,6 +180,6 @@ bool PlayMemory(const void* wav, unsigned long size) {
     return true;
 }
 
-} // namespace audio
-} // namespace live2d
-} // namespace aimgui
+}
+}
+}

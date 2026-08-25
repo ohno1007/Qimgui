@@ -30,18 +30,16 @@ Live2DVkContext g_ctx{};
 int            g_width = 1;
 int            g_height = 1;
 
-// The character is only shown as the collapsed floating "ball": it lives at a
-// draggable screen position and fades out as the window expands.
-float          g_expandT   = 0.0f;   // 0 = ball shown, 1 = window (no model)
-float          g_ballX = 140.0f, g_ballY = 260.0f;  // ball centre (screen px)
-float          g_ballScale = 1.0f;                  // UI size multiplier
-float          g_lookX = 0, g_lookY = 0;   // gaze target (screen px)
+float          g_expandT   = 0.0f;
+float          g_ballX = 140.0f, g_ballY = 260.0f;
+float          g_ballScale = 1.0f;
+float          g_lookX = 0, g_lookY = 0;
 bool           g_lookActive = false;
-float          g_dragX = 0, g_dragY = 0;    // smoothed gaze in [-1,1]
-float          g_reaction = 0.0f;           // seconds of tap-reaction left
+float          g_dragX = 0, g_dragY = 0;
+float          g_reaction = 0.0f;
 
 constexpr float kReactionDur = 0.6f;
-constexpr float kBallPx      = 200.0f;  // on-screen model height (the ball)
+constexpr float kBallPx      = 200.0f;
 
 inline float ClampF(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -50,10 +48,8 @@ inline float SmoothStep(float e0, float e1, float x) {
     float u = ClampF((x - e0) / (e1 - e0), 0.0f, 1.0f);
     return u * u * (3.0f - 2.0f * u);
 }
-} // namespace
+}
 
-// The Cubism Vulkan renderer loads its compiled SPIR-V by relative path; the
-// SDK is patched to call this, serving the embedded blobs by basename.
 extern "C" const unsigned char* aimgui_l2d_load_asset(const char* path, unsigned* outSize) {
     const char* base = path;
     if (const char* slash = std::strrchr(path, '/')) base = slash + 1;
@@ -75,8 +71,6 @@ bool VkInit(const Live2DVkContext* ctx) {
     CubismFramework::StartUp(&g_allocator, &g_option);
     CubismFramework::Initialize();
 
-    // One-time renderer configuration, before any model is created. The model
-    // is rendered into an offscreen image that the UI composites over.
     Rendering::CubismRenderer_Vulkan::SetConstantSettings(
         g_ctx.device, g_ctx.physicalDevice, g_ctx.commandPool, g_ctx.queue,
         g_ctx.imageCount, g_ctx.extent, g_ctx.modelView, g_ctx.colorFormat,
@@ -91,7 +85,7 @@ bool LoadModel(const char* dir, const char* model3json) {
     if (!g_started) return false;
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(g_ctx, dir, model3json, g_width, g_height, /*embedded=*/false)) {
+    if (!g_model->LoadAssets(g_ctx, dir, model3json, g_width, g_height, false)) {
         delete g_model;
         g_model = nullptr;
         return false;
@@ -102,10 +96,10 @@ bool LoadModel(const char* dir, const char* model3json) {
 bool LoadEmbedded() {
     if (!g_started) return false;
     const char* m3 = EmbeddedFindModel3();
-    if (!m3) return false;  // no model compiled in — fall back to disk
+    if (!m3) return false;
     delete g_model;
     g_model = new Model();
-    if (!g_model->LoadAssets(g_ctx, nullptr, m3, g_width, g_height, /*embedded=*/true)) {
+    if (!g_model->LoadAssets(g_ctx, nullptr, m3, g_width, g_height, true)) {
         delete g_model;
         g_model = nullptr;
         return false;
@@ -116,7 +110,7 @@ bool LoadEmbedded() {
 bool IsLoaded() { return g_model && g_model->Loaded(); }
 
 namespace {
-// First "*.model3.json" directly inside `dir`, or "" if none.
+
 std::string FindModel3(const std::string& dir) {
     DIR* d = opendir(dir.c_str());
     if (!d) return "";
@@ -128,7 +122,7 @@ std::string FindModel3(const std::string& dir) {
     closedir(d);
     return found;
 }
-} // namespace
+}
 
 bool AutoLoad(const char* root) {
     std::string j = FindModel3(root);
@@ -158,8 +152,6 @@ void SetLookScreen(float x, float y, bool active) {
     g_lookX = x; g_lookY = y; g_lookActive = active;
 }
 
-// Play a voice line. Disk clips in /data/local/tmp/live2d_voice/*.wav override
-// (rotating through them); otherwise the voice embedded in the binary is used.
 void Speak() {
     std::vector<std::string> wavs;
     if (DIR* d = opendir("/data/local/tmp/live2d_voice")) {
@@ -192,13 +184,13 @@ bool HitCollapsed(float x, float y) {
 }
 
 void Update(float dt) {
-    // Ease the gaze toward the tap point (or back to centre when inactive).
+
     float tx = 0.0f, ty = 0.0f;
     if (g_lookActive) {
         float range = 0.35f * (g_width < g_height ? g_width : g_height);
         if (range < 1.0f) range = 1.0f;
         tx = ClampF((g_lookX - g_ballX) / range, -1.0f, 1.0f);
-        ty = ClampF((g_ballY - g_lookY) / range, -1.0f, 1.0f);  // screen y is down
+        ty = ClampF((g_ballY - g_lookY) / range, -1.0f, 1.0f);
     }
     float k = ClampF(dt * 8.0f, 0.0f, 1.0f);
     g_dragX += (tx - g_dragX) * k;
@@ -212,23 +204,17 @@ void Update(float dt) {
 void Draw() {
     if (!g_model || !g_model->Loaded()) return;
 
-    // Point the (static) Cubism renderer at our offscreen model image each
-    // frame (SetRenderTarget mutates shared global state).
     Rendering::CubismRenderer_Vulkan::SetRenderTarget(
         g_ctx.modelImage, g_ctx.modelView, g_ctx.colorFormat, g_ctx.extent);
 
-    // The model image is a square (side × side); Cubism's VK vertex shader
-    // flips Y, so the GL-style projection renders upright. The character sits
-    // at the draggable ball position and shrinks away as the window expands
-    // (Cubism clears the target each frame, so at ~0 scale it reads empty).
     float side = static_cast<float>(g_ctx.extent.width > g_ctx.extent.height
                                         ? g_ctx.extent.width : g_ctx.extent.height);
     if (side <= 0.0f) side = 1.0f;
 
-    float fade = 1.0f - SmoothStep(0.0f, 0.6f, g_expandT);  // 1 collapsed → 0 open
+    float fade = 1.0f - SmoothStep(0.0f, 0.6f, g_expandT);
     float s = (kBallPx * g_ballScale * (fade > 0.001f ? fade : 0.001f)) / side;
 
-    float react01 = g_reaction / kReactionDur;             // tap "pop"
+    float react01 = g_reaction / kReactionDur;
     if (react01 > 0.0f) s *= 1.0f + 0.18f * std::sin((1.0f - react01) * 3.14159265f);
 
     float cx = 2.0f * g_ballX / side - 1.0f;
@@ -242,7 +228,7 @@ void Draw() {
 
 void Shutdown() {
     audio::Stop();
-    // Make sure the GPU is done with the model's textures before they free.
+
     if (g_started && g_ctx.device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_ctx.device);
     delete g_model;
     g_model = nullptr;
@@ -252,5 +238,5 @@ void Shutdown() {
     }
 }
 
-} // namespace live2d
-} // namespace aimgui
+}
+}

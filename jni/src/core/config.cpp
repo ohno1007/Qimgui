@@ -1,6 +1,6 @@
 #include "config.h"
 
-#include "ui/main_ui.h"   // kPagesCount, to keep a saved page in range
+#include "ui/main_ui.h"
 #include "ui/ui.h"
 
 #include <android/log.h>
@@ -16,9 +16,6 @@ namespace {
 
 constexpr const char* kPath = "/data/local/tmp/aimgui.conf";
 
-// The persisted set, in one place. Everything reads and writes through this
-// table, so adding a setting is one row rather than three edits that can drift
-// apart — a key saved but never loaded is silent and easy to miss.
 enum class Kind { Int, Float, Bool };
 
 struct Field {
@@ -41,9 +38,6 @@ const Field kFields[] = {
     F(ball_scale,       Kind::Float),
 };
 #undef F
-
-// last_full_pos / last_full_size are ImVec2 and do not fit the table, so they
-// are handled by hand below rather than bent into it.
 
 char* At(UiState* s, size_t off) { return reinterpret_cast<char*>(s) + off; }
 const char* At(const UiState* s, size_t off) {
@@ -88,7 +82,7 @@ void Remember(const UiState* s) {
     g_saved.valid = true;
 }
 
-} // namespace
+}
 
 const char* Path() { return kPath; }
 
@@ -129,25 +123,17 @@ void Load(UiState* state) {
     }
     std::fclose(f);
 
-    // A size below what the window can actually be constrained to would leave
-    // it stuck at a size it cannot represent, and a stage outside the enum is
-    // read straight into an array-free switch that would simply do nothing.
     if (state->last_full_size.x < 700.0f) state->last_full_size.x = 700.0f;
     if (state->last_full_size.y < 560.0f) state->last_full_size.y = 560.0f;
     if (state->stage < UiState::StageIsland) state->stage = UiState::StageIsland;
     if (state->stage > UiState::StageWindow) state->stage = UiState::StageWindow;
-    // A page index the enum does not cover draws nothing at all, which reads as
-    // a broken window rather than a bad setting.
+
     if (state->nav_page < 0 || state->nav_page >= kPagesCount) state->nav_page = 0;
-    // The spring has to start where the stage says, or the window plays its
-    // whole opening animation every launch.
+
     state->expand = (float)state->stage * 0.5f;
 
     Remember(state);
-    // Spelled out because these now decide what happens before the first frame
-    // — the mirror and the anti-record flag in particular change how the
-    // surface is built and what it talks to. If startup ever wedges, this line
-    // says which settings it wedged with, and deleting the file is the way out.
+
     LOGI("[config] loaded %s: mirror=%d permeate=%d fps=%d stage=%d page=%d haptics=%d",
          kPath, state->screen_mirror ? 1 : 0, state->permeate_record ? 1 : 0,
          state->target_fps, state->stage, state->nav_page,
@@ -155,8 +141,7 @@ void Load(UiState* state) {
 }
 
 void Save(const UiState* state) {
-    // Written whole and replaced, so a kill part-way through leaves the old
-    // file rather than half of the new one.
+
     char tmp[128];
     std::snprintf(tmp, sizeof(tmp), "%s.tmp", kPath);
     FILE* f = std::fopen(tmp, "w");
@@ -182,5 +167,5 @@ void Save(const UiState* state) {
 
 bool Dirty(const UiState* state) { return !SameAsSaved(state); }
 
-} // namespace config
-} // namespace aimgui
+}
+}

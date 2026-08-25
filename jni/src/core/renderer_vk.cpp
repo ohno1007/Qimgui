@@ -10,8 +10,7 @@
 #ifdef AIMGUI_LIVE2D
 #include "live2d_vk_bridge.h"
 #include <cstring>
-// Registers the device with the dynamic-rendering shim (see
-// vk_dynamic_rendering_shim.cpp) so vkCmdBeginRendering/EndRendering resolve.
+
 extern "C" void aimgui_vk_set_device(VkDevice);
 #endif
 
@@ -63,15 +62,12 @@ public:
         if (!CreateDescriptorPool()) return false;
         if (!CreateSurfaceAndSwapchain()) return false;
 #ifdef AIMGUI_LIVE2D
-        // Command pool + offscreen image the Cubism renderer draws the model
-        // into, plus the context struct handed to the Live2D layer.
+
         if (!CreateLive2DResources()) {
             LOGE("Live2D VK resources failed");
         }
 #endif
 
-        // Try to set up the bloom pipeline. If it fails for any reason the
-        // renderer falls back to direct-to-swapchain ImGui rendering.
         if (m_Bloom.Init(m_Device, m_PhysicalDevice, m_DescPool,
                          m_WD->SurfaceFormat.format, m_Width, m_Height)) {
             if (!m_Bloom.BindToSwapchainRenderPass(m_WD->RenderPass)) {
@@ -89,8 +85,6 @@ public:
 
         SetupImGuiBackend();
 
-        // Now that ImGui's Vulkan impl has its descriptor pool wired up,
-        // hand it the prev-scene image so dissolve particles sample real UI.
         if (m_Bloom.Ready()) m_Bloom.RegisterImGuiSnapshot();
 
         return true;
@@ -144,14 +138,6 @@ public:
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
 
-    // Imports one of the screen mirror's AHardwareBuffers as a sampled image
-    // and returns an ImTextureID for it. No copy: the VkImage is backed by the
-    // very memory SurfaceFlinger composited into.
-    //
-    // AImageReader hands the same handful of buffers back round-robin, so
-    // imports are cached by buffer pointer — re-importing per frame would mean
-    // creating and destroying an image, a memory allocation and a descriptor
-    // set 120 times a second.
     void SetGlassRects(const GlassRect* rects, int count,
                        int displayW, int displayH) override {
         m_GlassRects = rects;
@@ -163,7 +149,7 @@ public:
         if (!ahb || m_Device == VK_NULL_HANDLE) return 0;
         for (const auto& e : m_AhbCache)
             if (e.ahb == ahb) { m_ScreenView = e.view; return (unsigned long long)(uintptr_t)e.ds; }
-        if (m_AhbCache.size() >= 8) return 0;   // reader cycles far fewer than this
+        if (m_AhbCache.size() >= 8) return 0;
 
         auto getProps = (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
             vkGetDeviceProcAddr(m_Device, "vkGetAndroidHardwareBufferPropertiesANDROID");
@@ -176,9 +162,6 @@ public:
         props.pNext = &fmtProps;
         if (getProps(m_Device, ahb, &props) != VK_SUCCESS) return 0;
 
-        // The mirror allocates RGBA_8888, so Vulkan reports a real format and
-        // no external-format/ycbcr sampler is needed. Bail rather than guess if
-        // that ever stops being true.
         if (fmtProps.format == VK_FORMAT_UNDEFINED) return 0;
 
         VkExternalMemoryImageCreateInfo extImg{};
@@ -268,8 +251,7 @@ private:
         ai.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         ai.pApplicationName = "AImGui";
 #ifdef AIMGUI_LIVE2D
-        // Cubism's Vulkan renderer uses dynamic rendering + synchronization2 +
-        // extended dynamic state, all core in Vulkan 1.3.
+
         ai.apiVersion = VK_MAKE_VERSION(1, 3, 0);
 #else
         ai.apiVersion = VK_MAKE_VERSION(1, 1, 0);
@@ -324,20 +306,12 @@ private:
         dci.pQueueCreateInfos = &qci;
 
 #ifdef AIMGUI_LIVE2D
-        // Cubism's Vulkan renderer records vkCmdBeginRendering (dynamic
-        // rendering) and vkCmdSetCullModeEXT (extended dynamic state), and its
-        // texture sampler enables anisotropy. Enable the matching device
-        // extensions + features. All are core in 1.3 but the renderer resolves
-        // the *EXT alias, so the extension must be enabled too.
+
         const char* dext[] = {
             "VK_KHR_swapchain",
             "VK_KHR_dynamic_rendering",
             "VK_EXT_extended_dynamic_state",
-            // Importing the screen mirror's AHardwareBuffers as textures.
-            // VK_ANDROID_external_memory_android_hardware_buffer pulls in
-            // external-memory and ycbcr-conversion as dependencies, so they
-            // have to be listed even though the mirror's RGBA_8888 buffers
-            // never need a ycbcr sampler.
+
             "VK_KHR_external_memory",
             "VK_ANDROID_external_memory_android_hardware_buffer",
             "VK_EXT_queue_family_foreign",
@@ -367,11 +341,7 @@ private:
 #else
         const char* dext[] = {
             "VK_KHR_swapchain",
-            // Importing the screen mirror's AHardwareBuffers as textures.
-            // VK_ANDROID_external_memory_android_hardware_buffer pulls in
-            // external-memory and ycbcr-conversion as dependencies, so they
-            // have to be listed even though the mirror's RGBA_8888 buffers
-            // never need a ycbcr sampler.
+
             "VK_KHR_external_memory",
             "VK_ANDROID_external_memory_android_hardware_buffer",
             "VK_EXT_queue_family_foreign",
@@ -425,11 +395,6 @@ private:
         m_WD->SurfaceFormat = ImGui_ImplVulkanH_SelectSurfaceFormat(
             m_PhysicalDevice, surface, fmts, IM_ARRAYSIZE(fmts), VK_COLORSPACE_SRGB_NONLINEAR_KHR);
 
-        // FIFO is hard vsync — the panel's vblank becomes our frame clock,
-        // giving a flat refresh-rate-bound FPS without any CPU spin (the
-        // wait happens inside vkAcquireNextImageKHR as the OS schedules us
-        // off the CPU between frames). For target rates below the panel
-        // refresh, main.cpp's drift-corrected sleep_until adds the gap.
         VkPresentModeKHR modes[] = { VK_PRESENT_MODE_FIFO_KHR };
         m_WD->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
             m_PhysicalDevice, surface, modes, IM_ARRAYSIZE(modes));
@@ -449,8 +414,7 @@ private:
         ii.QueueFamily = m_QueueFamily;
         ii.Queue = m_Queue;
         ii.DescriptorPool = m_DescPool;
-        // ImGui renders into the offscreen scene pass when bloom is wired up;
-        // otherwise it draws straight into the swapchain.
+
         ii.PipelineInfoMain.RenderPass = m_Bloom.Ready() ? m_Bloom.GetSceneRenderPass()
                                                         : m_WD->RenderPass;
         ii.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
@@ -473,9 +437,6 @@ private:
             m_WD->FrameIndex = 0;
             m_Width = w; m_Height = h;
 
-            // Tear down and rebuild bloom against the new dimensions and
-            // swapchain render pass. If anything fails we fall back to the
-            // direct-to-swapchain path automatically.
             if (m_Bloom.Ready()) {
                 m_Bloom.Shutdown();
                 if (m_Bloom.Init(m_Device, m_PhysicalDevice, m_DescPool,
@@ -507,10 +468,7 @@ private:
     void Submit(ImDrawData* draw) {
         VkResult err;
 #ifdef AIMGUI_LIVE2D
-        // Render the Live2D model into its offscreen image first. The Cubism
-        // renderer self-submits to the graphics queue and waits idle, so this
-        // must run before we begin recording this frame's command buffer. When
-        // it returns the model image is in SHADER_READ_ONLY_OPTIMAL.
+
         bool haveModel = (m_ScenePreDraw != nullptr) && m_Bloom.Ready();
         if (m_ScenePreDraw) m_ScenePreDraw();
         m_Bloom.SetCompositeOverDest(haveModel);
@@ -531,9 +489,7 @@ private:
         vkBeginCommandBuffer(fd->CommandBuffer, &bi);
 
         if (m_Bloom.Ready()) {
-            // ImGui draws into the offscreen scene image, then threshold +
-            // separable Gaussian blur populate the bloom image, and the
-            // composite pass writes scene + bloom into the swapchain.
+
             m_Bloom.BeginScene(fd->CommandBuffer);
             RecordGlass(fd->CommandBuffer);
             ImGui_ImplVulkan_RenderDrawData(draw, fd->CommandBuffer);
@@ -549,16 +505,12 @@ private:
             rpi.pClearValues = &m_WD->ClearValue;
             vkCmdBeginRenderPass(fd->CommandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
 #ifdef AIMGUI_LIVE2D
-            // Draw the (un-bloomed) model as the backdrop, then blend UI+bloom
-            // over it. RecordCompositeDraw picks the alpha-blended pipeline
-            // because SetCompositeOverDest(true) was set above.
+
             if (haveModel) m_Bloom.RecordModelBackground(fd->CommandBuffer);
 #endif
             m_Bloom.RecordCompositeDraw(fd->CommandBuffer);
             vkCmdEndRenderPass(fd->CommandBuffer);
 
-            // Stash a copy of the just-rendered scene for next frame's
-            // dissolve particles to sample.
             m_Bloom.RecordSnapshotCopy(fd->CommandBuffer);
         } else {
             VkRenderPassBeginInfo rpi{};
@@ -626,8 +578,7 @@ private:
     }
 
     bool CreateLive2DResources() {
-        // Dedicated command pool for Cubism (RESET flag: it re-records its
-        // persistent update/draw command buffers every frame).
+
         VkCommandPoolCreateInfo pci{};
         pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -636,8 +587,6 @@ private:
 
         m_DepthFormat = SelectDepthFormat();
 
-        // Offscreen colour image the model is rendered into, then sampled as
-        // the UI backdrop. Same size as the (square) surface.
         VkFormat fmt = m_WD->SurfaceFormat.format;
         VkImageCreateInfo ic{};
         ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -671,8 +620,6 @@ private:
         vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         if (vkCreateImageView(m_Device, &vci, nullptr, &m_ModelView) != VK_SUCCESS) return false;
 
-        // Clear it to transparent and leave it SHADER_READ_ONLY so it is
-        // sampleable even before the first model draw (or if none loads).
         ClearModelImageToTransparent();
         FillLive2DContext();
         return true;
@@ -757,8 +704,6 @@ private:
     Live2DVkContext m_L2DCtx;
 #endif
 
-    // One imported mirror buffer: the VkImage aliases SurfaceFlinger's memory,
-    // so nothing here owns pixels — only the Vulkan objects wrapping them.
     struct AhbEntry {
         AHardwareBuffer* ahb   = nullptr;
         VkImage          image = VK_NULL_HANDLE;
@@ -767,7 +712,7 @@ private:
         VkDescriptorSet  ds    = VK_NULL_HANDLE;
     };
     std::vector<AhbEntry> m_AhbCache;
-    VkImageView           m_ScreenView = VK_NULL_HANDLE;  // newest mirrored frame
+    VkImageView           m_ScreenView = VK_NULL_HANDLE;
     GlassVK               m_Glass;
     const GlassRect*      m_GlassRects = nullptr;
     int                   m_GlassCount = 0;
@@ -789,10 +734,10 @@ private:
     void (*m_ScenePreDraw)() = nullptr;
 };
 
-} // namespace
+}
 
 std::unique_ptr<IRenderer> MakeVKRenderer() {
     return std::unique_ptr<IRenderer>(new VKRenderer());
 }
 
-} // namespace aimgui
+}

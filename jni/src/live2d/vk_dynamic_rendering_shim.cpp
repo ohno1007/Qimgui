@@ -1,12 +1,3 @@
-// Android's libvulkan.so stub only exports Vulkan 1.0/1.1 core commands for
-// static linking; 1.3 commands like vkCmdBeginRendering/vkCmdEndRendering must
-// be resolved at runtime via vkGetDeviceProcAddr. Cubism's Vulkan renderer
-// calls them as plain prototypes, which fails to link on Android.
-//
-// Provide the missing symbols here: each lazily resolves the real entry point
-// (core name first, KHR alias as a fallback for 1.1/1.2 devices that enable
-// VK_KHR_dynamic_rendering) and forwards to it. renderer_vk registers the
-// device via aimgui_vk_set_device() right after creating it.
 #include <vulkan/vulkan.h>
 
 extern "C" {
@@ -39,4 +30,4 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
     g_pEnd(commandBuffer);
 }
 
-} // extern "C"
+}

@@ -6,9 +6,6 @@ struct ANativeWindow;
 
 namespace aimgui {
 
-// Owns the (ANativeWindow, IRenderer) pair. Rebuild() tears down and
-// recreates both — used when toggling permeate_record (which needs a fresh
-// SurfaceFlinger layer) so the main loop doesn't have to know the order.
 class WindowSession {
 public:
     ~WindowSession() { Destroy(); }
@@ -21,4 +18,4 @@ private:
     std::unique_ptr<IRenderer> m_Renderer;
 };
 
-} // namespace aimgui
+}

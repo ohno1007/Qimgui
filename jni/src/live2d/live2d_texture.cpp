@@ -18,10 +18,9 @@ namespace live2d {
 
 namespace {
 
-// Decode an AImageDecoder into a tightly-packed RGBA8 buffer.
 bool DecodeRGBA(AImageDecoder* decoder, std::vector<unsigned char>& out, int& w, int& h) {
     AImageDecoder_setAndroidBitmapFormat(decoder, ANDROID_BITMAP_FORMAT_RGBA_8888);
-    // Premultiplied alpha (Cubism uses IsPremultipliedAlpha(true)).
+
     AImageDecoder_setUnpremultipliedRequired(decoder, false);
 
     const AImageDecoderHeaderInfo* info = AImageDecoder_getHeaderInfo(decoder);
@@ -36,7 +35,6 @@ bool DecodeRGBA(AImageDecoder* decoder, std::vector<unsigned char>& out, int& w,
         return false;
     }
 
-    // Repack to a tight w*4 stride for vkCmdCopyBufferToImage.
     const size_t tight = static_cast<size_t>(w) * 4;
     out.resize(tight * static_cast<size_t>(h));
     for (int y = 0; y < h; ++y)
@@ -44,7 +42,6 @@ bool DecodeRGBA(AImageDecoder* decoder, std::vector<unsigned char>& out, int& w,
     return true;
 }
 
-// Transition a single mip level of an image.
 void BarrierLevel(VkCommandBuffer cb, VkImage img, uint32_t level,
                   VkImageLayout oldL, VkImageLayout newL,
                   VkAccessFlags src, VkAccessFlags dst,
@@ -59,16 +56,13 @@ void BarrierLevel(VkCommandBuffer cb, VkImage img, uint32_t level,
     vkCmdPipelineBarrier(cb, srcS, dstS, 0, 0, nullptr, 0, nullptr, 1, &b);
 }
 
-// Upload a tightly-packed RGBA8 buffer into a sampled, mipmapped Vulkan image.
-// Mipmaps matter: the model is drawn small (the floating "ball"), so 2K source
-// textures must minify through a mip chain or they alias / look fuzzy.
 bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
             int w, int h, CubismImageVulkan& out) {
     const VkDeviceSize size = static_cast<VkDeviceSize>(px.size());
     const VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
 
     uint32_t mip = 1;
-    for (int m = (w > h ? w : h); m > 1; m >>= 1) ++mip;   // floor(log2(max))+1
+    for (int m = (w > h ? w : h); m > 1; m >>= 1) ++mip;
 
     CubismBufferVulkan staging;
     staging.CreateBuffer(ctx.device, ctx.physicalDevice, size,
@@ -99,7 +93,6 @@ bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
 
-    // All levels UNDEFINED → TRANSFER_DST, then copy the base level.
     {
         VkImageMemoryBarrier b{};
         b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -119,7 +112,6 @@ bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
     vkCmdCopyBufferToImage(cb, staging.GetBuffer(), img,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // Blit the chain, transitioning each finished source level to shader-read.
     int32_t mw = w, mh = h;
     for (uint32_t i = 1; i < mip; ++i) {
         BarrierLevel(cb, img, i - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -140,7 +132,7 @@ bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         mw = nw; mh = nh;
     }
-    // Last level is still TRANSFER_DST → shader-read.
+
     BarrierLevel(cb, img, mip - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -164,7 +156,7 @@ bool Upload(const Live2DVkContext& ctx, const std::vector<unsigned char>& px,
     return true;
 }
 
-} // namespace
+}
 
 bool LoadTextureVkFromMemory(const Live2DVkContext& ctx, const void* data,
                              unsigned long size, CubismImageVulkan& out) {
@@ -197,5 +189,5 @@ bool LoadTextureVk(const Live2DVkContext& ctx, const char* path, CubismImageVulk
     return ok && Upload(ctx, px, w, h, out);
 }
 
-} // namespace live2d
-} // namespace aimgui
+}
+}

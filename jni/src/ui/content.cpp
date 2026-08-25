@@ -8,33 +8,26 @@
 namespace aimgui {
 
 void DrawContent(UiState* state, Page page) {
-    // The left edge is the tight one: the slot takes half its width out of
-    // this side, so the body text would otherwise start inside the lensing.
+
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(34, 20));
 
     ImGui::BeginChild("##content", ImVec2(0, 0),
                       ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar);
-    // Per-page body lives in main_ui.cpp.
+
     DrawPage(state, page);
-    // Pips + preview frame only (input handled before Begin in DrawUi).
+
     DrawResizeGrip(state);
-    // Not gated on a dialog being up: the modal covers its own three bodies
-    // and nothing else, so a drag beginning outside them was never meant for it.
+
     ContentGesture("##content", state);
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
 }
 
-// What the middle rest shows: enough to answer "is it running and how fast"
-
 void DrawCardContent(const UiState* state) {
     ImGuiIO& io = ImGui::GetIO();
 
-    // The card has no title bar or child to inherit padding from, so its text
-    // sat flush against the lensed rim — where the refraction is strongest and
-    // least readable. Inset it clear of that band.
     constexpr float kCardPadX = 30.0f;
     constexpr float kCardPadY = 24.0f;
     ImGui::Indent(kCardPadX);
@@ -45,9 +38,6 @@ void DrawCardContent(const UiState* state) {
     ImGui::PopFont();
     ImGui::Spacing();
 
-    // A caller-supplied body replaces the status block outright rather than
-    // adding to it — the card is small, and a card showing both would overflow
-    // rather than look full.
     if (state->card_body) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(state->card_body);
@@ -96,8 +86,6 @@ void DrawIslandContent(const UiState* state) {
     ImGui::TextUnformatted(buf);
 }
 
-// The dot sits outside the ImGui window, so its content goes on the foreground
-// list rather than through the layout.
 void DrawDotContent(const UiState* state, float alpha) {
     if (g_ui.dot_radius < 6.0f || alpha <= 0.01f) return;
     const char* txt = state->dot_text ? state->dot_text : state->island_icon;
@@ -109,4 +97,4 @@ void DrawDotContent(const UiState* state, float alpha) {
         ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)), txt);
 }
 
-} // namespace aimgui
+}

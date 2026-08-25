@@ -1,17 +1,8 @@
-// All sidebar nav entries and per-page body content live here, separate
-// from the window framework in ui.cpp. To add a new page:
-//   1. Append a value to enum class Page in ui/main_ui.h
-//   2. Append a { Page::Foo, u8"标签" } row to kPages below
-//   3. Write Draw<Foo>() and add a case in DrawPage().
-//
-// Page bodies render straight into the content child (caller already
-// pushed it), so they can use ImGui::* layout APIs freely.
-
 #include <string>
 #include "ui/main_ui.h"
 
-#include "ui/ui.h"          // UiState, aimgui::ripple::TouchLastItem
-#include "ui/ui_internal.h" // g_ui.pending_exit — whose answer this is
+#include "ui/ui.h"
+#include "ui/ui_internal.h"
 #include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
@@ -32,10 +23,6 @@
 
 namespace aimgui {
 
-// ─── Nav entries ─────────────────────────────────────────────────────────
-// Icon and label are separate so the row can lay them out on a fixed pixel
-// grid — baked into one string they were only ever separable by counting
-// spaces, which lands wherever the font happens to put it.
 const PageItem kPages[] = {
     { Page::Dashboard,   ICON_FA_GAUGE,       u8"概览" },
     { Page::Widgets,     ICON_FA_SLIDERS,     u8"控件" },
@@ -47,7 +34,6 @@ const int kPagesCount = (int)(sizeof(kPages) / sizeof(kPages[0]));
 
 namespace {
 
-// ─── Page-local helpers ──────────────────────────────────────────────────
 constexpr int kFpsPresets[] = { 0, 30, 60, 90, 120, 144 };
 constexpr const char* kFpsLabels =
     u8"垂直同步\0" "30\0" "60\0" "90\0" "120\0" "144\0";
@@ -58,9 +44,6 @@ int FpsToIndex(int fps) {
     return 0;
 }
 
-// SliderFloat with a pill-shaped grab whose width hugs the formatted value
-// text. The default rectangular grab is suppressed; we draw our own pill
-// on top and center the number inside it.
 bool SliderFloatGrabValue(const char* label, float* v, float v_min, float v_max,
                           const char* fmt = "%.3f") {
     ImGui::PushStyleColor(ImGuiCol_SliderGrab,       IM_COL32(0, 0, 0, 0));
@@ -98,15 +81,13 @@ bool SliderFloatGrabValue(const char* label, float* v, float v_min, float v_max,
     const ImVec2 gMin(cx - grab_w * 0.5f, cy - grab_h * 0.5f);
     const ImVec2 gMax(cx + grab_w * 0.5f, cy + grab_h * 0.5f);
 
-    // The track is the step; the grab is the one solid thing on it, which is
-    // where this material puts its highlights.
     chrome::Rect(barMin, barMax, -1.0f,
                  ImGui::IsItemHovered(), ImGui::IsItemActive());
 
     const ImU32 col = ImGui::GetColorU32(ImGuiCol_SliderGrab);
     ImDrawList* dl  = ImGui::GetWindowDrawList();
     dl->AddRectFilled(gMin, gMax, col, grab_h * 0.5f);
-    // The pill is near-white now, so its own text has to be the dark one.
+
     dl->AddText(ImVec2(cx - ts.x * 0.5f, cy - ts.y * 0.5f),
                 IM_COL32(14, 16, 20, 255), buf);
 
@@ -122,7 +103,6 @@ void KV(const char* key, const char* fmt, ...) {
     va_end(args);
 }
 
-// ─── Page bodies ─────────────────────────────────────────────────────────
 void DrawDashboard(const UiState* state) {
     ImGui::SeparatorText(u8"概览");
 
@@ -156,9 +136,7 @@ void DrawWidgets() {
     SliderFloatGrabValue(u8"滑块", &slider, 0.0f, 1.0f, "%.3f");
     ImGui::Checkbox  (u8"开关",   &toggle);
     chrome::LastItemFrame(u8"开关"); ripple::TouchLastItem();
-    // ColorEdit's four drag fields are the one place a cleared FrameBg does not
-    // work: they sit shoulder to shoulder, and with no fill at all they merge
-    // into a single strip. Give them back the faintest of grounds locally.
+
     ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4(1, 1, 1, 0.07f));
     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1, 1, 1, 0.11f));
     ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4(1, 1, 1, 0.15f));
@@ -167,12 +145,6 @@ void DrawWidgets() {
 
     ImGui::Spacing();
 
-    // Collapsible list with animated expand/collapse + shared-element row
-    // transition. The header drives an exponential-eased "open factor" t in
-    // [0..1]; the items are then wrapped in a BeginChild whose height is
-    // `t * full_height` so they slide in/out under the header. A single
-    // rounded highlight rect lerps from the old selected row to the new one
-    // and is drawn beneath the row text via DrawList channels.
     {
         static bool   list_open       = true;
         static float  list_t          = 1.0f;
@@ -239,9 +211,7 @@ void DrawWidgets() {
                     anim_max.x += (sel_max.x - anim_max.x) * a2;
                     anim_max.y += (sel_max.y - anim_max.y) * a2;
                 }
-                // Same capsule the nav column uses: the accent lives inside the
-                // step rather than being the step. Channel 0 already puts this
-                // under the labels, so the wash cannot touch them.
+
                 const float rr = (anim_max.y - anim_min.y) * 0.5f;
                 dl->AddRectFilled(anim_min, anim_max,
                                   ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.18f)), rr);
@@ -306,8 +276,7 @@ void DrawWindow(UiState* state) {
             if (state->screen_mirror) {
                 SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
                                      0.0f, 0.35f, "%.2f");
-                // The coupling behind this is not guessable from the outside,
-                // so it is spelled out rather than left as a surprise.
+
                 ImGui::Checkbox(u8"镜像时对截屏隐藏窗口", &state->mirror_hides_window);
                 chrome::LastItemFrame(u8"镜像时对截屏隐藏窗口");
                 ripple::TouchLastItem();
@@ -332,15 +301,13 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"触感");
     {
-        // Probed once: the answer cannot change while the process is up, and
-        // the check walks every /dev/input node.
+
         static bool has_vibrator = false;
         static bool probed        = false;
         if (!probed) {
             probed = true;
             Haptics probe;
-            // Ask before closing it: Shutdown resets the mode, so reading
-            // Available() afterwards would report false on every device.
+
             has_vibrator = probe.Init();
             probe.Shutdown();
         }
@@ -356,7 +323,7 @@ void DrawWindow(UiState* state) {
     ImGui::Spacing();
     ImGui::SeparatorText(u8"弹窗");
     {
-        // One of each kind, so all three are reachable without a device build.
+
         static std::string last;
         const float w3 = (ImGui::GetContentRegionAvail().x -
                           ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
@@ -377,8 +344,6 @@ void DrawWindow(UiState* state) {
                          u8"好的", u8"算了");
         chrome::LastItem(); ripple::TouchLastItem();
 
-        // Answers are taken once, on the frame they are given, so whoever
-        // opened a dialog is the one that reads it.
         if (!g_ui.pending_exit) {
             const dialog::Result r = dialog::Take();
             if (r == dialog::ResultOk) {
@@ -399,11 +364,6 @@ void DrawWindow(UiState* state) {
         static bool        paste_pending = false;
         static int         last_len      = -1;
 
-        // Writing to `buf` from outside the widget only lands while the widget
-        // is inactive: once it has focus ImGui keeps its own copy of the text
-        // and writes that back over the buffer every frame. So a paste is
-        // handed in through the callback as well, which is the one path that
-        // reaches the live editing state.
         struct Pending { std::string* text; bool* flag; };
         static Pending pending{&incoming, &paste_pending};
         auto on_edit = [](ImGuiInputTextCallbackData* d) -> int {
@@ -419,18 +379,10 @@ void DrawWindow(UiState* state) {
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##clip", u8"在这里编辑文本", buf, sizeof(buf),
                                  ImGuiInputTextFlags_CallbackAlways, on_edit, &pending);
-        // The callback only runs while the field is active. If it did not run,
-        // the direct write to `buf` already did the job — so the request has to
-        // be dropped here either way, or a paste made while the field was
-        // unfocused would lie in wait and wipe the text the next time it is
-        // tapped.
+
         paste_pending = false;
         chrome::LastItem(14.0f);
 
-        // A phone has no Ctrl+V, so paste gets a button. There is no copy
-        // button: writing to the Android clipboard never worked and was
-        // removed, and a button that silently only wrote a file would be
-        // claiming to do something it does not.
         const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴系统剪贴板",
                                           ImVec2(-FLT_MIN, 0));
         chrome::LastItem();
@@ -439,14 +391,10 @@ void DrawWindow(UiState* state) {
             const char* t = clipboard::Get();
             incoming      = t ? t : "";
             last_len      = (int)incoming.size();
-            paste_pending = true;                       // for the active case
-            std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());  // for the inactive one
+            paste_pending = true;
+            std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());
         }
 
-        // Where the text actually came from, and how much. A paste that quietly
-        // came from somewhere other than where the user copied is the worst way
-        // this can fail, so it is never left implicit — and an empty clipboard
-        // has to look different from a broken one.
         if (last_len >= 0) {
             if (clipboard::UsedSystem()) {
                 if (last_len == 0) ImGui::TextDisabled(u8"系统剪贴板是空的");
@@ -477,8 +425,7 @@ void DrawWindow(UiState* state) {
             case 1: ImGui::StyleColorsLight();   break;
             case 2: ImGui::StyleColorsClassic(); break;
         }
-        // StyleColorsX puts ImGui's own slab colours back, which would leave
-        // flat fills sitting under every control's step.
+
         ApplyGlassPalette();
     }
     ripple::TouchLastItem();
@@ -524,7 +471,7 @@ void DrawPerformance(UiState* state) {
     std::snprintf(overlay, sizeof(overlay), "%.1f", ImGui::GetIO().Framerate);
     ImGui::PlotLines("##fps_plot", history, N, offset, overlay,
                      0.0f, 165.0f, ImVec2(-1, 90));
-    chrome::LastItem(14.0f);   // a plot is a panel, not a capsule
+    chrome::LastItem(14.0f);
 }
 
 void DrawAbout() {
@@ -543,7 +490,7 @@ void DrawAbout() {
     ImGui::BulletText(u8"自动加载系统中文字体 (NotoSansCJK / MiSans / HwChinese ...)");
 }
 
-} // namespace
+}
 
 void DrawPage(UiState* state, Page page) {
     switch (page) {
@@ -555,4 +502,4 @@ void DrawPage(UiState* state, Page page) {
     }
 }
 
-} // namespace aimgui
+}

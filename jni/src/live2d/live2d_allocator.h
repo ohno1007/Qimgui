@@ -1,7 +1,6 @@
-// Minimal ICubismAllocator for the Cubism Framework.
 #pragma once
 
-#include <CubismFramework.hpp>   // defines the `Csm` namespace alias + basic types
+#include <CubismFramework.hpp>
 #include <ICubismAllocator.hpp>
 #include <cstdlib>
 
@@ -17,7 +16,7 @@ public:
         std::free(memory);
     }
     void* AllocateAligned(const Csm::csmSizeType size, const Csm::csmUint32 alignment) override {
-        // Over-allocate and store the original pointer just before the aligned block.
+
         size_t offset = alignment + sizeof(void*);
         void* p = std::malloc(size + offset);
         if (!p) return nullptr;
@@ -32,5 +31,5 @@ public:
     }
 };
 
-} // namespace live2d
-} // namespace aimgui
+}
+}

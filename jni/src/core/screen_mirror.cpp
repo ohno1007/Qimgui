@@ -11,34 +11,15 @@
 namespace aimgui {
 namespace {
 
-// Only failures are reported, and only once each — this path is quiet when it
-// works. stderr because the binary is run from a shell.
 #define MIRROR_FAIL(fmt, ...) \
     std::fprintf(stderr, "[mirror] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 
-
-// AImageReader is loaded at first use rather than linked. Linking libmediandk
-// would put a DT_NEEDED on this binary, dragging libmedia/libbinder into every
-// launch of what is a bare root executable rather than an app — the situation
-// this project already hit with linker namespaces. Loading it lazily also
-// keeps the build at API 24 instead of forcing 26 on everyone, and turns "this
-// device can't do it" into a disabled feature rather than a failure.
 constexpr int32_t  kMediaOk         = 0;
-// RGBA_8888 rather than PRIVATE. PRIVATE (IMPLEMENTATION_DEFINED) lets the
-// allocator pick a GPU-friendly layout, which is ideal for a sample-only
-// buffer — but SurfaceFlinger has to negotiate a format it can composite a
-// virtual display into, and with PRIVATE it silently settled on producing
-// nothing. RGBA_8888 is the combination every MediaProjection + ImageReader
-// screen-capture path uses, and it is unambiguous for both writer and reader.
-constexpr int32_t  kFormatRgba8888 = 0x1;       // AIMAGE_FORMAT_RGBA_8888
-constexpr uint64_t kUsageGpuSampled = 1ULL << 8; // GPU_SAMPLED_IMAGE
-constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9; // GPU_FRAMEBUFFER (colour output)
 
-// Both halves are required. SAMPLED is for us — we read these buffers as a
-// texture. FRAMEBUFFER is for SurfaceFlinger, which composites *into* them and
-// therefore needs them usable as a render target. Requesting only SAMPLED
-// leaves the compositor with nothing it can draw to, and the display sits
-// there producing no frames at all rather than reporting an error.
+constexpr int32_t  kFormatRgba8888 = 0x1;
+constexpr uint64_t kUsageGpuSampled = 1ULL << 8;
+constexpr uint64_t kUsageGpuFramebuffer = 1ULL << 9;
+
 constexpr uint64_t kMirrorUsage = kUsageGpuSampled | kUsageGpuFramebuffer;
 
 struct MediaNdk {
@@ -71,7 +52,7 @@ const MediaNdk& Media() {
     return m;
 }
 
-} // namespace
+}
 
 bool ScreenMirror::Available() {
     return Media().ok && android::ANativeWindowCreator::ScreenCaptureSupported();
@@ -87,7 +68,7 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
 
     void* reader = nullptr;
     if (media.ReaderNewWithUsage(width, height, kFormatRgba8888, kMirrorUsage,
-                                 /*maxImages=*/5, &reader) != kMediaOk || !reader) {
+                                 5, &reader) != kMediaOk || !reader) {
         MIRROR_FAIL("AImageReader_newWithUsage failed (%dx%d)", width, height);
         return false;
     }
@@ -98,23 +79,12 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
         return false;
     }
 
-    // The ANativeWindow an AImageReader hands out is an android::Surface, so
-    // its producer end is what the virtual display attaches to.
     const auto& fns = android::detail::Functionals::GetInstance();
     if (!fns.Surface__GetIGraphicBufferProducer) {
         media.ReaderDelete(reader);
         return false;
     }
-    // An ANativeWindow* is not the Surface's address. android::Surface derives
-    // from ANativeObjectBase<ANativeWindow, Surface, RefBase>, and RefBase's
-    // vtable sits first, so the ANativeWindow subobject lives 16 bytes into
-    // the Surface. ANativeWindowCreator::Create() already relies on this in
-    // the other direction — SurfaceControl::GetSurface() adds the same 16 to
-    // turn a Surface* into the ANativeWindow* it hands out.
-    //
-    // Passing the window straight through as `this` made the callee read its
-    // members at the wrong offsets and then incStrong the garbage it found
-    // there, which is the segfault.
+
     constexpr size_t kSurfaceToWindow = sizeof(std::max_align_t) / 2;
     void* surface = reinterpret_cast<char*>(window) - kSurfaceToWindow;
     android::detail::StrongPointer<void> producer =
@@ -125,31 +95,15 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     }
 
     auto& composer = android::ANativeWindowCreator::GetComposerInstance();
-    // Non-secure: a secure display refuses to mirror protected content, and
-    // showing that blurred beats failing outright.
+
     android::detail::StrongPointer<void> token =
-        composer.CreateVirtualDisplay("AImGuiMirror", /*secure=*/false);
+        composer.CreateVirtualDisplay("AImGuiMirror", false);
     if (!token.get()) {
         MIRROR_FAIL("createVirtualDisplay returned no token");
         media.ReaderDelete(reader);
         return false;
     }
 
-    // Share the physical display's layer stack, which is how screenrecord
-    // mirrors and the only approach known to work on every version here.
-    //
-    // This was tried first and abandoned after SurfaceFlinger listed no layers
-    // for the display — but that measurement was taken before the display was
-    // being powered on, and power-on went in during the same round as the
-    // mirror-layer approach that replaced it. The empty layer list was most
-    // likely the display being off, and crediting the fix to the mirror layer
-    // was a confound. A mirror layer also has to have its damage propagated
-    // from what it reflects for the virtual display to recompose, which is
-    // exactly the sort of thing that differs between versions and matches a
-    // display that renders once and then never again.
-    //
-    // If frames really do not arrive this way, Update() falls back to the
-    // mirror layer, so the wrong guess costs a second rather than the feature.
     uint32_t layerStack = 0;
     {
         android::detail::ui::DisplayState ds{};
@@ -162,18 +116,11 @@ bool ScreenMirror::Start(int width, int height, int srcWidth, int srcHeight) {
     const bool okStack = t.SetDisplayLayerStack(token, layerStack);
     const android::detail::ui::Rect src{0, 0, srcWidth, srcHeight};
     const android::detail::ui::Rect dst{0, 0, width, height};
-    const bool okProj = t.SetDisplayProjection(token, /*orientation=*/0, src, dst);
-    // Not one-way: this transaction brings a display into existence, and a
-    // fire-and-forget binder call gives SurfaceFlinger no way to report that
-    // it rejected any of it. The status was being discarded, which is why a
-    // rejected transaction has looked identical to an accepted one all along.
+    const bool okProj = t.SetDisplayProjection(token, 0, src, dst);
+
     const int32_t applyRc = t.Apply(false, false);
 
-    // A virtual display that is configured but not powered on composites
-    // nothing, which from outside looks exactly like a layer-stack mismatch.
-    // SurfaceFlinger does not turn these on by itself here, and it only
-    // attaches to our producer once one is on.
-    composer.SetDisplayPowerMode(token, /*ON=*/2);
+    composer.SetDisplayPowerMode(token, 2);
     m_Started = std::chrono::steady_clock::now();
 
     m_Window = window;
@@ -196,9 +143,6 @@ void ScreenMirror::Stop() {
     if (m_Image && media.ok) { media.ImageDelete(m_Image); }
     m_Image = nullptr;
 
-    // The mirror layer has to go with the display it fed. Leaving it behind
-    // would strand one on our layer stack per restart, and rotation restarts
-    // the mirror every time.
     if (m_MirrorLayer) {
         android::detail::SurfaceComposerClientTransaction t;
         android::detail::StrongPointer<void> mp{};
@@ -222,11 +166,7 @@ void ScreenMirror::Stop() {
 }
 
 void ScreenMirror::Update() {
-    // Sharing the physical display's layer stack is the primary route, but if
-    // it turns out this build will not mirror that way, nothing arrives and
-    // there is no error to catch — the display simply sits there. So give it a
-    // second, and if not one frame has landed, hang a mirror layer on a stack
-    // of our own instead and let that drive the display.
+
     if (!m_Running || m_Frames > 0 || m_MirrorLayer) return;
     if (std::chrono::steady_clock::now() - m_Started < std::chrono::milliseconds(1000)) return;
     if (!android::detail::SurfaceComposerClient::MirrorDisplaySupported()) return;
@@ -241,8 +181,6 @@ void ScreenMirror::Update() {
         return;
     }
 
-    // Move the display onto a stack nobody else uses and put the mirror there,
-    // so it has exactly one thing to composite and that thing is the screen.
     constexpr uint32_t kPrivateStack = 0x41493344;
     android::detail::StrongPointer<void> token{};
     token.pointer = m_Token;
@@ -266,15 +204,10 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
     void* image = nullptr;
     const int32_t rc = media.ReaderAcquireLatest(m_Reader, &image);
     if (rc != kMediaOk || !image) {
-        // Report the code periodically. NO_BUFFER_AVAILABLE means the
-        // compositor simply hasn't produced anything yet; any other code is a
-        // different failure and would otherwise look identical from the UI.
-        // Nothing new since the last call — normal between frames.
+
         return nullptr;
     }
 
-    // The previous image's buffer may still be referenced by the frame in
-    // flight, so it is only released once a newer one has arrived.
     if (m_Image) media.ImageDelete(m_Image);
     m_Image = image;
     ++m_Frames;
@@ -284,4 +217,4 @@ AHardwareBuffer* ScreenMirror::AcquireLatest() {
     return buffer;
 }
 
-} // namespace aimgui
+}

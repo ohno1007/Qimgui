@@ -10,10 +10,6 @@
 namespace aimgui {
 namespace {
 
-// ASensorEvent's layout is stable ABI, but pulling in <android/sensor.h> would
-// also pull the link-time symbols we are deliberately resolving by hand. The
-// only fields we need are the three floats at offset 16 (the acceleration
-// vector inside the union) and the type tag.
 struct SensorEvent {
     int   version;
     int   sensor;
@@ -43,7 +39,7 @@ PFN_destroyQueue g_DestroyQueue = nullptr;
 PFN_getEvents    g_GetEvents    = nullptr;
 void*            g_Manager      = nullptr;
 
-} // namespace
+}
 
 bool SensorTilt::Init() {
     m_Lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
@@ -65,9 +61,6 @@ bool SensorTilt::Init() {
         return false;
     }
 
-    // The queue needs a looper on this thread; a bare ELF's main thread has
-    // none until asked. ALOOPER_PREPARE_ALLOW_NON_CALLBACKS = 1, since we poll
-    // the queue directly instead of registering a callback.
     m_Looper = looperPrep(1);
     if (!m_Looper) { dlclose(m_Lib); m_Lib = nullptr; return false; }
 
@@ -77,7 +70,7 @@ bool SensorTilt::Init() {
     const void* accel = getDefault(g_Manager, kTypeAccelerometer);
     if (!accel) { dlclose(m_Lib); m_Lib = nullptr; return false; }
 
-    m_Queue = createQueue(g_Manager, m_Looper, 0 /*ident*/, nullptr, nullptr);
+    m_Queue = createQueue(g_Manager, m_Looper, 0 , nullptr, nullptr);
     if (!m_Queue) { dlclose(m_Lib); m_Lib = nullptr; return false; }
 
     if (enableSensor(m_Queue, accel) < 0) {
@@ -86,8 +79,7 @@ bool SensorTilt::Init() {
         dlclose(m_Lib); m_Lib = nullptr;
         return false;
     }
-    // 20 ms. The highlight is smoothed heavily on top of this, so a faster
-    // stream would only burn power for motion we then filter back out.
+
     if (setRate) setRate(m_Queue, accel, 20000);
 
     m_Ok = true;
@@ -105,8 +97,6 @@ void SensorTilt::Shutdown() {
 void SensorTilt::Update(float dt) {
     if (!m_Ok) return;
 
-    // Drain to the newest sample; intermediate ones are of no interest since
-    // the value below is a low-pass filter anyway.
     SensorEvent ev[16];
     float ax = 0.0f, ay = 0.0f;
     bool  got = false;
@@ -122,20 +112,14 @@ void SensorTilt::Update(float dt) {
     }
     if (!got) return;
 
-    // Device axes point right and up; screen y points down, so y flips. Divide
-    // by g to land in -1..1 and clamp: past about 45 degrees the lean stops
-    // meaning anything useful for a light direction.
     float tx = -ax / kGravity;
     float ty =  ay / kGravity;
     tx = tx < -1.0f ? -1.0f : (tx > 1.0f ? 1.0f : tx);
     ty = ty < -1.0f ? -1.0f : (ty > 1.0f ? 1.0f : ty);
 
-    // Heavy smoothing: raw accelerometer is noisy enough that feeding it
-    // straight to the highlight makes the rim shimmer while the phone sits
-    // still on a table. Frame-rate independent so 60 and 120 Hz agree.
     const float k = 1.0f - std::exp(-4.0f * dt);
     m_X += (tx - m_X) * k;
     m_Y += (ty - m_Y) * k;
 }
 
-} // namespace aimgui
+}

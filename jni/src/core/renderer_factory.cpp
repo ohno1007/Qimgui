@@ -29,4 +29,4 @@ std::unique_ptr<IRenderer> MakeRenderer(ANativeWindow* window,
     return tryInit(MakeGLRenderer());
 }
 
-} // namespace aimgui
+}

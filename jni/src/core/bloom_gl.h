@@ -6,21 +6,6 @@
 
 namespace aimgui {
 
-// Tiny post-process bloom for the OpenGL ES 3 backend.
-//
-// Usage in IRenderer::EndFrame:
-//
-//   if (bloom.Ready()) {
-//       bloom.BeginScene();                                // bind scene FBO
-//       ImGui_ImplOpenGL3_RenderDrawData(...);
-//       bloom.EndSceneAndComposite();                      // threshold + blur + composite to default FB
-//   } else {
-//       glClear(GL_COLOR_BUFFER_BIT);
-//       ImGui_ImplOpenGL3_RenderDrawData(...);
-//   }
-//
-// The composite preserves the scene's alpha channel so the SurfaceFlinger
-// overlay still shows through where ImGui didn't draw.
 class BloomGL {
 public:
     bool Init(int width, int height);
@@ -30,22 +15,15 @@ public:
     void SetIntensity(float i) { m_Intensity = i; }
     void SetSnapshotFrozen(bool frozen) { m_SnapshotFrozen = frozen; }
 
-    // When true, the final composite is alpha-blended over whatever is already
-    // in the default framebuffer (instead of clearing it) — used to draw the
-    // Live2D model as an un-bloomed background that the UI+bloom overlays.
     void SetCompositeOverDest(bool b) { m_OverDest = b; }
 
-    // GL texture handle of last frame's scene image. Sampleable as a
-    // regular texture (ImTextureID = (intptr_t)tex). Returns 0 if bloom
-    // isn't initialised.
     unsigned int GetSnapshotTex() const { return m_PrevSceneTex; }
 
     void BeginScene();
     void EndSceneAndComposite();
 
 private:
-    // True at most once per snapshot interval; rate-limits the full-surface
-    // copy that feeds the dissolve animation. See EndSceneAndComposite().
+
     bool SnapshotDue();
 
     bool m_Ready  = false;
@@ -60,7 +38,7 @@ private:
 
     GLuint m_SceneFBO     = 0;
     GLuint m_SceneTex     = 0;
-    GLuint m_PrevSceneTex = 0; // snapshot of previous frame's scene image
+    GLuint m_PrevSceneTex = 0;
     GLuint m_BlurFBO[2]   = { 0, 0 };
     GLuint m_BlurTex[2]   = { 0, 0 };
 
@@ -79,4 +57,4 @@ private:
     GLint  m_LocCompIntens  = -1;
 };
 
-} // namespace aimgui
+}

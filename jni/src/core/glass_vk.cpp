@@ -9,15 +9,12 @@ namespace {
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "AImGui", __VA_ARGS__)
 
-// Mirrors the push-constant block in shaders/glass.{vert,frag}.
-// Exactly 128 bytes, which is the smallest maxPushConstantsSize Vulkan
-// guarantees — kMaxMergedShapes is sized to land on it, so this must not grow.
 struct Push {
-    float screen[4];  // xy = display size px (UV), zw = surface size px (NDC)
-    float params[4];  // rounding, edge width, bend, alpha
-    float tint[4];    // rgb = wash colour, a = wash strength
-    float params2[4]; // blur px, light x, light y, merge radius px
-    float shapes[kMaxMergedShapes * 4];  // xy = centre px, zw = half size px
+    float screen[4];
+    float params[4];
+    float tint[4];
+    float params2[4];
+    float shapes[kMaxMergedShapes * 4];
 };
 static_assert(sizeof(Push) <= 128, "push constants must fit the guaranteed 128 bytes");
 
@@ -31,7 +28,7 @@ VkShaderModule MakeModule(VkDevice d, const uint32_t* code, size_t bytes) {
     return m;
 }
 
-} // namespace
+}
 
 bool GlassVK::Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPass) {
     m_Device = device;
@@ -109,9 +106,6 @@ bool GlassVK::Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPa
     ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // Straight alpha over whatever is already there, preserving destination
-    // alpha so the SurfaceFlinger overlay still shows through where nothing
-    // was drawn.
     VkPipelineColorBlendAttachmentState cba{};
     cba.blendEnable = VK_TRUE;
     cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -184,20 +178,12 @@ void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, 1, &m_DS, 0, nullptr);
 
-    // One pass per group, and one group is one body: the fragment shader's
-    // distance field is the smooth union of its panes, so a pane cannot be
-    // drawn on its own without losing the neck it shares with its neighbours.
-    // So a group is also a wall: two panes in different groups can never touch.
-    // Which is why a modal beside the island shares its group and gives up a
-    // clarity of its own, and one over a window keeps that clarity and cannot
-    // touch it. Two passes at most in practice, and an empty group costs a
-    // filter and nothing else.
     for (int gi = 0; gi < kMaxGlassGroups; ++gi) {
         GlassGroup g;
         const GlassRect* lead = nullptr;
         if (!BuildGlassGroup(rects, count, &g, gi, &lead) || !lead) continue;
 
-        const GlassRect& r = *lead;   // shared material settings
+        const GlassRect& r = *lead;
         Push p{};
         p.screen[0] = (float)screenW;  p.screen[1] = (float)screenH;
         p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
@@ -229,4 +215,4 @@ void GlassVK::Shutdown() {
     m_Ready = false;
 }
 
-} // namespace aimgui
+}
