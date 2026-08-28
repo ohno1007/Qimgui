@@ -32,9 +32,14 @@ uint32_t FindMemoryType(VkPhysicalDevice phys, uint32_t typeBits, VkMemoryProper
     return UINT32_MAX;
 }
 
+// usage is spelled out by the caller because two of these images are copied
+// to or from, and a copy needs the transfer bits declared up front — an image
+// without them is invalid as a copy operand however well the driver tolerates it.
 bool CreateImage2D(VkDevice device, VkPhysicalDevice phys, VkFormat fmt,
                    uint32_t w, uint32_t h, VkImage* out_image,
-                   VkImageView* out_view, VkDeviceMemory* out_mem) {
+                   VkImageView* out_view, VkDeviceMemory* out_mem,
+                   VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                             VK_IMAGE_USAGE_SAMPLED_BIT) {
     VkImageCreateInfo ic{};
     ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ic.imageType = VK_IMAGE_TYPE_2D;
@@ -44,7 +49,7 @@ bool CreateImage2D(VkDevice device, VkPhysicalDevice phys, VkFormat fmt,
     ic.arrayLayers = 1;
     ic.samples = VK_SAMPLE_COUNT_1_BIT;
     ic.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ic.usage = usage;
     ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     if (vkCreateImage(device, &ic, nullptr, out_image) != VK_SUCCESS) return false;
 
@@ -70,8 +75,12 @@ bool CreateImage2D(VkDevice device, VkPhysicalDevice phys, VkFormat fmt,
     return true;
 }
 
+// initialLayout matters only for LOAD: UNDEFINED means "the contents may be
+// discarded", so a LOAD pass declared that way keeps nothing and the panes
+// already drawn would be thrown away when the pass reopens.
 bool CreateColorRenderPass(VkDevice device, VkFormat fmt, VkAttachmentLoadOp loadOp,
-                           VkRenderPass* out_rp) {
+                           VkRenderPass* out_rp,
+                           VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED) {
     VkAttachmentDescription att{};
     att.format = fmt;
     att.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -79,7 +88,7 @@ bool CreateColorRenderPass(VkDevice device, VkFormat fmt, VkAttachmentLoadOp loa
     att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.initialLayout = initialLayout;
     att.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkAttachmentReference ref{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
@@ -265,15 +274,31 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
         LOGE("blur render pass"); Shutdown(); return false;
     }
 
-    if (!CreateImage2D(device, phys, fmt, m_W, m_H, &m_SceneImage, &m_SceneView, &m_SceneMem) ||
+    if (!CreateImage2D(device, phys, fmt, m_W, m_H, &m_SceneImage, &m_SceneView, &m_SceneMem,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
         !CreateFramebuffer(device, m_SceneRP, m_SceneView, m_W, m_H, &m_SceneFB)) {
         LOGE("scene image/FB"); Shutdown(); return false;
     }
     if (!CreateImage2D(device, phys, fmt, m_W, m_H,
-                       &m_PrevSceneImage, &m_PrevSceneView, &m_PrevSceneMem)) {
+                       &m_PrevSceneImage, &m_PrevSceneView, &m_PrevSceneMem,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
         LOGE("prev-scene image"); Shutdown(); return false;
     }
     m_PrevSceneFirstUse = true;
+
+    // For the controls' pass: the scene as it stands after the panes are down,
+    // copied out so it can be sampled while the same image is still the render
+    // target. A LOAD-op pass over the same framebuffer picks the scene back up
+    // where the copy interrupted it. Optional — losing it costs the controls
+    // their glass and nothing else, so a failure here is not fatal.
+    m_WidgetOk = CreateImage2D(device, phys, fmt, m_W, m_H,
+                               &m_CaptureImage, &m_CaptureView, &m_CaptureMem,
+                               VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT) &&
+                 CreateColorRenderPass(device, fmt, VK_ATTACHMENT_LOAD_OP_LOAD,
+                                       &m_SceneLoadRP,
+                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!m_WidgetOk) LOGE("widget capture unavailable");
+    m_CaptureFirstUse = true;
     for (int i = 0; i < 2; ++i) {
         if (!CreateImage2D(device, phys, fmt, m_BW, m_BH,
                            &m_BlurImage[i], &m_BlurView[i], &m_BlurMem[i]) ||
@@ -436,6 +461,71 @@ void BloomVK::BeginScene(VkCommandBuffer cmd) {
     SetFullViewport(cmd, m_W, m_H);
 }
 
+void BloomVK::RecordWidgetCapture(VkCommandBuffer cmd) {
+    if (!WidgetCaptureReady()) return;
+
+    vkCmdEndRenderPass(cmd);
+
+    VkImageMemoryBarrier b[2]{};
+    b[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b[0].srcQueueFamilyIndex = b[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b[0].image = m_SceneImage;
+    b[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+    b[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b[1].srcAccessMask = m_CaptureFirstUse ? 0 : VK_ACCESS_SHADER_READ_BIT;
+    b[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    b[1].oldLayout = m_CaptureFirstUse ? VK_IMAGE_LAYOUT_UNDEFINED
+                                       : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b[1].srcQueueFamilyIndex = b[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b[1].image = m_CaptureImage;
+    b[1].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    m_CaptureFirstUse = false;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, b);
+
+    VkImageCopy region{};
+    region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.extent = { m_W, m_H, 1 };
+    vkCmdCopyImage(cmd,
+        m_SceneImage,   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        m_CaptureImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &region);
+
+    b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    b[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    b[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    b[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, b);
+
+    VkRenderPassBeginInfo rpi{};
+    rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpi.renderPass = m_SceneLoadRP;
+    rpi.framebuffer = m_SceneFB;
+    rpi.renderArea.extent = { m_W, m_H };
+    rpi.clearValueCount = 0;
+    vkCmdBeginRenderPass(cmd, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+    SetFullViewport(cmd, m_W, m_H);
+}
+
 void BloomVK::EndSceneAndBlur(VkCommandBuffer cmd) {
     if (!m_Ready) return;
     vkCmdEndRenderPass(cmd);
@@ -588,6 +678,13 @@ void BloomVK::Shutdown() {
         if (m_BlurImage[i])  vkDestroyImage(m_Device, m_BlurImage[i], nullptr);
         if (m_BlurMem[i])    vkFreeMemory(m_Device, m_BlurMem[i], nullptr);
     }
+    if (m_CaptureView)  vkDestroyImageView(m_Device, m_CaptureView, nullptr);
+    if (m_CaptureImage) vkDestroyImage(m_Device, m_CaptureImage, nullptr);
+    if (m_CaptureMem)   vkFreeMemory(m_Device, m_CaptureMem, nullptr);
+    if (m_SceneLoadRP)  vkDestroyRenderPass(m_Device, m_SceneLoadRP, nullptr);
+    m_CaptureView = VK_NULL_HANDLE; m_CaptureImage = VK_NULL_HANDLE;
+    m_CaptureMem = VK_NULL_HANDLE;  m_SceneLoadRP = VK_NULL_HANDLE;
+    m_WidgetOk = false;
     if (m_SceneRP)     vkDestroyRenderPass(m_Device, m_SceneRP, nullptr);
     if (m_BlurRP)      vkDestroyRenderPass(m_Device, m_BlurRP, nullptr);
 

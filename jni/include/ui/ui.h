@@ -63,6 +63,16 @@ struct UiState {
     GlassRect glass_rects[kMaxGlassRects];
     int       glass_count = 0;
 
+    // Controls, refracting the sheet they sit on rather than the desktop. Their
+    // pass runs after the panes above and samples the result, so the depth
+    // composes: the control bends the window's glass, which bends the screen.
+    GlassRect widget_rects[kMaxWidgetGlass];
+    int       widget_count = 0;
+    bool      widget_glass = true;
+    // Set by the main loop from the renderer: false means the second pass will
+    // not run, and controls keep painting their own edge.
+    bool      widget_glass_ok = false;
+
     bool  exit_anim_active      = false;
 
     unsigned long long scene_snapshot_id = 0;

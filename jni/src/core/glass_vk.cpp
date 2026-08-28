@@ -62,6 +62,10 @@ bool GlassVK::Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPa
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &m_DSL;
     if (vkAllocateDescriptorSets(device, &dai, &m_DS) != VK_SUCCESS) { Shutdown(); return false; }
+    // A second set for the controls' pass. Not fatal if the pool is out: the
+    // controls simply keep painting their own edge.
+    if (vkAllocateDescriptorSets(device, &dai, &m_DSWidget) != VK_SUCCESS)
+        m_DSWidget = VK_NULL_HANDLE;
 
     VkPushConstantRange pcr{};
     pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -166,6 +170,61 @@ void GlassVK::SetScreenImage(VkImageView view) {
     w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     w.pImageInfo = &ii;
     vkUpdateDescriptorSets(m_Device, 1, &w, 0, nullptr);
+}
+
+void GlassVK::SetWidgetImage(VkImageView view) {
+    if (!m_Ready || m_DSWidget == VK_NULL_HANDLE) return;
+    if (view == VK_NULL_HANDLE || view == m_WidgetView) return;
+    m_WidgetView = view;
+
+    VkDescriptorImageInfo ii{};
+    ii.sampler = m_Sampler;
+    ii.imageView = view;
+    ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkWriteDescriptorSet w{};
+    w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    w.dstSet = m_DSWidget;
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo = &ii;
+    vkUpdateDescriptorSets(m_Device, 1, &w, 0, nullptr);
+}
+
+// One draw per control, each a single shape, so they never compete for the four
+// slots a merged body has. Screen and surface are the same here: the texture is
+// a copy of this surface, not the mirror of a differently sized display.
+void GlassVK::RecordWidgets(VkCommandBuffer cmd, int surfaceW, int surfaceH,
+                            const GlassRect* rects, int count) {
+    if (!m_Ready || m_WidgetView == VK_NULL_HANDLE || m_DSWidget == VK_NULL_HANDLE) return;
+    if (count <= 0 || surfaceW <= 0 || surfaceH <= 0) return;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, 1,
+                            &m_DSWidget, 0, nullptr);
+
+    for (int i = 0; i < count; ++i) {
+        const GlassRect& r = rects[i];
+        if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
+        Push p{};
+        p.screen[0] = (float)surfaceW; p.screen[1] = (float)surfaceH;
+        p.screen[2] = (float)surfaceW; p.screen[3] = (float)surfaceH;
+        p.params[0] = r.rounding; p.params[1] = r.edgeWidth;
+        p.params[2] = r.bend;     p.params[3] = r.alpha;
+        p.tint[0] = r.tintR; p.tint[1] = r.tintG; p.tint[2] = r.tintB; p.tint[3] = r.tintA;
+        p.params2[0] = r.blur;
+        p.params2[1] = r.lightX;
+        p.params2[2] = r.lightY;
+        p.params2[3] = 0.0f;
+        p.shapes[0] = r.x + r.w * 0.5f;
+        p.shapes[1] = r.y + r.h * 0.5f;
+        p.shapes[2] = r.w * 0.5f;
+        p.shapes[3] = r.h * 0.5f;
+        vkCmdPushConstants(cmd, m_Layout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(Push), &p);
+        vkCmdDraw(cmd, 4, 1, 0, 0);
+    }
 }
 
 void GlassVK::Record(VkCommandBuffer cmd, int screenW, int screenH,

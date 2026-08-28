@@ -35,6 +35,9 @@ constexpr float kNavLagMax = 34.0f;
 
 void DrawUi(UiState* state, bool* keep_running) {
     ApplyStyleOnce();
+    state->widget_count = 0;
+    chrome::BeginFrame(state->widget_glass && state->widget_glass_ok &&
+                       state->screen_texture_id != 0 && !state->exit_anim_active);
 
     ImGuiIO& io = ImGui::GetIO();
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
@@ -477,6 +480,8 @@ void DrawUi(UiState* state, bool* keep_running) {
     ripple::DrawAll();
 
     dialog::Draw(state);
+
+    state->widget_count = chrome::Drain(state->widget_rects, kMaxWidgetGlass);
 
     if (state->exit_anim_active && g_ui.exit_anim_first_frame) {
         const float now     = (float)ImGui::GetTime();

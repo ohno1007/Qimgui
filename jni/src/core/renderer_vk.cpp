@@ -138,6 +138,9 @@ public:
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
 
+    GlassRect m_WidgetRects[kMaxWidgetGlass];
+    int       m_WidgetCount = 0;
+
     void SetGlassRects(const GlassRect* rects, int count,
                        int displayW, int displayH) override {
         m_GlassRects = rects;
@@ -455,6 +458,38 @@ private:
         m_SwapChainRebuild = false;
     }
 
+    // The controls' pass. Only on the offscreen path, because it works by
+    // copying the colour attachment mid-frame and the scene image is ours to
+    // declare as a copy source — the swapchain's is not, and a copy out of an
+    // image that never asked to be one is invalid however well it appears to
+    // work. Without bloom the controls keep painting their own edge.
+    void RecordWidgetGlass(VkCommandBuffer cmd) {
+        if (m_WidgetCount <= 0 || !m_Glass.Ready()) return;
+        if (!m_Bloom.WidgetCaptureReady()) return;
+
+        m_Bloom.RecordWidgetCapture(cmd);
+        m_Glass.SetWidgetImage(m_Bloom.WidgetCaptureView());
+        if (!m_Glass.WidgetImageReady()) return;
+
+        VkViewport vp{ 0.0f, 0.0f, (float)m_Width, (float)m_Height, 0.0f, 1.0f };
+        VkRect2D   sc{ {0, 0}, { (uint32_t)m_Width, (uint32_t)m_Height } };
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+        m_Glass.RecordWidgets(cmd, m_Width, m_Height, m_WidgetRects, m_WidgetCount);
+    }
+
+    bool SupportsWidgetGlass() const override {
+        return m_Glass.Ready() && m_Bloom.WidgetCaptureReady();
+    }
+
+    void SetWidgetGlass(const GlassRect* rects, int count) override {
+        m_WidgetCount = 0;
+        if (!rects || count <= 0) return;
+        if (count > kMaxWidgetGlass) count = kMaxWidgetGlass;
+        for (int i = 0; i < count; ++i) m_WidgetRects[i] = rects[i];
+        m_WidgetCount = count;
+    }
+
     void RecordGlass(VkCommandBuffer cmd) {
         if (!m_Glass.Ready() || m_GlassCount <= 0 || m_ScreenView == VK_NULL_HANDLE) return;
         m_Glass.SetScreenImage(m_ScreenView);
@@ -492,6 +527,7 @@ private:
 
             m_Bloom.BeginScene(fd->CommandBuffer);
             RecordGlass(fd->CommandBuffer);
+            RecordWidgetGlass(fd->CommandBuffer);
             ImGui_ImplVulkan_RenderDrawData(draw, fd->CommandBuffer);
             m_Bloom.EndSceneAndBlur(fd->CommandBuffer);
 

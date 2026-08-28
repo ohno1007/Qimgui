@@ -39,6 +39,16 @@ public:
         (void)rects; (void)count; (void)displayW; (void)displayH;
     }
 
+    // Panes for the second pass, which samples the frame so far instead of the
+    // screen mirror. Backends that cannot capture mid-frame ignore this.
+    virtual void SetWidgetGlass(const GlassRect* rects, int count) {
+        (void)rects; (void)count;
+    }
+
+    // Whether that pass will actually run. Controls stop painting themselves
+    // only when it will, or they would submit panes nobody draws and vanish.
+    virtual bool SupportsWidgetGlass() const { return false; }
+
     virtual unsigned long long ImportHardwareBuffer(struct AHardwareBuffer* ahb,
                                                     int width, int height) {
         (void)ahb; (void)width; (void)height;

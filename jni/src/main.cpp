@@ -195,6 +195,9 @@ int main(int argc, char** argv) {
         aimgui::live2d::SetBallScale(st.ball_scale);
         aimgui::live2d::SetView(st.expand);
 #endif
+        st.widget_glass_ok = ws.renderer()->SupportsWidgetGlass();
+        ws.renderer()->SetWidgetGlass(st.widget_glass ? st.widget_rects : nullptr,
+                                      st.widget_glass ? st.widget_count : 0);
         ws.renderer()->SetGlassRects(st.glass_rects, st.glass_count,
                                      st.display_w, st.display_h);
         ws.renderer()->SetBloomIntensity(st.bloom_intensity);

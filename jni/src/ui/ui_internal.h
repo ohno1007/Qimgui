@@ -74,6 +74,13 @@ extern Shell g_ui;
 
 void ApplyStyleOnce();
 
+namespace chrome {
+// Controls submit a pane each instead of painting themselves, when the second
+// glass pass is running. BeginFrame arms it, Drain hands the panes to DrawUi.
+void BeginFrame(bool glass_live);
+int  Drain(GlassRect* out, int max);
+}
+
 void DrawSidebar(Page& current, bool* keep_running, UiState* state);
 
 void DrawContent(UiState* state, Page page);

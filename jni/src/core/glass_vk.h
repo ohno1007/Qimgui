@@ -14,9 +14,17 @@ public:
 
     void SetScreenImage(VkImageView view);
 
+    // The controls' pass samples a copy of the frame so far rather than the
+    // screen mirror, so it needs a descriptor set of its own bound to that copy.
+    void SetWidgetImage(VkImageView view);
+    bool WidgetImageReady() const { return m_WidgetView != VK_NULL_HANDLE; }
+
     void Record(VkCommandBuffer cmd, int screenW, int screenH,
                 int surfaceW, int surfaceH,
                 const GlassRect* rects, int count);
+
+    void RecordWidgets(VkCommandBuffer cmd, int surfaceW, int surfaceH,
+                       const GlassRect* rects, int count);
 
 private:
     bool             m_Ready  = false;
@@ -26,6 +34,8 @@ private:
     VkSampler             m_Sampler = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_DSL     = VK_NULL_HANDLE;
     VkDescriptorSet       m_DS      = VK_NULL_HANDLE;
+    VkDescriptorSet       m_DSWidget   = VK_NULL_HANDLE;
+    VkImageView           m_WidgetView = VK_NULL_HANDLE;
     VkPipelineLayout      m_Layout  = VK_NULL_HANDLE;
     VkPipeline            m_Pipe    = VK_NULL_HANDLE;
     VkShaderModule        m_VS      = VK_NULL_HANDLE;

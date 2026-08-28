@@ -90,6 +90,7 @@ public:
             m_Bloom.SetCompositeOverDest(m_ScenePreDraw != nullptr);
             m_Bloom.BeginScene();
             DrawGlass();
+            DrawWidgetGlass();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             m_Bloom.EndSceneAndComposite();
         } else {
@@ -98,6 +99,7 @@ public:
             glClear(GL_COLOR_BUFFER_BIT);
             if (m_ScenePreDraw) m_ScenePreDraw();
             DrawGlass();
+            DrawWidgetGlass();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
         eglSwapBuffers(m_Display, m_Surface);
@@ -111,9 +113,50 @@ public:
                          m_GlassRects, m_GlassCount);
     }
 
+    // The controls' pass. It samples the frame as it stands after the panes
+    // above, so a control bends the sheet it is lying on rather than the
+    // desktop — which is what puts it in front of that sheet instead of looking
+    // like a hole punched through to what is behind the window.
+    //
+    // One draw per control, each a single shape, so they are not competing for
+    // the four slots a merged body has. The copy is whole-surface because that
+    // is what glCopyTexSubImage2D reads from cheaply; the draws themselves are
+    // tight quads around each control.
+    void DrawWidgetGlass() {
+        if (m_WidgetCount <= 0 || !m_Glass.Ready()) return;
+        if (!EnsureCapture()) return;
+
+        glBindTexture(GL_TEXTURE_2D, m_CaptureTex);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_Width, m_Height);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        for (int i = 0; i < m_WidgetCount; ++i)
+            m_Glass.Draw(m_CaptureTex, m_Width, m_Height, m_Width, m_Height,
+                         &m_WidgetRects[i], 1);
+    }
+
+    bool EnsureCapture() {
+        if (m_CaptureTex && m_CaptureW == m_Width && m_CaptureH == m_Height)
+            return true;
+        if (m_CaptureTex) glDeleteTextures(1, &m_CaptureTex);
+        glGenTextures(1, &m_CaptureTex);
+        if (!m_CaptureTex) return false;
+        glBindTexture(GL_TEXTURE_2D, m_CaptureTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_Width, m_Height, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        m_CaptureW = m_Width; m_CaptureH = m_Height;
+        return true;
+    }
+
     void Shutdown() override {
         m_Bloom.Shutdown();
         m_Glass.Shutdown();
+        if (m_CaptureTex) { glDeleteTextures(1, &m_CaptureTex); m_CaptureTex = 0; }
         static auto destroyImg = (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
         for (auto& e : m_AhbCache) {
             if (e.tex) glDeleteTextures(1, &e.tex);
@@ -142,6 +185,16 @@ public:
     }
 
     void SetSnapshotFrozen(bool frozen) override { m_Bloom.SetSnapshotFrozen(frozen); }
+
+    bool SupportsWidgetGlass() const override { return m_Glass.Ready(); }
+
+    void SetWidgetGlass(const GlassRect* rects, int count) override {
+        m_WidgetCount = 0;
+        if (!rects || count <= 0) return;
+        if (count > kMaxWidgetGlass) count = kMaxWidgetGlass;
+        for (int i = 0; i < count; ++i) m_WidgetRects[i] = rects[i];
+        m_WidgetCount = count;
+    }
 
     void SetGlassRects(const GlassRect* rects, int count,
                        int displayW, int displayH) override {
@@ -234,6 +287,10 @@ private:
     GlassGL m_Glass;
     const GlassRect* m_GlassRects = nullptr;
     int              m_GlassCount = 0;
+    GlassRect        m_WidgetRects[kMaxWidgetGlass];
+    int              m_WidgetCount = 0;
+    GLuint           m_CaptureTex = 0;
+    int              m_CaptureW = 0, m_CaptureH = 0;
     int              m_GlassW = 0, m_GlassH = 0;
     void (*m_ScenePreDraw)() = nullptr;
 };

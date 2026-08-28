@@ -36,6 +36,13 @@ public:
     VkDescriptorSet GetSnapshotDescriptorSet() const { return m_PrevSceneImGuiDS; }
 
     void BeginScene(VkCommandBuffer cmd);
+
+    // Breaks the scene pass open, copies what has been drawn so far into an
+    // image the controls' pass can sample, and reopens the same framebuffer
+    // with LOAD so nothing already drawn is lost.
+    bool WidgetCaptureReady() const { return m_Ready && m_WidgetOk; }
+    VkImageView WidgetCaptureView() const { return m_CaptureView; }
+    void RecordWidgetCapture(VkCommandBuffer cmd);
     void EndSceneAndBlur(VkCommandBuffer cmd);
     void RecordCompositeDraw(VkCommandBuffer cmd);
 
@@ -59,6 +66,13 @@ private:
 
     VkRenderPass     m_SceneRP = VK_NULL_HANDLE;
     VkRenderPass     m_BlurRP  = VK_NULL_HANDLE;
+
+    VkImage          m_CaptureImage = VK_NULL_HANDLE;
+    VkImageView      m_CaptureView  = VK_NULL_HANDLE;
+    VkDeviceMemory   m_CaptureMem   = VK_NULL_HANDLE;
+    VkRenderPass     m_SceneLoadRP  = VK_NULL_HANDLE;
+    bool             m_WidgetOk        = false;
+    bool             m_CaptureFirstUse = true;
 
     VkImage          m_SceneImage = VK_NULL_HANDLE;
     VkImageView      m_SceneView  = VK_NULL_HANDLE;

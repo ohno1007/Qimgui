@@ -277,6 +277,20 @@ void DrawWindow(UiState* state) {
                 SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
                                      0.0f, 0.35f, "%.2f");
 
+                // Deliberately not persisted: it drives a second render pass,
+                // and a setting that can only be reached through the UI it might
+                // break is a setting that has to come back on its own.
+                ImGui::BeginDisabled(!state->widget_glass_ok);
+                ImGui::Checkbox(u8"控件也用玻璃", &state->widget_glass);
+                chrome::LastItemFrame(u8"控件也用玻璃");
+                ripple::TouchLastItem();
+                ImGui::EndDisabled();
+                if (!state->widget_glass_ok) {
+                    ImGui::TextDisabled(u8"这个后端拿不到画面副本，控件维持描边");
+                } else if (state->widget_glass) {
+                    ImGui::TextDisabled(u8"控件折射它所在的那层玻璃，不是桌面");
+                }
+
                 ImGui::Checkbox(u8"镜像时对截屏隐藏窗口", &state->mirror_hides_window);
                 chrome::LastItemFrame(u8"镜像时对截屏隐藏窗口");
                 ripple::TouchLastItem();

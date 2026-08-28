@@ -22,6 +22,11 @@ struct GlassRect {
 
 constexpr int kMaxGlassRects = 8;
 
+// Controls get glass of their own, one small pane each, in a second pass that
+// samples what the first pass already put on screen. They never merge with each
+// other, so they are not bound by kMaxMergedShapes — one draw apiece.
+constexpr int kMaxWidgetGlass = 48;
+
 constexpr int kMaxMergedShapes = 4;
 
 struct GlassGroup {
