@@ -329,8 +329,22 @@ void DrawUi(UiState* state, bool* keep_running) {
             // enough across the divide that the two share a straight top edge:
             // past 2x the corner radius the rounding of each is inside the
             // other, so there is nothing left for the smoothing to fill.
+            // The title bar and the content are one piece by being one shape,
+            // which is the only way to get it. A smooth union does not merely
+            // union: where two boxes' outer edges coincide it *adds* material,
+            // k*h*(1-h) with h at a half, so a quarter of the merge radius. The
+            // title cap used to reach 26px into the content pane and share its
+            // top edge along the way, and 30/4 is the 7.5px lump that put on the
+            // top of the window. Overlapping less brings back the notch the
+            // overlap was there to fill; there is no overlap that does neither.
+            //
+            // So the content pane runs the full height of the window and is the
+            // title bar as well — one box, no join, nothing to weld. The cap is
+            // only the top of the *other* column, and it stops at the same slot
+            // the nav column does, so no two shapes ever reach the top edge at
+            // the same x. The slot simply runs all the way up now, which is what
+            // it was already doing everywhere below the title.
             constexpr float kTitleOverlap = 4.0f;
-            constexpr float kTitleJoin    = 26.0f;
 
             b.x = divide + gap * 0.5f;
             b.y = win_pos.y;
@@ -339,7 +353,7 @@ void DrawUi(UiState* state, bool* keep_running) {
 
             title.x = win_pos.x;
             title.y = win_pos.y;
-            title.w = (b.x - win_pos.x) + kTitleJoin;
+            title.w = (divide - gap * 0.5f) - win_pos.x;
             title.h = title_h + kTitleOverlap;
 
             const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
