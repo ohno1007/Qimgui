@@ -20,6 +20,7 @@
 #include "live2d/live2d_view.h"
 #endif
 
+#include <csignal>
 #include <chrono>
 
 #ifdef AIMGUI_LIVE2D
@@ -76,6 +77,21 @@ int main(int argc, char** argv) {
     st.renderer_name = ws.renderer()->Name();
     BOOT("touch");
     Touch::Init({(float)W, (float)H}, false);
+    st.block_touch_ok = true;
+    // An exclusive grab outlives the process that took it, so every way out of
+    // here has to give it back — including the ones nobody plans for. The
+    // watchdog inside Touch covers a hang; this covers a crash.
+    {
+        struct sigaction sa{};
+        sa.sa_handler = [](int sig) {
+            Touch::EmergencyRelease();
+            signal(sig, SIG_DFL);
+            raise(sig);
+        };
+        sigemptyset(&sa.sa_mask);
+        for (int sig : { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTERM, SIGINT })
+            sigaction(sig, &sa, nullptr);
+    }
     Touch::setOrientation((int)info.orientation);
     BOOT("keyboard");
     aimgui::kbd_input::Init();

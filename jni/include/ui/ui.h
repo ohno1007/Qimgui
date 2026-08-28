@@ -73,6 +73,13 @@ struct UiState {
     // not run, and controls keep painting their own edge.
     bool      widget_glass_ok = false;
 
+    // Stop touches that land on the overlay from also reaching what is behind
+    // it. Off by default and never persisted: it holds an exclusive grab on the
+    // touchscreen, so a restart has to be able to undo it.
+    bool block_touch    = false;
+    bool block_touch_ok = false;   // a uinput device exists to hand events back
+    bool block_touch_on = false;   // the grab is actually held right now
+
     bool  exit_anim_active      = false;
 
     unsigned long long scene_snapshot_id = 0;

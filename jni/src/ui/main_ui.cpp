@@ -250,6 +250,20 @@ void DrawWindow(UiState* state) {
                 // Deliberately not persisted: it drives a second render pass,
                 // and a setting that can only be reached through the UI it might
                 // break is a setting that has to come back on its own.
+                ImGui::BeginDisabled(!state->block_touch_ok);
+                ImGui::Checkbox(u8"挡住触摸穿透", &state->block_touch);
+                chrome::LastItemFrame(u8"挡住触摸穿透");
+                ripple::TouchLastItem();
+                ImGui::EndDisabled();
+                if (!state->block_touch_ok) {
+                    ImGui::TextDisabled(u8"拿不到 /dev/uinput，无法回注事件");
+                } else if (state->block_touch) {
+                    ImGui::TextDisabled(state->block_touch_on
+                        ? u8"独占触摸屏中；点在窗口上不会穿到后面"
+                        : u8"已请求，等待抓取");
+                    ImGui::TextDisabled(u8"卡住 2 秒会自动放开，崩溃也会放开");
+                }
+
                 ImGui::BeginDisabled(!state->widget_glass_ok);
                 ImGui::Checkbox(u8"控件也用玻璃", &state->widget_glass);
                 chrome::LastItemFrame(u8"控件也用玻璃");

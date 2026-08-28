@@ -16,12 +16,12 @@ uniform vec4 uParams2;
 const float kPad = 48.0;
 void main() {
 
-    vec2 lo = uShapes[0].xy - uShapes[0].zw;
-    vec2 hi = uShapes[0].xy + uShapes[0].zw;
+    vec2 lo = uShapes[0].xy - abs(uShapes[0].zw);
+    vec2 hi = uShapes[0].xy + abs(uShapes[0].zw);
     for (int i = 1; i < 4; ++i) {
         if (uShapes[i].z <= 0.0) continue;
-        lo = min(lo, uShapes[i].xy - uShapes[i].zw);
-        hi = max(hi, uShapes[i].xy + uShapes[i].zw);
+        lo = min(lo, uShapes[i].xy - abs(uShapes[i].zw));
+        hi = max(hi, uShapes[i].xy + abs(uShapes[i].zw));
     }
 
     float grow = kPad + max(uParams2.w, 0.0);
@@ -65,11 +65,11 @@ float smin(float a, float b, float k) {
 }
 
 float sceneSDF(vec2 p) {
-    float d = sdRoundedBox(p - uShapes[0].xy, uShapes[0].zw, uParams.x);
+    float d = sdRoundedBox(p - uShapes[0].xy, abs(uShapes[0].zw), uParams.x);
     for (int i = 1; i < 4; ++i) {
         if (uShapes[i].z <= 0.0) continue;
-        d = smin(d, sdRoundedBox(p - uShapes[i].xy, uShapes[i].zw, uParams.x),
-                 uParams2.w);
+        float di = sdRoundedBox(p - uShapes[i].xy, abs(uShapes[i].zw), uParams.x);
+        d = (uShapes[i].w < 0.0) ? min(d, di) : smin(d, di, uParams2.w);
     }
     return d;
 }

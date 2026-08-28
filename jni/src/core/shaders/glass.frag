@@ -33,11 +33,12 @@ float smin(float a, float b, float k) {
 }
 
 float sceneSDF(vec2 p) {
-    float d = sdRoundedBox(p - pc.shapes[0].xy, pc.shapes[0].zw, pc.params.x);
+    float d = sdRoundedBox(p - pc.shapes[0].xy, abs(pc.shapes[0].zw), pc.params.x);
     for (int i = 1; i < 4; ++i) {
         if (pc.shapes[i].z <= 0.0) continue;
-        d = smin(d, sdRoundedBox(p - pc.shapes[i].xy, pc.shapes[i].zw, pc.params.x),
-                 pc.params2.w);
+        float di = sdRoundedBox(p - pc.shapes[i].xy, abs(pc.shapes[i].zw), pc.params.x);
+
+        d = (pc.shapes[i].w < 0.0) ? min(d, di) : smin(d, di, pc.params2.w);
     }
     return d;
 }

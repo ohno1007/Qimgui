@@ -4,6 +4,7 @@
 
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
+#include "platform/TouchHelperA.h"
 
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
@@ -239,6 +240,24 @@ void DrawUi(UiState* state, bool* keep_running) {
 
     g_ui.shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
 
+    // What counts as landing on the overlay: the shell, and whatever a modal
+    // has put outside it. Only while something is actually on screen — with the
+    // window dissolving there is nothing left to press.
+    {
+        float bx = win_pos.x, by = win_pos.y;
+        float bx1 = bx + win_size.x, by1 = by + win_size.y;
+        const ImVec4& m = g_ui.modal_rect;
+        if (m.z > 2.0f && m.w > 2.0f) {
+            if (m.x < bx)  bx  = m.x;
+            if (m.y < by)  by  = m.y;
+            if (m.x + m.z > bx1) bx1 = m.x + m.z;
+            if (m.y + m.w > by1) by1 = m.y + m.w;
+        }
+        Touch::SetBlockRegion(bx, by, bx1 - bx, by1 - by,
+                              state->block_touch && !state->exit_anim_active);
+        state->block_touch_on = Touch::Blocking();
+    }
+
     const bool show_chrome    = (lt > 0.75f);
     const bool overriding_pos = (lt < 0.999f);
 
@@ -329,32 +348,35 @@ void DrawUi(UiState* state, bool* keep_running) {
             // enough across the divide that the two share a straight top edge:
             // past 2x the corner radius the rounding of each is inside the
             // other, so there is nothing left for the smoothing to fill.
-            // The title bar and the content are one piece by being one shape,
-            // which is the only way to get it. A smooth union does not merely
-            // union: where two boxes' outer edges coincide it *adds* material,
-            // k*h*(1-h) with h at a half, so a quarter of the merge radius. The
-            // title cap used to reach 26px into the content pane and share its
-            // top edge along the way, and 30/4 is the 7.5px lump that put on the
-            // top of the window. Overlapping less brings back the notch the
-            // overlap was there to fill; there is no overlap that does neither.
+            // The title bar and the content are one body, welded with a plain
+            // union rather than a smooth one.
             //
-            // So the content pane runs the full height of the window and is the
-            // title bar as well — one box, no join, nothing to weld. The cap is
-            // only the top of the *other* column, and it stops at the same slot
-            // the nav column does, so no two shapes ever reach the top edge at
-            // the same x. The slot simply runs all the way up now, which is what
-            // it was already doing everywhere below the title.
+            // That distinction is the whole of it. A smooth union *adds*
+            // material where two shapes are equally close — k*h*(1-h), a
+            // quarter of the merge radius where their outer edges coincide.
+            // That is the neck two drops grow when they meet, and it is also a
+            // 7.5px lump along any edge two boxes of one solid piece happen to
+            // share. Overlapping them less only trades it for the notch their
+            // rounded corners leave; no overlap avoids both.
+            //
+            // A plain union has neither: it is the exact union of the two. So
+            // the sheet's own seam is hard and the title bar can go back to
+            // running the full width, with the content full height behind it —
+            // every edge they share is simply the edge, and the corners each
+            // rounds are buried inside the other. The nav column and its strand
+            // still reach for the sheet smoothly, which is what they are for.
             constexpr float kTitleOverlap = 4.0f;
+
+            title.x = win_pos.x;
+            title.y = win_pos.y;
+            title.w = win_size.x;
+            title.h = title_h + kTitleOverlap;
 
             b.x = divide + gap * 0.5f;
             b.y = win_pos.y;
             b.w = win_r - b.x;
             b.h = win_b - b.y;
-
-            title.x = win_pos.x;
-            title.y = win_pos.y;
-            title.w = (divide - gap * 0.5f) - win_pos.x;
-            title.h = title_h + kTitleOverlap;
+            b.hardJoin = true;
 
             const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
             a.x = win_pos.x + lag.x;

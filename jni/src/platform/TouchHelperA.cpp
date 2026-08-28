@@ -7,6 +7,8 @@
 #include <vector>
 #include <thread>
 #include <unordered_map>
+#include <atomic>
+#include <ctime>
 #include "spinlock.h"
 
 #include "imgui.h"
@@ -45,6 +47,77 @@ namespace Touch {
     static std::function<void(std::vector<Device> *)> callback;
 
     static spinlock lock;
+
+    // ── Blocking pass-through ───────────────────────────────────────────
+    static bool blockEnabled = false;          // asked for
+    static std::atomic<bool> blockGrabbed{false};  // actually holding them
+    static float blockX = 0, blockY = 0, blockW = 0, blockH = 0;
+    static std::atomic<long long> heartbeat{0};
+    static std::atomic<bool>      watchdogRun{false};
+
+    static long long NowMs() {
+        struct timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    }
+
+    static bool AnyFingerDown() {
+        for (auto &d : devices)
+            for (int s = 0; s < maxF; ++s)
+                if (d.Finger[s].isDown) return true;
+        return false;
+    }
+
+    // Only ever between gestures. Taking the grab mid-touch strands the down
+    // the system already has — the rest of that gesture would come back out of
+    // a *different* device and the original would never be lifted — and giving
+    // it back mid-touch strands one the other way.
+    static void SetGrab(bool on) {
+        if (on == blockGrabbed.load()) return;
+        if (AnyFingerDown()) return;
+        for (auto &d : devices)
+            if (d.fd > 0) ioctl(d.fd, EVIOCGRAB, on ? GRAB : UNGRAB);
+        blockGrabbed.store(on);
+    }
+
+    // Async-signal reachable: no allocation, no locks, just the two ioctls that
+    // give the touchscreen back. Worth calling from a crash handler, because
+    // the alternative is a phone that needs a reboot to be touched again.
+    void EmergencyRelease() {
+        for (auto &d : devices)
+            if (d.fd > 0) ioctl(d.fd, EVIOCGRAB, UNGRAB);
+        blockGrabbed.store(false);
+        blockEnabled = false;
+    }
+
+    bool Blocking() { return blockGrabbed; }
+
+    void Heartbeat() { heartbeat.store(NowMs()); }
+
+    // The grab is exclusive, so a process that stops drawing while holding it
+    // takes the touchscreen with it. Nothing else can notice that from inside,
+    // so this does: no frame for two seconds and the devices go back.
+    static void *Watchdog(void *) {
+        while (watchdogRun.load()) {
+            struct timespec ts{0, 250 * 1000 * 1000};
+            nanosleep(&ts, nullptr);
+            if (!blockGrabbed.load()) continue;
+            const long long last = heartbeat.load();
+            if (last != 0 && NowMs() - last > 2000) {
+                // Not SetGrab: that waits for the finger to come up, and a
+                // process that has stopped drawing may never see it do so.
+                for (auto &d : devices)
+                    if (d.fd > 0) ioctl(d.fd, EVIOCGRAB, UNGRAB);
+                blockGrabbed.store(false);
+            }
+        }
+        return nullptr;
+    }
+
+    static bool InsideBlock(const My_Vector2 &p) {
+        return p.x >= blockX && p.y >= blockY &&
+               p.x <= blockX + blockW && p.y <= blockY + blockH;
+    }
 
     void Upload() {
         static bool isFirstDown = true;
@@ -191,6 +264,8 @@ namespace Touch {
             lock.lock();
             for (size_t j = 0; j < count; j++) {
                 input_event &ie = inputEvent[j];
+                if (blockGrabbed.load() && device.pendN < (int)(sizeof(device.pend) / sizeof(device.pend[0])))
+                    device.pend[device.pendN++] = ie;
                 if (ie.type == EV_ABS) {
                     if (ie.code == ABS_MT_SLOT) {
                         latest = ie.value;
@@ -217,6 +292,27 @@ namespace Touch {
                     }
                 }
                 if (ie.code == SYN_REPORT) {
+                    // Judge each finger once, as it lands, then hand the frame
+                    // back to the system unless one of ours is down in it.
+                    if (blockGrabbed.load()) {
+                        bool ours = false;
+                        for (int s = 0; s < maxF; ++s) {
+                            if (device.Finger[s].isDown) {
+                                if (!device.claimed[s]) {
+                                    device.claimed[s] = true;
+                                    device.mine[s] = InsideBlock(Touch2Screen(device.Finger[s].pos));
+                                }
+                                if (device.mine[s]) ours = true;
+                            } else {
+                                device.claimed[s] = false;
+                                device.mine[s]    = false;
+                            }
+                        }
+                        if (!ours && nowfd > 0 && device.pendN > 0)
+                            write(nowfd, device.pend,
+                                  sizeof(input_event) * (size_t)device.pendN);
+                        device.pendN = 0;
+                    }
                     if (ImGui::GetCurrentContext() != nullptr) {
                         ImGuiIO &io = ImGui::GetIO();
                         if (device.Finger[latest].isDown) {
@@ -332,13 +428,16 @@ namespace Touch {
         int screenX = devices[0].absX.maximum;
         int screenY = devices[0].absY.maximum;
 
-        // AImGui patch: never create a uinput virtual device. We only read
-        // /dev/input/event* and feed the events to ImGui — no re-injection.
-        if (false /* was: !readOnly */) {
+        // The device the blocked-through events are written back out of. Made
+        // up front so that turning blocking on is only an ioctl and cannot fail
+        // half way, and inert until something is written to it. Optional: no
+        // /dev/uinput means no blocking, not no touch.
+        {
             struct uinput_user_dev ui_dev;
             nowfd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
             if (nowfd <= 0) {
-                return false;
+                nowfd = 0;
+                goto uinput_done;
             }
 
             int string_len = rand() % 10 + 5;
@@ -411,10 +510,16 @@ namespace Touch {
             write(nowfd, &ui_dev, sizeof(ui_dev));
 
             if (ioctl(nowfd, UI_DEV_CREATE)) {
-                return false;
+                close(nowfd);
+                nowfd = 0;
             }
         }
+    uinput_done:
         initialized = true;
+
+        watchdogRun.store(true);
+        heartbeat.store(NowMs());
+        { pthread_t wd; pthread_create(&wd, nullptr, Watchdog, nullptr); }
 
         pthread_t t;
         for (int i = 0; i < devices.size(); i++) {
@@ -437,9 +542,11 @@ namespace Touch {
 
     void Close() {
         if (initialized) {
+            watchdogRun.store(false);
+            blockEnabled = false;
+            blockGrabbed.store(false);
             for (auto &device: devices) {
-                if (!readOnly)
-                    ioctl(device.fd, EVIOCGRAB, UNGRAB);
+                ioctl(device.fd, EVIOCGRAB, UNGRAB);
                 close(device.fd);
                 device.fd = 0;
             }
@@ -480,6 +587,15 @@ namespace Touch {
         touchObj &touch = devices[0].Finger[9];
         touch.isDown = false;
         Upload();
+        lock.unlock();
+    }
+
+    void SetBlockRegion(float x, float y, float w, float h, bool enabled) {
+        heartbeat.store(NowMs());
+        lock.lock();
+        blockX = x; blockY = y; blockW = w; blockH = h;
+        blockEnabled = enabled && nowfd > 0;
+        SetGrab(blockEnabled);
         lock.unlock();
     }
 
