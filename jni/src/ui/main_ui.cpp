@@ -145,97 +145,67 @@ void DrawWidgets() {
 
     ImGui::Spacing();
 
-    {
-        static bool   list_open       = true;
-        static float  list_t          = 1.0f;
-        static float  list_full_h     = 160.0f;
-        static int    selected         = 0;
-        static ImVec2 anim_min         = ImVec2(0, 0);
-        static ImVec2 anim_max         = ImVec2(0, 0);
-        static bool   anim_initialized = false;
+    // The list opens as one body: the row's capsule stretches into the panel
+    // and the rows appear inside it, rather than a header staying put while a
+    // separate box grows underneath.
+    if (expander::Begin(u8"列表", ICON_FA_LIST)) {
+        static int    selected = 0;
+        static ImVec2 anim_min = ImVec2(0, 0), anim_max = ImVec2(0, 0);
+        static bool   anim_ok  = false;
 
-        ImGui::SetNextItemOpen(list_open, ImGuiCond_FirstUseEver);
+        const char* items[] = { u8"第一项", u8"第二项", u8"第三项", u8"第四项" };
+        const int   N  = IM_ARRAYSIZE(items);
+        const float dt = ImGui::GetIO().DeltaTime;
+
+        // The selection is its own body sliding between rows, so it is drawn
+        // under them on a separate channel.
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->ChannelsSplit(2);
+        dl->ChannelsSetCurrent(1);
+
         ImGui::PushStyleColor(ImGuiCol_Header,        IM_COL32(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_HeaderActive,  IM_COL32(0, 0, 0, 0));
-        list_open = ImGui::CollapsingHeader(u8"列表");
-        ImGui::PopStyleColor(3);
-        chrome::LastItem();
-        ripple::TouchLastItem();
-
-        const float dt    = ImGui::GetIO().DeltaTime;
-        const float alpha = 1.0f - std::exp(-14.0f * dt);
-        list_t += ((list_open ? 1.0f : 0.0f) - list_t) * alpha;
-
-        if (list_t > 0.005f) {
-            const float child_h = list_full_h * list_t;
-            ImGui::BeginChild("##list_content", ImVec2(0, child_h),
-                              ImGuiChildFlags_None,
-                              ImGuiWindowFlags_NoScrollbar);
-
-            const char* items[] = { u8"第一项", u8"第二项", u8"第三项", u8"第四项" };
-            const int N = IM_ARRAYSIZE(items);
-
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->ChannelsSplit(2);
-            dl->ChannelsSetCurrent(1);
-
-            ImGui::PushStyleColor(ImGuiCol_Header,        IM_COL32(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_HeaderActive,  IM_COL32(0, 0, 0, 0));
-
-            const float y_start = ImGui::GetCursorPosY();
-            ImVec2 sel_min(0, 0), sel_max(0, 0);
-            for (int i = 0; i < N; ++i) {
-                if (ImGui::Selectable(items[i], selected == i)) selected = i;
-                ripple::TouchLastItem();
-                if (selected == i) {
-                    sel_min = ImGui::GetItemRectMin();
-                    sel_max = ImGui::GetItemRectMax();
-                }
+        ImVec2 sel_min(0, 0), sel_max(0, 0);
+        for (int i = 0; i < N; ++i) {
+            if (ImGui::Selectable(items[i], selected == i)) selected = i;
+            ripple::TouchLastItem();
+            if (selected == i) {
+                sel_min = ImGui::GetItemRectMin();
+                sel_max = ImGui::GetItemRectMax();
             }
-            const float y_end = ImGui::GetCursorPosY();
-
-            ImGui::PopStyleColor(3);
-
-            dl->ChannelsSetCurrent(0);
-            if (sel_max.y > sel_min.y) {
-                if (!anim_initialized) {
-                    anim_min = sel_min;
-                    anim_max = sel_max;
-                    anim_initialized = true;
-                } else {
-                    const float a2 = 1.0f - std::exp(-15.0f * dt);
-                    anim_min.x += (sel_min.x - anim_min.x) * a2;
-                    anim_min.y += (sel_min.y - anim_min.y) * a2;
-                    anim_max.x += (sel_max.x - anim_max.x) * a2;
-                    anim_max.y += (sel_max.y - anim_max.y) * a2;
-                }
-
-                const float rr = (anim_max.y - anim_min.y) * 0.5f;
-                dl->AddRectFilled(anim_min, anim_max,
-                                  ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.18f)), rr);
-                chrome::Rect(anim_min, anim_max, -1.0f, false, true);
-            }
-            dl->ChannelsMerge();
-
-            if (list_t > 0.99f && y_end > y_start) {
-                list_full_h = y_end - y_start;
-            }
-            ImGui::EndChild();
-
-            const float spacing_y = ImGui::GetStyle().ItemSpacing.y;
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (1.0f - list_t) * spacing_y);
         }
-    }
+        ImGui::PopStyleColor(3);
 
-    ImGui::Spacing();
-    ImGui::SeparatorText(u8"进度");
-    static float progress = 0.0f;
-    progress += ImGui::GetIO().DeltaTime * 0.15f;
-    if (progress > 1.0f) progress -= 1.0f;
-    ImGui::ProgressBar(progress, ImVec2(-1, 0));
-    chrome::LastItem();
+        dl->ChannelsSetCurrent(0);
+        if (sel_max.y > sel_min.y) {
+            if (!anim_ok) {
+                anim_min = sel_min; anim_max = sel_max; anim_ok = true;
+            } else {
+                const float a = 1.0f - std::exp(-15.0f * dt);
+                anim_min.x += (sel_min.x - anim_min.x) * a;
+                anim_min.y += (sel_min.y - anim_min.y) * a;
+                anim_max.x += (sel_max.x - anim_max.x) * a;
+                anim_max.y += (sel_max.y - anim_max.y) * a;
+            }
+            const float rr = (anim_max.y - anim_min.y) * 0.5f;
+            dl->AddRectFilled(anim_min, anim_max,
+                              ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.18f)), rr);
+            chrome::Rect(anim_min, anim_max, -1.0f, false, true);
+        }
+        dl->ChannelsMerge();
+    }
+    expander::End();
+
+    if (expander::Begin(u8"进度", ICON_FA_LAYER_GROUP)) {
+        static float progress = 0.0f;
+        progress += ImGui::GetIO().DeltaTime * 0.15f;
+        if (progress > 1.0f) progress -= 1.0f;
+        ImGui::ProgressBar(progress, ImVec2(-1, 0));
+        chrome::LastItem();
+        ImGui::TextDisabled(u8"展开和收起是同一块玻璃在变形");
+    }
+    expander::End();
 }
 
 void DrawWindow(UiState* state) {

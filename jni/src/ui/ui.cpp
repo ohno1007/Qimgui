@@ -317,16 +317,30 @@ void DrawUi(UiState* state, bool* keep_running) {
             const ImVec2 lag(g_ui.glass_nav_lag.x * split, g_ui.glass_nav_lag.y * split);
             g_ui.glass_nav_offset = lag;
 
+            // The title bar and the content are one rect, not two butted
+            // together. They used to be a full-width band overlapping the
+            // content by four pixels, and at the window's right edge the band's
+            // bottom-right corner and the content's top-right corner rounded
+            // away from each other into a visible waist — which is what made the
+            // title read as a separate strip laid across the top.
+            //
+            // So the content pane simply starts at the top of the window, and
+            // the title shape is only the cap over the nav column, reaching far
+            // enough across the divide that the two share a straight top edge:
+            // past 2x the corner radius the rounding of each is inside the
+            // other, so there is nothing left for the smoothing to fill.
             constexpr float kTitleOverlap = 4.0f;
-            title.x = win_pos.x;
-            title.y = win_pos.y;
-            title.w = win_size.x;
-            title.h = title_h + kTitleOverlap;
+            constexpr float kTitleJoin    = 26.0f;
 
             b.x = divide + gap * 0.5f;
-            b.y = win_pos.y + title_h;
+            b.y = win_pos.y;
             b.w = win_r - b.x;
             b.h = win_b - b.y;
+
+            title.x = win_pos.x;
+            title.y = win_pos.y;
+            title.w = (b.x - win_pos.x) + kTitleJoin;
+            title.h = title_h + kTitleOverlap;
 
             const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
             a.x = win_pos.x + lag.x;

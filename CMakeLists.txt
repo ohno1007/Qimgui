@@ -98,6 +98,7 @@ add_executable(AImGui
     ${JNI}/src/ui/content.cpp
     ${JNI}/src/ui/gestures.cpp
     ${JNI}/src/ui/dialog.cpp
+    ${JNI}/src/ui/expander.cpp
     ${JNI}/src/ui/chrome.cpp
     ${JNI}/src/ui/ripple.cpp
     ${JNI}/src/ui/dissolve.cpp

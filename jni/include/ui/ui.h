@@ -95,6 +95,21 @@ void LastItem(float rounding = -1.0f);
 void LastItemFrame(const char* label, float rounding = -1.0f);
 }
 
+// A list row that opens into a panel. The row's glass body is the panel's: one
+// shape whose height and rounding travel from a capsule to a card, so the row
+// is never replaced by something else, it becomes it. Under-damped, so it
+// arrives slightly past the open height and settles back.
+//
+//     if (expander::Begin(u8"外观", ICON_FA_PALETTE)) {
+//         ... body ...
+//     }
+//     expander::End();     // always, whatever Begin returned
+namespace expander {
+bool Begin(const char* label, const char* icon = nullptr);
+void End();
+bool IsOpen(const char* label);
+}
+
 namespace dialog {
 
 enum Kind {
