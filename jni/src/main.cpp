@@ -78,9 +78,7 @@ int main(int argc, char** argv) {
     BOOT("touch");
     Touch::Init({(float)W, (float)H}, false);
     st.block_touch_ok = true;
-    // An exclusive grab outlives the process that took it, so every way out of
-    // here has to give it back — including the ones nobody plans for. The
-    // watchdog inside Touch covers a hang; this covers a crash.
+
     {
         struct sigaction sa{};
         sa.sa_handler = [](int sig) {

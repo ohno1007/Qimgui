@@ -63,22 +63,15 @@ struct UiState {
     GlassRect glass_rects[kMaxGlassRects];
     int       glass_count = 0;
 
-    // Controls, refracting the sheet they sit on rather than the desktop. Their
-    // pass runs after the panes above and samples the result, so the depth
-    // composes: the control bends the window's glass, which bends the screen.
     GlassRect widget_rects[kMaxWidgetGlass];
     int       widget_count = 0;
     bool      widget_glass = true;
-    // Set by the main loop from the renderer: false means the second pass will
-    // not run, and controls keep painting their own edge.
+
     bool      widget_glass_ok = false;
 
-    // Stop touches that land on the overlay from also reaching what is behind
-    // it. Off by default and never persisted: it holds an exclusive grab on the
-    // touchscreen, so a restart has to be able to undo it.
     bool block_touch    = false;
-    bool block_touch_ok = false;   // a uinput device exists to hand events back
-    bool block_touch_on = false;   // the grab is actually held right now
+    bool block_touch_ok = false;
+    bool block_touch_on = false;
 
     bool  exit_anim_active      = false;
 
@@ -102,15 +95,6 @@ void LastItem(float rounding = -1.0f);
 void LastItemFrame(const char* label, float rounding = -1.0f);
 }
 
-// A list row that opens into a panel. The row's glass body is the panel's: one
-// shape whose height and rounding travel from a capsule to a card, so the row
-// is never replaced by something else, it becomes it. Under-damped, so it
-// arrives slightly past the open height and settles back.
-//
-//     if (expander::Begin(u8"外观", ICON_FA_PALETTE)) {
-//         ... body ...
-//     }
-//     expander::End();     // always, whatever Begin returned
 namespace expander {
 bool Begin(const char* label, const char* icon = nullptr);
 void End();

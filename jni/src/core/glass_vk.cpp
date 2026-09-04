@@ -62,8 +62,7 @@ bool GlassVK::Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPa
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &m_DSL;
     if (vkAllocateDescriptorSets(device, &dai, &m_DS) != VK_SUCCESS) { Shutdown(); return false; }
-    // A second set for the controls' pass. Not fatal if the pool is out: the
-    // controls simply keep painting their own edge.
+
     if (vkAllocateDescriptorSets(device, &dai, &m_DSWidget) != VK_SUCCESS)
         m_DSWidget = VK_NULL_HANDLE;
 
@@ -191,9 +190,6 @@ void GlassVK::SetWidgetImage(VkImageView view) {
     vkUpdateDescriptorSets(m_Device, 1, &w, 0, nullptr);
 }
 
-// One draw per control, each a single shape, so they never compete for the four
-// slots a merged body has. Screen and surface are the same here: the texture is
-// a copy of this surface, not the mirror of a differently sized display.
 void GlassVK::RecordWidgets(VkCommandBuffer cmd, int surfaceW, int surfaceH,
                             const GlassRect* rects, int count) {
     if (!m_Ready || m_WidgetView == VK_NULL_HANDLE || m_DSWidget == VK_NULL_HANDLE) return;

@@ -32,9 +32,6 @@ uint32_t FindMemoryType(VkPhysicalDevice phys, uint32_t typeBits, VkMemoryProper
     return UINT32_MAX;
 }
 
-// usage is spelled out by the caller because two of these images are copied
-// to or from, and a copy needs the transfer bits declared up front — an image
-// without them is invalid as a copy operand however well the driver tolerates it.
 bool CreateImage2D(VkDevice device, VkPhysicalDevice phys, VkFormat fmt,
                    uint32_t w, uint32_t h, VkImage* out_image,
                    VkImageView* out_view, VkDeviceMemory* out_mem,
@@ -75,9 +72,6 @@ bool CreateImage2D(VkDevice device, VkPhysicalDevice phys, VkFormat fmt,
     return true;
 }
 
-// initialLayout matters only for LOAD: UNDEFINED means "the contents may be
-// discarded", so a LOAD pass declared that way keeps nothing and the panes
-// already drawn would be thrown away when the pass reopens.
 bool CreateColorRenderPass(VkDevice device, VkFormat fmt, VkAttachmentLoadOp loadOp,
                            VkRenderPass* out_rp,
                            VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED) {
@@ -286,11 +280,6 @@ bool BloomVK::Init(VkDevice device, VkPhysicalDevice phys, VkDescriptorPool pool
     }
     m_PrevSceneFirstUse = true;
 
-    // For the controls' pass: the scene as it stands after the panes are down,
-    // copied out so it can be sampled while the same image is still the render
-    // target. A LOAD-op pass over the same framebuffer picks the scene back up
-    // where the copy interrupted it. Optional — losing it costs the controls
-    // their glass and nothing else, so a failure here is not fatal.
     m_WidgetOk = CreateImage2D(device, phys, fmt, m_W, m_H,
                                &m_CaptureImage, &m_CaptureView, &m_CaptureMem,
                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT) &&

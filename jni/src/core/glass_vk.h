@@ -14,8 +14,6 @@ public:
 
     void SetScreenImage(VkImageView view);
 
-    // The controls' pass samples a copy of the frame so far rather than the
-    // screen mirror, so it needs a descriptor set of its own bound to that copy.
     void SetWidgetImage(VkImageView view);
     bool WidgetImageReady() const { return m_WidgetView != VK_NULL_HANDLE; }
 

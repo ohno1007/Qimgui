@@ -37,9 +37,6 @@ public:
 
     void BeginScene(VkCommandBuffer cmd);
 
-    // Breaks the scene pass open, copies what has been drawn so far into an
-    // image the controls' pass can sample, and reopens the same framebuffer
-    // with LOAD so nothing already drawn is lost.
     bool WidgetCaptureReady() const { return m_Ready && m_WidgetOk; }
     VkImageView WidgetCaptureView() const { return m_CaptureView; }
     void RecordWidgetCapture(VkCommandBuffer cmd);

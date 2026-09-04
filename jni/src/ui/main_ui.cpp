@@ -145,9 +145,6 @@ void DrawWidgets() {
 
     ImGui::Spacing();
 
-    // The list opens as one body: the row's capsule stretches into the panel
-    // and the rows appear inside it, rather than a header staying put while a
-    // separate box grows underneath.
     if (expander::Begin(u8"列表", ICON_FA_LIST)) {
         static int    selected = 0;
         static ImVec2 anim_min = ImVec2(0, 0), anim_max = ImVec2(0, 0);
@@ -157,8 +154,6 @@ void DrawWidgets() {
         const int   N  = IM_ARRAYSIZE(items);
         const float dt = ImGui::GetIO().DeltaTime;
 
-        // The selection is its own body sliding between rows, so it is drawn
-        // under them on a separate channel.
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->ChannelsSplit(2);
         dl->ChannelsSetCurrent(1);
@@ -247,9 +242,6 @@ void DrawWindow(UiState* state) {
                 SliderFloatGrabValue(u8"通透度", &state->glass_clarity,
                                      0.0f, 0.35f, "%.2f");
 
-                // Deliberately not persisted: it drives a second render pass,
-                // and a setting that can only be reached through the UI it might
-                // break is a setting that has to come back on its own.
                 ImGui::BeginDisabled(!state->block_touch_ok);
                 ImGui::Checkbox(u8"挡住触摸穿透", &state->block_touch);
                 chrome::LastItemFrame(u8"挡住触摸穿透");

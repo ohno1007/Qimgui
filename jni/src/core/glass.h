@@ -18,20 +18,12 @@ struct GlassRect {
     float merge = 0.0f;
 
     int   group = 0;
-    // Joined to whatever precedes it with a plain union rather than the smooth
-    // one. A smooth union adds material where two shapes are equally close —
-    // k/4 of it where their outer edges coincide — which is exactly the neck
-    // that makes two drops run together, and exactly the lump that appears
-    // where two boxes are meant to be one solid piece. Parts of a single body
-    // set this; separate bodies that should reach for each other do not.
+
     bool  hardJoin = false;
 };
 
 constexpr int kMaxGlassRects = 8;
 
-// Controls get glass of their own, one small pane each, in a second pass that
-// samples what the first pass already put on screen. They never merge with each
-// other, so they are not bound by kMaxMergedShapes — one draw apiece.
 constexpr int kMaxWidgetGlass = 48;
 
 constexpr int kMaxMergedShapes = 4;
@@ -50,9 +42,7 @@ inline bool BuildGlassGroup(const GlassRect* rects, int count, GlassGroup* out,
         if (r.group != group) continue;
         if (r.w < 2.0f || r.h < 2.0f || r.alpha <= 0.001f) continue;
         if (lead && n == 0) *lead = &r;
-        // The half-height's sign carries hardJoin. Push constants are full at
-        // 128 bytes and a half-size is never negative, so the sign bit is the
-        // one spare bit per shape there is.
+
         const float hw = r.w * 0.5f, hh = r.h * 0.5f;
         out->shapes[n * 4 + 0] = r.x + hw;
         out->shapes[n * 4 + 1] = r.y + hh;

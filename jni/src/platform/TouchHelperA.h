@@ -19,11 +19,6 @@ namespace Touch {
         input_absinfo absX, absY;
         touchObj Finger[10];
 
-        // The frame being read, kept verbatim so it can be written back out
-        // untouched if it turns out not to be ours, and which slots have been
-        // judged. A slot is judged once, when the finger lands: a gesture that
-        // starts on the overlay belongs to the overlay until it is lifted,
-        // wherever it wanders.
         int pendN;
         input_event pend[192];
         bool claimed[10];
@@ -56,19 +51,6 @@ namespace Touch {
 
     void setOtherTouch(bool p_otherTouch);
 
-    // Stop touches that land on the overlay from also reaching whatever is
-    // behind it.
-    //
-    // Nothing in this process owns the input pipeline: the events are read from
-    // /dev/input and the system has already had them. The only way to take one
-    // away is EVIOCGRAB, which is exclusive — so while blocking is on the
-    // touchscreen is grabbed and every event that is *not* ours is written back
-    // out through a uinput device, verbatim, in the frame it arrived in.
-    //
-    // Which makes a wedged process able to leave a phone with a dead
-    // touchscreen, so: Heartbeat() has to be called every frame and a watchdog
-    // releases the grab if it stops, EmergencyRelease() is safe to call from a
-    // signal handler, and Close() releases as before.
     void SetBlockRegion(float x, float y, float w, float h, bool enabled);
     void Heartbeat();
     void EmergencyRelease();

@@ -113,15 +113,6 @@ public:
                          m_GlassRects, m_GlassCount);
     }
 
-    // The controls' pass. It samples the frame as it stands after the panes
-    // above, so a control bends the sheet it is lying on rather than the
-    // desktop — which is what puts it in front of that sheet instead of looking
-    // like a hole punched through to what is behind the window.
-    //
-    // One draw per control, each a single shape, so they are not competing for
-    // the four slots a merged body has. The copy is whole-surface because that
-    // is what glCopyTexSubImage2D reads from cheaply; the draws themselves are
-    // tight quads around each control.
     void DrawWidgetGlass() {
         if (m_WidgetCount <= 0 || !m_Glass.Ready()) return;
         if (!EnsureCapture()) return;

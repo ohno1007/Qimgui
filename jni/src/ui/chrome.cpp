@@ -15,25 +15,15 @@ constexpr int   kShadowLayers = 3;
 constexpr float kShadowStep   = 2.0f;
 constexpr float kRimThickness = 1.5f;
 
-// A control's own glass adds very little of its own, because what it is
-// refracting has already been washed, blurred and lit by the pane underneath.
-// A second full-strength sheet on top of that is what makes glass-on-glass look
-// like mud. So: no wash to speak of, a rim narrow enough that the two sides do
-// not meet across a 48px control, and only a light bend.
-constexpr float kEdgeShare = 0.30f;   // of the shorter side, same guard as the pill
+constexpr float kEdgeShare = 0.30f;
 constexpr float kEdgeMax   = 18.0f;
 constexpr float kBend      = 0.95f;
 constexpr float kBlur      = 2.0f;
 
-bool      g_live = false;             // the second pass is running this frame
+bool      g_live = false;
 GlassRect g_rects[kMaxWidgetGlass];
 int       g_count = 0;
 
-// Everything drawn into a scrolling child can be scrolled out of it, and the
-// glass pass knows nothing about ImGui's clip rects — so a control leaving the
-// view would otherwise keep its pane, spilling over the edge of the child. The
-// pane is trimmed to what is actually visible and faded by how much of it
-// survived, so it slides away instead of popping.
 bool Submit(const ImVec2& a, const ImVec2& b, float r, bool hovered, bool active) {
     if (g_count >= kMaxWidgetGlass) return false;
     const ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -63,7 +53,7 @@ bool Submit(const ImVec2& a, const ImVec2& b, float r, bool hovered, bool active
     p.alpha     = share;
     p.merge     = 0.0f;
     p.group     = 0;
-    // The only thing state changes: a touch more light held at the edge.
+
     p.tintA = active ? 0.10f : (hovered ? 0.06f : 0.0f);
     p.tintR = p.tintG = p.tintB = 1.0f;
     p.lightX = -0.6f;
@@ -72,9 +62,6 @@ bool Submit(const ImVec2& a, const ImVec2& b, float r, bool hovered, bool active
     return true;
 }
 
-// What a control looked like before it had glass, and what it falls back to
-// when there is no mirror to refract: a contact shadow, a wash thin enough to
-// separate it, and a rim lit from the same up-and-left key.
 void Painted(const ImVec2& a, const ImVec2& b, float r, bool hovered, bool active) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
@@ -122,8 +109,6 @@ void Rect(const ImVec2& a, const ImVec2& b, float rounding,
     const float rmax = (h < w ? h : w) * 0.5f;
     if (r > rmax) r = rmax;
 
-    // The pane is drawn by the renderer before any of ImGui's data, so the
-    // control's own label lands on top of it with nothing else to arrange.
     if (g_live && Submit(a, b, r, hovered, active)) return;
     Painted(a, b, r, hovered, active);
 }

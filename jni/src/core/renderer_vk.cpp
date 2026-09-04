@@ -458,11 +458,6 @@ private:
         m_SwapChainRebuild = false;
     }
 
-    // The controls' pass. Only on the offscreen path, because it works by
-    // copying the colour attachment mid-frame and the scene image is ours to
-    // declare as a copy source — the swapchain's is not, and a copy out of an
-    // image that never asked to be one is invalid however well it appears to
-    // work. Without bloom the controls keep painting their own edge.
     void RecordWidgetGlass(VkCommandBuffer cmd) {
         if (m_WidgetCount <= 0 || !m_Glass.Ready()) return;
         if (!m_Bloom.WidgetCaptureReady()) return;

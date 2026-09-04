@@ -240,9 +240,6 @@ void DrawUi(UiState* state, bool* keep_running) {
 
     g_ui.shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
 
-    // What counts as landing on the overlay: the shell, and whatever a modal
-    // has put outside it. Only while something is actually on screen — with the
-    // window dissolving there is nothing left to press.
     {
         float bx = win_pos.x, by = win_pos.y;
         float bx1 = bx + win_size.x, by1 = by + win_size.y;
@@ -336,35 +333,6 @@ void DrawUi(UiState* state, bool* keep_running) {
             const ImVec2 lag(g_ui.glass_nav_lag.x * split, g_ui.glass_nav_lag.y * split);
             g_ui.glass_nav_offset = lag;
 
-            // The title bar and the content are one rect, not two butted
-            // together. They used to be a full-width band overlapping the
-            // content by four pixels, and at the window's right edge the band's
-            // bottom-right corner and the content's top-right corner rounded
-            // away from each other into a visible waist — which is what made the
-            // title read as a separate strip laid across the top.
-            //
-            // So the content pane simply starts at the top of the window, and
-            // the title shape is only the cap over the nav column, reaching far
-            // enough across the divide that the two share a straight top edge:
-            // past 2x the corner radius the rounding of each is inside the
-            // other, so there is nothing left for the smoothing to fill.
-            // The title bar and the content are one body, welded with a plain
-            // union rather than a smooth one.
-            //
-            // That distinction is the whole of it. A smooth union *adds*
-            // material where two shapes are equally close — k*h*(1-h), a
-            // quarter of the merge radius where their outer edges coincide.
-            // That is the neck two drops grow when they meet, and it is also a
-            // 7.5px lump along any edge two boxes of one solid piece happen to
-            // share. Overlapping them less only trades it for the notch their
-            // rounded corners leave; no overlap avoids both.
-            //
-            // A plain union has neither: it is the exact union of the two. So
-            // the sheet's own seam is hard and the title bar can go back to
-            // running the full width, with the content full height behind it —
-            // every edge they share is simply the edge, and the corners each
-            // rounds are buried inside the other. The nav column and its strand
-            // still reach for the sheet smoothly, which is what they are for.
             constexpr float kTitleOverlap = 4.0f;
 
             title.x = win_pos.x;
