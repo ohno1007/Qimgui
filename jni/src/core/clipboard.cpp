@@ -1,6 +1,6 @@
 #include "clipboard.h"
 
-#include "clipboard_system.h"
+#include "java_bridge.h"
 
 #include "imgui.h"
 
@@ -11,9 +11,6 @@ namespace aimgui {
 namespace clipboard {
 namespace {
 
-constexpr const char* kPath = "/data/local/tmp/aimgui.clip";
-constexpr size_t      kMax  = 64 * 1024;
-
 std::string g_text;
 bool        g_used_system = false;
 
@@ -22,9 +19,9 @@ void        SetFn(ImGuiContext*, const char* text) { Set(text); }
 
 }
 
-const char* Path() { return kPath; }
+const char* Path() { return "Java Clipboard"; }
 bool UsedSystem() { return g_used_system; }
-const char* SystemError() { return sysclip::LastError(); }
+const char* SystemError() { return java_bridge::LastError(); }
 
 void Report(const char* op, bool system_path, size_t n, const char* why = nullptr) {
     if (system_path) {
@@ -41,50 +38,28 @@ void Set(const char* text) {
     if (!text) text = "";
     g_text = text;
 
-    g_used_system = false;
-    Report("copy", false, g_text.size());
-
-    char tmp[128];
-    std::snprintf(tmp, sizeof(tmp), "%s.tmp", kPath);
-    if (FILE* f = std::fopen(tmp, "wb")) {
-        std::fwrite(g_text.data(), 1, g_text.size(), f);
-        std::fclose(f);
-        std::rename(tmp, kPath);
-    }
+    g_used_system = java_bridge::SetClipboard(g_text.c_str());
+    Report("copy", g_used_system, g_text.size(), g_used_system ? nullptr : java_bridge::LastError());
 }
 
 const char* Get() {
 
     std::string sys;
-    if (sysclip::ReadText(&sys)) {
+    if (java_bridge::GetClipboard(&sys)) {
         g_used_system = true;
         g_text = std::move(sys);
         Report("paste", true, g_text.size());
         return g_text.c_str();
     }
     g_used_system = false;
-
-    FILE* f = std::fopen(kPath, "rb");
-    if (!f) { Report("paste", false, 0, sysclip::LastError()); return g_text.c_str(); }
-
-    std::string in;
-    char buf[4096];
-    size_t n;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
-        in.append(buf, n);
-        if (in.size() > kMax) { in.resize(kMax); break; }
-    }
-    std::fclose(f);
-
-    while (!in.empty() && (in.back() == '\n' || in.back() == '\r')) in.pop_back();
-    g_text = std::move(in);
-    Report("paste", false, g_text.size(), sysclip::LastError());
+    g_text.clear();
+    Report("paste", false, 0, java_bridge::LastError());
     return g_text.c_str();
 }
 
 void Install() {
 
-    std::fprintf(stderr, "[clip] ready, file fallback at %s\n", kPath);
+    std::fprintf(stderr, "[clip] Java clipboard bridge ready\n");
     std::fflush(stderr);
 
     ImGuiPlatformIO& pio = ImGui::GetPlatformIO();

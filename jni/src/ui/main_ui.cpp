@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
 #include "core/clipboard.h"
+#include "core/java_bridge.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -33,16 +34,6 @@ const PageItem kPages[] = {
 const int kPagesCount = (int)(sizeof(kPages) / sizeof(kPages[0]));
 
 namespace {
-
-constexpr int kFpsPresets[] = { 0, 30, 60, 90, 120, 144 };
-constexpr const char* kFpsLabels =
-    u8"垂直同步\0" "30\0" "60\0" "90\0" "120\0" "144\0";
-
-int FpsToIndex(int fps) {
-    for (int i = 0; i < IM_ARRAYSIZE(kFpsPresets); ++i)
-        if (kFpsPresets[i] == fps) return i;
-    return 0;
-}
 
 bool SliderFloatGrabValue(const char* label, float* v, float v_min, float v_max,
                           const char* fmt = "%.3f") {
@@ -373,6 +364,13 @@ void DrawWindow(UiState* state) {
         paste_pending = false;
         chrome::LastItem(14.0f);
 
+        static const char* ime_status = nullptr;
+        if (ImGui::Button(ICON_FA_PEN "  系统输入法", ImVec2(-FLT_MIN, 0)))
+            ime_status = java_bridge::ShowInputMethod() ? u8"已请求系统输入法" : java_bridge::LastError();
+        chrome::LastItem();
+        ripple::TouchLastItem();
+        if (ime_status && *ime_status) ImGui::TextDisabled("%s", ime_status);
+
         const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴系统剪贴板",
                                           ImVec2(-FLT_MIN, 0));
         chrome::LastItem();
@@ -396,7 +394,7 @@ void DrawWindow(UiState* state) {
                 ImGui::TextDisabled("%s", clipboard::Path());
             }
         } else {
-            ImGui::TextDisabled(u8"从别处复制后点这里取过来");
+            ImGui::TextDisabled(u8"剪贴板仅通过 Java 系统服务读写");
         }
     }
 
@@ -434,15 +432,8 @@ void DrawWindow(UiState* state) {
 }
 
 void DrawPerformance(UiState* state) {
-    ImGui::SeparatorText(u8"帧率限制");
-
-    int fps_idx = FpsToIndex(state->target_fps);
-    const bool fps_hit = ImGui::Combo(u8"目标帧率", &fps_idx, kFpsLabels);
-    chrome::LastItemFrame(u8"目标帧率");
-    if (fps_hit) {
-        state->target_fps = kFpsPresets[fps_idx];
-    }
-    ripple::TouchLastItem();
+    ImGui::SeparatorText(u8"垂直同步");
+    ImGui::TextDisabled(u8"由显示设备的 VSync 驱动帧率，避免软件限帧与 FIFO 冲突。");
 
     ImGui::Spacing();
     KV(u8"当前帧率", "%.1f FPS", ImGui::GetIO().Framerate);

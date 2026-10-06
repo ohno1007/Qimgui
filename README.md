@@ -46,7 +46,6 @@ jni/
         ├── bloom_gl.cpp             GL post-process bloom (luma threshold → 2-pass blur → composite)
         ├── bloom_vk.cpp             Vulkan equivalent
         ├── font.{h,cpp}             system CJK font loader
-        ├── frame_pacer.h            drift-corrected sleep-until pacer
         ├── keyboard_input.{h,cpp}   volume key polling
         └── window_session.{h,cpp}   RAII for the (ANativeWindow, IRenderer) pair
 ```
