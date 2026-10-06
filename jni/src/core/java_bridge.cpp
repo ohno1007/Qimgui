@@ -7,6 +7,7 @@
 #include <vector>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -34,7 +35,7 @@ jobject Context(JNIEnv* e){jclass at=e->FindClass("android/app/ActivityThread");
 jobject Service(JNIEnv* e,jobject c,const char*n){jclass cc=e->GetObjectClass(c);jmethodID m=e->GetMethodID(cc,"getSystemService","(Ljava/lang/String;)Ljava/lang/Object;");jstring s=e->NewStringUTF(n);jobject o=m?e->CallObjectMethod(c,m,s):nullptr;e->DeleteLocalRef(s);e->DeleteLocalRef(cc);if(!o)ClearException(e,"system service unavailable");return o;}
 bool DirectSet(JNIEnv*e,const char*t){jobject c=Context(e);if(!c)return false;jobject cm=Service(e,c,"clipboard");jclass cd=e->FindClass("android/content/ClipData");jmethodID mk=cd?e->GetStaticMethodID(cd,"newPlainText","(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;"):nullptr;jclass mc=cm?e->GetObjectClass(cm):nullptr;jmethodID set=mc?e->GetMethodID(mc,"setPrimaryClip","(Landroid/content/ClipData;)V"):nullptr;jstring l=e->NewStringUTF("AImGui"),v=e->NewStringUTF(t?t:"");jobject clip=mk?e->CallStaticObjectMethod(cd,mk,l,v):nullptr;bool ok=set&&clip; if(ok) e->CallVoidMethod(cm,set,clip); ok=ok&&!e->ExceptionCheck();e->DeleteLocalRef(l);e->DeleteLocalRef(v);if(clip)e->DeleteLocalRef(clip);if(mc)e->DeleteLocalRef(mc);if(cd)e->DeleteLocalRef(cd);if(cm)e->DeleteLocalRef(cm);e->DeleteLocalRef(c);if(!ok)ClearException(e,"setPrimaryClip failed");return ok;}
 }
-bool Available(){std::lock_guard<std::mutex>l(g_mu);bool a=false;JNIEnv*e=Env(&a);if(a&&g_vm)g_vm->DetachCurrentThread();return e||Connect()>=0;}
+bool Available(){std::lock_guard<std::mutex>l(g_mu);bool a=false;JNIEnv*e=Env(&a);if(a&&g_vm)g_vm->DetachCurrentThread();int fd=Connect(); if(fd>=0) close(fd); return e||fd>=0;}
 const char* LastError(){std::lock_guard<std::mutex>l(g_mu);return g_error.c_str();}
 bool SetClipboard(const char*t){std::lock_guard<std::mutex>l(g_mu);bool a=false;JNIEnv*e=Env(&a);bool ok=e&&DirectSet(e,t);if(a&&g_vm)g_vm->DetachCurrentThread();if(ok)return true;return HostCommand(std::string("CLIPSET ")+B64Encode(t?t:""),nullptr);}
 bool GetClipboard(std::string*out){if(!out)return false;std::lock_guard<std::mutex>l(g_mu);std::string r;if(HostCommand("CLIPGET",&r)){*out=B64Decode(r);return true;}return false;}
