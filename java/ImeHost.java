@@ -7,13 +7,16 @@ import android.view.Gravity;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.os.Handler;
+import android.os.Looper;
+import java.util.concurrent.CountDownLatch;
 import java.io.*;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 
 public final class ImeHost {
   static String SOCK="/data/local/tmp/aimgui-ime.sock"; static String TOKEN="";
-  static Context ctx; static EditText edit; static WindowManager wm;
+  static Context ctx; static EditText edit; static WindowManager wm; static Handler MAIN;
   static Context context() throws Exception {
     Class<?> c=Class.forName("android.app.ActivityThread");
     java.lang.reflect.Method m=c.getDeclaredMethod("currentApplication"); m.setAccessible(true);
@@ -35,12 +38,21 @@ public final class ImeHost {
   static String dec(String s){return new String(Base64.decode(s,Base64.DEFAULT),java.nio.charset.StandardCharsets.UTF_8);}
   static String clipGet() throws Exception { ClipboardManager cm=(ClipboardManager)context().getSystemService(Context.CLIPBOARD_SERVICE); if(!cm.hasPrimaryClip())return ""; CharSequence t=cm.getPrimaryClip().getItemAt(0).coerceToText(context()); return t==null?"":t.toString(); }
   static void clipSet(String s) throws Exception { ClipboardManager cm=(ClipboardManager)context().getSystemService(Context.CLIPBOARD_SERVICE); cm.setPrimaryClip(ClipData.newPlainText("AImGui",s)); }
+  static void mainThread(final Runnable r) throws Exception {
+    if (Looper.myLooper()==Looper.getMainLooper()) { r.run(); return; }
+    final CountDownLatch done=new CountDownLatch(1); final Throwable[] error=new Throwable[1];
+    MAIN.post(new Runnable(){ public void run(){ try{r.run();}catch(Throwable t){error[0]=t;} finally{done.countDown();} }});
+    done.await(); if(error[0]!=null) throw new Exception(error[0]);
+  }
   static String command(String q) throws Exception {
-    if("SHOW".equals(q)){show();return "OK";} if("HIDE".equals(q)){hide();return "OK";}
-    if("GET".equals(q))return edit==null?"":enc(edit.getText().toString());
-    if("CLIPGET".equals(q))return enc(clipGet());
-    if(q.startsWith("CLIPSET ")){clipSet(dec(q.substring(8)));return "OK";}
+    final String[] result=new String[1];
+    if("SHOW".equals(q)){ mainThread(new Runnable(){ public void run(){ try{show();result[0]="OK";}catch(Throwable t){throw new RuntimeException(t);} }}); return result[0]; }
+    if("HIDE".equals(q)){ mainThread(new Runnable(){ public void run(){ hide();result[0]="OK";} }); return result[0]; }
+    if("GET".equals(q)){ mainThread(new Runnable(){ public void run(){ result[0]=edit==null?"":enc(edit.getText().toString()); }}); return result[0]; }
+    if("CLIPGET".equals(q)){ final String[] x=new String[1]; mainThread(new Runnable(){ public void run(){ try{x[0]=enc(clipGet());}catch(Throwable t){throw new RuntimeException(t);} }}); return x[0]; }
+    if(q.startsWith("CLIPSET ")){ final String value=dec(q.substring(8)); mainThread(new Runnable(){ public void run(){ try{clipSet(value);}catch(Throwable t){throw new RuntimeException(t);} }}); return "OK"; }
     return "ERR unknown command";
   }
-  public static void main(String[] a)throws Exception{ if(a.length>0)SOCK=a[0]; if(a.length>1)TOKEN=a[1]; new File(SOCK).delete(); final LocalServerSocket s=new LocalServerSocket(SOCK); File sf=new File(SOCK); sf.setReadable(false,false); sf.setWritable(false,false); sf.setReadable(true,true); sf.setWritable(true,true); for(;;){ try(LocalSocket c=s.accept()){ BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream())); BufferedWriter w=new BufferedWriter(new OutputStreamWriter(c.getOutputStream())); String q=r.readLine(); String ans; if(q==null||!q.startsWith(TOKEN+" ")){ans="ERR unauthorized";} else try{ans=command(q.substring(TOKEN.length()+1));}catch(Throwable t){ans="ERR "+t.getClass().getSimpleName()+" "+String.valueOf(t.getMessage());} w.write(ans+"\n"); w.flush(); }} }
+  static void serve() { try { final LocalServerSocket s=new LocalServerSocket(SOCK); File sf=new File(SOCK); sf.setReadable(false,false); sf.setWritable(false,false); sf.setReadable(true,true); sf.setWritable(true,true); for(;;){ try(LocalSocket c=s.accept()){ BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream())); BufferedWriter w=new BufferedWriter(new OutputStreamWriter(c.getOutputStream())); String q=r.readLine(); String ans; if(q==null||!q.startsWith(TOKEN+" ")){ans="ERR unauthorized";} else try{ans=command(q.substring(TOKEN.length()+1));}catch(Throwable t){ans="ERR "+t.getClass().getSimpleName()+" "+String.valueOf(t.getMessage());} w.write(ans+"\n"); w.flush(); }} } catch(Throwable ignored) {} }
+  public static void main(String[] a)throws Exception{ if(a.length>0)SOCK=a[0]; if(a.length>1)TOKEN=a[1]; new File(SOCK).delete(); Looper.prepareMainLooper(); MAIN=new Handler(Looper.getMainLooper()); new Thread(new Runnable(){ public void run(){serve();} },"aimgui-ime-ipc").start(); Looper.loop(); }
 }
