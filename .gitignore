@@ -4,7 +4,8 @@ build/
 java/build/
 *.o
 *.a
-!prebuilt/*/libimgui.a
 .vscode/
 .idea/
 *.log
+__pycache__/
+*.pyc

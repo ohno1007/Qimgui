@@ -2,34 +2,55 @@ name: build
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: 29.0.14206865
+  AIMGUI_REQUIRE_IPC_TEST: "1"
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Show toolchain
+      - name: Install pinned Android tools
         run: |
-          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
-          cmake --version
-
-      - name: Build AImGui (arm64-v8a)
+          if [[ ! -f "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties" || ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/d8" ]]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f -print -quit)"
+            "$SDKMANAGER" "ndk;$NDK_VERSION" "platforms;android-35" "build-tools;35.0.0"
+          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Verify upstream source manifest
+        run: python3 scripts/verify_sources.py
+      - name: Verify generated glass shaders
+        run: scripts/compile_glass_shaders.sh --check
+      - name: Build Android ARM64 ELF and input helper
         run: |
-          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
           ./build.sh
-
-      - name: Inspect ELF
-        run: |
+          scripts/build_ime_host.sh
           file libs/arm64-v8a/AImGui
-          ls -l libs/arm64-v8a/AImGui
-
+          sha256sum libs/arm64-v8a/AImGui libs/arm64-v8a/ime-host.dex
+      - name: Test ImGui rendering and Java bridge under sanitizers
+        run: tests/run_host_checks.sh
+      - name: Install software renderer for shader tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libegl1 libgl1-mesa-dri
+          python3 -m pip install -r tests/requirements.txt
+      - name: Render and verify GLES glass
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: python3 tests/render_glass.py --output build/glass-preview.png
       - uses: actions/upload-artifact@v4
         with:
-          name: AImGui-arm64-v8a
-          path: libs/arm64-v8a/AImGui
+          name: Qimgui-arm64-v8a
+          path: |
+            libs/arm64-v8a/AImGui
+            libs/arm64-v8a/ime-host.dex
+            build/glass-preview.png
           if-no-files-found: error

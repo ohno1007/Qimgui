@@ -19,15 +19,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Size-optimised flags shared by every target — mirror what the old
-# jni/Application.mk used so the resulting ELF stays small.
-# Note: -flto is intentionally omitted from both compile and link. The
-# old Application.mk listed it under APP_LDFLAGS only, so no objects ever
-# carried LTO IR and link-time LTO was a no-op. Turning real LTO on broke
-# ANativeWindowCreator::ProcessMirrorDisplay() (the hidden-visibility,
-# heavy-static-state mirror path crashed when a screen-recording virtual
-# display appeared). Keep the no-op for byte-for-byte parity with what
-# shipped before.
+# Keep binary size bounded. LTO stays disabled until the private Android
+# window/mirror ABI has been validated with it on real devices.
 add_compile_options(
     -Os
     -ffunction-sections
@@ -42,14 +35,21 @@ add_link_options(-Wl,--gc-sections -Wl,--icf=all -Wl,-s)
 
 set(JNI ${CMAKE_SOURCE_DIR}/jni)
 
-# ── Prebuilt Dear ImGui ──────────────────────────────────────────────────
-# Shipped under prebuilt/$ABI/libimgui.a; only public headers live in-tree.
-add_library(imgui STATIC IMPORTED GLOBAL)
-set_target_properties(imgui PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/prebuilt/${ANDROID_ABI}/libimgui.a)
-target_include_directories(imgui INTERFACE
-    ${JNI}/include/imgui
-    ${JNI}/include/imgui/backends)
+# Compile the pinned upstream sources with the same configuration as callers.
+# scripts/update_imgui.py refreshes sources, headers and provenance together.
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
+add_library(imgui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp)
+target_include_directories(imgui PUBLIC
+    ${IMGUI_DIR} ${IMGUI_DIR}/backends ${CMAKE_SOURCE_DIR}/config)
+target_compile_definitions(imgui PUBLIC IMGUI_USER_CONFIG="aimgui_imconfig.h")
+target_compile_definitions(imgui PRIVATE
+    VK_USE_PLATFORM_ANDROID_KHR IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 
 # ── aimgui_platform: ANativeWindow + Touch helper ────────────────────────
 add_library(aimgui_platform STATIC
@@ -74,7 +74,7 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/haptics.cpp
     ${JNI}/src/core/config.cpp
     ${JNI}/src/core/clipboard.cpp
-    ${JNI}/src/core/clipboard_system.cpp
+    ${JNI}/src/core/java_bridge.cpp
     ${JNI}/src/core/glass_gl.cpp
     ${JNI}/src/core/glass_vk.cpp)
 target_compile_definitions(aimgui_core PRIVATE

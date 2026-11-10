@@ -16,8 +16,6 @@ struct UiState {
 
     bool mirror_hides_window = true;
 
-    int target_fps = 0;
-
     int nav_page = 0;
 
     bool haptics_enabled = true;

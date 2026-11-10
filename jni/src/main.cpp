@@ -1,8 +1,7 @@
 #include "core/font.h"
-#include "core/frame_pacer.h"
 #include "core/keyboard_input.h"
 #include "core/clipboard.h"
-#include "core/clipboard_system.h"
+#include "core/java_bridge.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -31,8 +30,6 @@ static void Live2DScenePreDraw() { aimgui::live2d::Draw(); }
 #define BOOT(step) __android_log_print(ANDROID_LOG_INFO, "AImGui", "[boot] " step)
 
 int main(int argc, char** argv) {
-
-    if (const int rc = aimgui::sysclip::RunHelperMain(argc, argv); rc != -1) return rc;
 
     using namespace android;
     using clock = std::chrono::steady_clock;
@@ -116,7 +113,6 @@ int main(int argc, char** argv) {
     aimgui::SensorTilt tilt;
     tilt.Init();
     BOOT("entering main loop");
-    aimgui::FramePacer pacer;
 
     int frames_presented = 0;
     constexpr int kMirrorHoldoff = 12;
@@ -131,7 +127,6 @@ int main(int argc, char** argv) {
         auto now = clock::now();
         io.DeltaTime = std::max(1e-6f, std::chrono::duration<float>(now - last).count());
         last = now;
-        pacer.SetTargetFps(st.target_fps);
 
         if (now - last_display_poll >= std::chrono::milliseconds(200)) {
             last_display_poll = now;
@@ -220,7 +215,6 @@ int main(int argc, char** argv) {
         if (frames_presented <= kMirrorHoldoff) {
             if (++frames_presented == 1) BOOT("first frame presented");
         }
-        pacer.Wait();
 
         if (aimgui::config::Dirty(&st)) {
             if (!cfg_dirty) { cfg_dirty = true; cfg_dirty_since = now; }
@@ -257,6 +251,7 @@ int main(int argc, char** argv) {
 #endif
 
     aimgui::config::Save(&st);
+    aimgui::java_bridge::Shutdown();
     haptics.Shutdown();
     tilt.Shutdown();
     aimgui::kbd_input::Shutdown();

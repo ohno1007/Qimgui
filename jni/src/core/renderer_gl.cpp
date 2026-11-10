@@ -25,6 +25,7 @@ namespace aimgui {
 namespace {
 
 class GLRenderer final : public IRenderer {
+    bool m_ImGuiReady = false;
 public:
     bool Init(ANativeWindow* window, int width, int height) override {
         m_Window = window;
@@ -63,6 +64,7 @@ public:
         glClearColor(0.f, 0.f, 0.f, 0.f);
 
         if (!ImGui_ImplOpenGL3_Init("#version 300 es")) return false;
+        m_ImGuiReady = true;
         m_Bloom.Init(width, height);
         m_Glass.Init();
         return true;
@@ -123,7 +125,7 @@ public:
 
         for (int i = 0; i < m_WidgetCount; ++i)
             m_Glass.Draw(m_CaptureTex, m_Width, m_Height, m_Width, m_Height,
-                         &m_WidgetRects[i], 1);
+                         &m_WidgetRects[i], 1, true);
     }
 
     bool EnsureCapture() {
@@ -155,7 +157,8 @@ public:
         }
         m_AhbCache.clear();
         m_BackdropTex = 0;
-        ImGui_ImplOpenGL3_Shutdown();
+        if (m_ImGuiReady) ImGui_ImplOpenGL3_Shutdown();
+        m_ImGuiReady = false;
         if (m_Display != EGL_NO_DISPLAY) {
             eglMakeCurrent(m_Display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             if (m_Context != EGL_NO_CONTEXT) eglDestroyContext(m_Display, m_Context);

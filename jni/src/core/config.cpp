@@ -26,7 +26,6 @@ struct Field {
 
 #define F(name, kind) { #name, kind, offsetof(UiState, name) }
 const Field kFields[] = {
-    F(target_fps,       Kind::Int),
     F(glass_clarity,    Kind::Float),
     F(bloom_intensity,  Kind::Float),
     F(screen_mirror,    Kind::Bool),
@@ -134,10 +133,9 @@ void Load(UiState* state) {
 
     Remember(state);
 
-    LOGI("[config] loaded %s: mirror=%d permeate=%d fps=%d stage=%d page=%d haptics=%d",
+    LOGI("[config] loaded %s: mirror=%d permeate=%d stage=%d page=%d haptics=%d",
          kPath, state->screen_mirror ? 1 : 0, state->permeate_record ? 1 : 0,
-         state->target_fps, state->stage, state->nav_page,
-         state->haptics_enabled ? 1 : 0);
+         state->stage, state->nav_page, state->haptics_enabled ? 1 : 0);
 }
 
 void Save(const UiState* state) {
