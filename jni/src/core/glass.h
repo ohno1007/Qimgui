@@ -5,13 +5,13 @@ namespace aimgui {
 struct GlassRect {
     float x = 0, y = 0, w = 0, h = 0;
     float rounding  = 12.0f;
-    float edgeWidth = 60.0f;
-    float bend      = 1.15f;
+    float edgeWidth = 40.0f;
+    float bend      = 0.65f;
     float alpha     = 1.0f;
     float tintR = 0.0f, tintG = 0.0f, tintB = 0.0f;
     float tintA = 0.0f;
 
-    float blur  = 7.0f;
+    float blur  = 6.0f;
 
     float lightX = -0.6f, lightY = -0.8f;
 

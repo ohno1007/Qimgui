@@ -364,12 +364,25 @@ void DrawWindow(UiState* state) {
         paste_pending = false;
         chrome::LastItem(14.0f);
 
-        static const char* ime_status = nullptr;
-        if (ImGui::Button(ICON_FA_PEN "  系统输入法", ImVec2(-FLT_MIN, 0)))
-            ime_status = java_bridge::ShowInputMethod() ? u8"已请求系统输入法" : java_bridge::LastError();
-        chrome::LastItem();
-        ripple::TouchLastItem();
-        if (ime_status && *ime_status) ImGui::TextDisabled("%s", ime_status);
+        static std::string ime_status;
+        if (ImGui::Button(ICON_FA_PEN u8"  系统输入法", ImVec2(-FLT_MIN, 0)))
+            ime_status = java_bridge::ShowInputMethod(buf) ? u8"输入后点击应用输入" : java_bridge::LastError();
+        chrome::LastItem(); ripple::TouchLastItem();
+        if (ImGui::Button(u8"应用输入")) {
+            if (java_bridge::GetInputText(&incoming)) {
+                std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());
+                paste_pending = true;
+                java_bridge::HideInputMethod();
+                ime_status = u8"已应用输入";
+            } else ime_status = java_bridge::LastError();
+        }
+        chrome::LastItem(); ripple::TouchLastItem();
+        ImGui::SameLine();
+        if (ImGui::Button(u8"收起键盘")) {
+            ime_status = java_bridge::HideInputMethod() ? u8"已收起键盘" : java_bridge::LastError();
+        }
+        chrome::LastItem(); ripple::TouchLastItem();
+        if (!ime_status.empty()) ImGui::TextDisabled("%s", ime_status.c_str());
 
         const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴系统剪贴板",
                                           ImVec2(-FLT_MIN, 0));
@@ -386,10 +399,10 @@ void DrawWindow(UiState* state) {
         if (last_len >= 0) {
             if (clipboard::UsedSystem()) {
                 if (last_len == 0) ImGui::TextDisabled(u8"系统剪贴板是空的");
-                else               ImGui::TextDisabled(u8"系统剪贴板  ·  %d 个字符", last_len);
+                else               ImGui::TextDisabled(u8"系统剪贴板  ·  %d 字节", last_len);
             } else {
                 const char* why = clipboard::SystemError();
-                ImGui::TextDisabled(u8"来自文件  ·  %d 个字符", last_len);
+                ImGui::TextDisabled(u8"进程内剪贴板  ·  %d 字节", last_len);
                 if (why && *why) ImGui::TextDisabled(u8"系统剪贴板不可用：%s", why);
                 ImGui::TextDisabled("%s", clipboard::Path());
             }

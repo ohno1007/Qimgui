@@ -14,9 +14,10 @@ public:
 
     void Draw(GLuint screenTex, int screenW, int screenH,
               int surfaceW, int surfaceH,
-              const GlassRect* rects, int count);
+              const GlassRect* rects, int count, bool framebufferSource = false);
 
 private:
+    GLint m_LocFlipY = -1;
     bool   m_Ready   = false;
     GLuint m_Prog    = 0;
     GLuint m_VAO     = 0;

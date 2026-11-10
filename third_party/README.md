@@ -1,26 +1,19 @@
-# third_party — Live2D Cubism SDK drop-in
+# Third-party dependencies
 
-The Live2D integration is **off by default** and requires two components from
-the official **Cubism SDK for Native** package, which you must download
-yourself after agreeing to Live2D's license (they cannot be redistributed in
-this repo, and are `.gitignore`d here):
+## Dear ImGui
 
-```
-third_party/
-├── Core/                       # from the SDK package: Core/
-│   ├── include/Live2DCubismCore.h
-│   └── lib/android/arm64-v8a/libLive2DCubismCore.a
-└── CubismNativeFramework/      # from the SDK package: Framework/
-    └── CMakeLists.txt , src/ , ...
-```
+`imgui/` contains the required core and OpenGL/Vulkan backend sources from the
+pinned official release. `imgui/UPSTREAM.json` records the tag, exact commit and
+per-file SHA-256 hashes. Its MIT license is preserved in `imgui/LICENSE.txt`.
 
-> **Version match matters.** Copy `Core/` **and** `Framework/` from the *same*
-> SDK package — mismatched Core/Framework versions will not link or run.
+Project configuration lives in `config/aimgui_imconfig.h` and is passed through
+`IMGUI_USER_CONFIG` to every target. Do not edit the vendored upstream defaults.
 
-Get the SDK here: https://www.live2d.com/en/sdk/download/native/
-(Cubism 5 SDK for Native). Unzip and copy:
+Update with `python3 scripts/update_imgui.py <stable-tag>`, then run the checks
+and Android build before committing. The ordinary build needs no network.
 
-- `<sdk>/Core`      → `third_party/Core`
-- `<sdk>/Framework` → `third_party/CubismNativeFramework`
+## Live2D Cubism (optional)
 
-Then build with `-DAIMGUI_LIVE2D=ON`. See [docs/LIVE2D.md](../docs/LIVE2D.md).
+Copy `Core/` and `CubismNativeFramework/` from the same Cubism SDK for Native
+package into this directory. These SDK directories are ignored by Git.
+See [docs/LIVE2D.md](../docs/LIVE2D.md) for the full setup and licensing notes.

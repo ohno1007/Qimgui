@@ -28,7 +28,7 @@ void Report(const char* op, bool system_path, size_t n, const char* why = nullpt
         std::fprintf(stderr, "[clip] %s: system clipboard, %zu bytes\n", op, n);
     } else {
 
-        std::fprintf(stderr, "[clip] %s: file, %zu bytes%s%s\n", op, n,
+        std::fprintf(stderr, "[clip] %s: in-process fallback, %zu bytes%s%s\n", op, n,
                      (why && *why) ? " — " : "", (why && *why) ? why : "");
     }
     std::fflush(stderr);
@@ -52,8 +52,7 @@ const char* Get() {
         return g_text.c_str();
     }
     g_used_system = false;
-    g_text.clear();
-    Report("paste", false, 0, java_bridge::LastError());
+    Report("paste", false, g_text.size(), java_bridge::LastError());
     return g_text.c_str();
 }
 

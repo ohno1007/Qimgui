@@ -1,0 +1,3 @@
+moderngl==5.13.0
+numpy>=1.26,<3
+Pillow>=10,<13

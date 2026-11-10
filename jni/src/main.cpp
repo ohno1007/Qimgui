@@ -1,6 +1,7 @@
 #include "core/font.h"
 #include "core/keyboard_input.h"
 #include "core/clipboard.h"
+#include "core/java_bridge.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -250,6 +251,7 @@ int main(int argc, char** argv) {
 #endif
 
     aimgui::config::Save(&st);
+    aimgui::java_bridge::Shutdown();
     haptics.Shutdown();
     tilt.Shutdown();
     aimgui::kbd_input::Shutdown();

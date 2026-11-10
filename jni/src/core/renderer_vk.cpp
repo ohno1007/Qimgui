@@ -39,6 +39,8 @@ static void check_vk(VkResult err) {
 }
 
 class VKRenderer final : public IRenderer {
+    bool m_ImGuiReady = false;
+    void* m_BackendLoader = nullptr;
 public:
     bool Init(ANativeWindow* window, int width, int height) override {
         m_Window = window;
@@ -50,11 +52,11 @@ public:
             return false;
         }
 
-        void* libvulkan = dlopen("libvulkan.so", RTLD_NOW);
-        ImGui_ImplVulkan_LoadFunctions(0,
+        m_BackendLoader = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+        if (!m_BackendLoader || !ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_0,
             [](const char* name, void* user) -> PFN_vkVoidFunction {
                 return reinterpret_cast<PFN_vkVoidFunction>(dlsym(user, name));
-            }, libvulkan);
+            }, m_BackendLoader)) return false;
 
         if (!CreateInstance()) return false;
         if (!SelectPhysicalDevice()) return false;
@@ -83,7 +85,7 @@ public:
         m_Glass.Init(m_Device, m_DescPool,
                      m_Bloom.Ready() ? m_Bloom.GetSceneRenderPass() : m_WD->RenderPass);
 
-        SetupImGuiBackend();
+        if (!SetupImGuiBackend()) return false;
 
         if (m_Bloom.Ready()) m_Bloom.RegisterImGuiSnapshot();
 
@@ -108,14 +110,21 @@ public:
     }
 
     void Shutdown() override {
-        if (m_Device == VK_NULL_HANDLE) return;
+        if (m_Device == VK_NULL_HANDLE) {
+            if (m_Instance != VK_NULL_HANDLE) vkDestroyInstance(m_Instance, nullptr);
+            m_Instance = VK_NULL_HANDLE;
+            if (m_BackendLoader) dlclose(m_BackendLoader);
+            m_BackendLoader = nullptr;
+            return;
+        }
         vkDeviceWaitIdle(m_Device);
 #ifdef AIMGUI_LIVE2D
         DestroyLive2DResources();
 #endif
         m_Bloom.Shutdown();
         m_Glass.Shutdown();
-        ImGui_ImplVulkan_Shutdown();
+        if (m_ImGuiReady) ImGui_ImplVulkan_Shutdown();
+        m_ImGuiReady = false;
         if (m_WD) {
             ImGui_ImplVulkanH_DestroyWindow(m_Instance, m_Device, m_WD, nullptr);
             delete m_WD;
@@ -126,6 +135,8 @@ public:
         vkDestroyInstance(m_Instance, nullptr);
         m_Device = VK_NULL_HANDLE;
         m_Instance = VK_NULL_HANDLE;
+        if (m_BackendLoader) dlclose(m_BackendLoader);
+        m_BackendLoader = nullptr;
     }
 
     const char* Name() const override { return "Vulkan"; }
@@ -366,13 +377,15 @@ private:
 
     bool CreateDescriptorPool() {
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64 }, // glass and bloom
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 64 }, // ImGui 1.93 textures
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 8 },
         };
         VkDescriptorPoolCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         ci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        ci.maxSets = 64;
-        ci.poolSizeCount = 1;
+        ci.maxSets = 136;
+        ci.poolSizeCount = IM_ARRAYSIZE(sizes);
         ci.pPoolSizes = sizes;
         return vkCreateDescriptorPool(m_Device, &ci, nullptr, &m_DescPool) == VK_SUCCESS;
     }
@@ -409,8 +422,9 @@ private:
         return true;
     }
 
-    void SetupImGuiBackend() {
+    bool SetupImGuiBackend() {
         ImGui_ImplVulkan_InitInfo ii{};
+        ii.ApiVersion = VK_API_VERSION_1_0;
         ii.Instance = m_Instance;
         ii.PhysicalDevice = m_PhysicalDevice;
         ii.Device = m_Device;
@@ -424,7 +438,8 @@ private:
         ii.MinImageCount = m_MinImageCount;
         ii.ImageCount = m_WD->ImageCount;
         ii.CheckVkResultFn = check_vk;
-        ImGui_ImplVulkan_Init(&ii);
+        m_ImGuiReady = ImGui_ImplVulkan_Init(&ii);
+        return m_ImGuiReady;
     }
 
     void RebuildSwapchain() {
@@ -440,6 +455,7 @@ private:
             m_WD->FrameIndex = 0;
             m_Width = w; m_Height = h;
 
+            m_Glass.Shutdown();
             if (m_Bloom.Ready()) {
                 m_Bloom.Shutdown();
                 if (m_Bloom.Init(m_Device, m_PhysicalDevice, m_DescPool,
@@ -454,6 +470,8 @@ private:
                     }
                 }
             }
+            m_Glass.Init(m_Device, m_DescPool,
+                m_Bloom.Ready() ? m_Bloom.GetSceneRenderPass() : m_WD->RenderPass);
         }
         m_SwapChainRebuild = false;
     }

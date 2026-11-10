@@ -17,8 +17,8 @@ constexpr float kRimThickness = 1.5f;
 
 constexpr float kEdgeShare = 0.30f;
 constexpr float kEdgeMax   = 18.0f;
-constexpr float kBend      = 0.95f;
-constexpr float kBlur      = 2.0f;
+constexpr float kBend      = 0.40f;
+constexpr float kBlur      = 1.5f;
 
 bool      g_live = false;
 GlassRect g_rects[kMaxWidgetGlass];
