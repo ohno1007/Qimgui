@@ -27,7 +27,10 @@ jobs:
         run: tests/run_host_checks.sh
       - name: Check Android backend compatibility
         run: |
-          sdkmanager "ndk;29.0.14206865"
+          if [[ ! -f "$ANDROID_HOME/ndk/29.0.14206865/source.properties" ]]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f -print -quit)"
+            "$SDKMANAGER" "ndk;29.0.14206865"
+          fi
           ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865" ./build.sh
       - uses: actions/upload-artifact@v4
         with:

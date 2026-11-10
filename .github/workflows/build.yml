@@ -20,7 +20,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned Android tools
         run: |
-          sdkmanager "ndk;$NDK_VERSION" "platforms;android-35" "build-tools;35.0.0"
+          if [[ ! -f "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties" || ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/d8" ]]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f -print -quit)"
+            "$SDKMANAGER" "ndk;$NDK_VERSION" "platforms;android-35" "build-tools;35.0.0"
+          fi
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - name: Verify upstream source manifest
         run: python3 scripts/verify_sources.py
