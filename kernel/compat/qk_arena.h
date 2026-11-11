@@ -24,14 +24,7 @@
 extern "C" {
 #endif
 
-#if defined(__KERNEL__)
-#include <linux/types.h>
-#else
-#include <stddef.h>
-#include <stdint.h>
-typedef uint32_t u32;
-typedef uint64_t u64;
-#endif
+#include "qk_types.h"
 
 struct qk_arena_stats {
     u32 capacity;     /* Payload bytes the region can hold, minus headers. */

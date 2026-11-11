@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include <linux/device.h>
 #include <linux/input.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>

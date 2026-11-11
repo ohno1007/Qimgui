@@ -36,7 +36,10 @@ QK_INCLUDES := -I$(src)/kernel/src -I$(src)/kernel/compat -I$(src)/kernel/raster
 ccflags-y := $(QK_INCLUDES) -DIMGUI_USER_CONFIG='"qk_imconfig.h"'
 
 # qk_math.c is the only C file that computes in floating point.
-# Kbuild keys these by object basename, not by path.
+# Kbuild keys these by the object's path relative to $(obj); the bare name is
+# kept as well, for kernels whose target-stem is just the basename.
+CFLAGS_REMOVE_kernel/compat/qk_math.o := -mgeneral-regs-only
+CFLAGS_kernel/compat/qk_math.o := -fno-math-errno
 CFLAGS_REMOVE_qk_math.o := -mgeneral-regs-only
 CFLAGS_qk_math.o := -fno-math-errno
 
@@ -49,8 +52,13 @@ QK_CXX_DROP := -std=gnu11 -std=gnu90 -std=gnu99 -mgeneral-regs-only \
                -Werror=implicit-int -Werror=strict-prototypes -Wstrict-prototypes \
                -Wmissing-prototypes -Wold-style-definition -Wno-pointer-sign \
                -Werror=designated-init -Wnested-externs -Wno-pointer-to-int-cast \
-               -Wenum-conversion
-QK_CXXFLAGS = $(filter-out $(QK_CXX_DROP),$(c_flags)) \
+               -Wenum-conversion -Werror=incompatible-pointer-types \
+               -Werror=designated-init -Wno-restrict
+# The kernel force-includes its own headers into every C file; those headers
+# are not valid C++, so the -include pairs come out along with the C-only
+# warnings. Everything else -- the ABI, codegen and hardening flags -- stays,
+# because the module has to agree with the kernel on all of it.
+QK_CXXFLAGS = $(filter-out -include %.h $(QK_CXX_DROP),$(c_flags)) \
               -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics \
               -fno-use-cxa-atexit -nostdinc++ -fno-math-errno \
               -I$(src)/kernel/compat/include \

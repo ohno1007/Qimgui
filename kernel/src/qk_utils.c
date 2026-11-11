@@ -28,6 +28,15 @@ static int qk_resolve_lookup(void)
     return lookup_name_fn ? 0 : -ENOENT;
 }
 
+/* Reported by the assert() the C++ sources compile against: see
+ * kernel/compat/include/assert.h.
+ */
+void qk_assert_failed(const char *condition, const char *file, int line)
+{
+    pr_warn_ratelimited("[" QK_TAG "] assertion failed: %s at %s:%d\n",
+                        condition, file, line);
+}
+
 unsigned long NO_CFI qk_lookup_name(const char *name)
 {
     unsigned long address = 0;

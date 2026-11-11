@@ -17,17 +17,7 @@
 extern "C" {
 #endif
 
-#if defined(__KERNEL__)
-#include <linux/types.h>
-#else
-#include <stddef.h>
-#include <stdint.h>
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef int32_t s32;
-typedef uint64_t u64;
-#endif
+#include "qk_types.h"
 
 #define QK_SUBPIXEL_BITS 8
 #define QK_SUBPIXEL      (1 << QK_SUBPIXEL_BITS)

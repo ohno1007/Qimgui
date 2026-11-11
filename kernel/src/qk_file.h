@@ -12,11 +12,7 @@
 extern "C" {
 #endif
 
-#if defined(__KERNEL__)
-#include <linux/types.h>
-#else
-#include <stddef.h>
-#endif
+#include "qk_types.h"
 
 /* Size in bytes, or a negative errno. */
 long qk_file_size(const char *path);

@@ -6,6 +6,8 @@
 
 #include "qk_app.h"
 
+#include <cstdint>
+
 #include "imgui.h"
 #include "ui/md3.h"
 #include "core/font_data.h"

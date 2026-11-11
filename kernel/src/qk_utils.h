@@ -12,7 +12,10 @@
 /* Calls through a resolved address skip the compiler's control-flow integrity
  * check, which cannot know a target it never saw.
  */
-#if defined(__has_attribute)
+/* Only clang implements the kernel's CFI, and only clang understands this
+ * attribute; GCC warns about the unknown value and checks nothing anyway.
+ */
+#if defined(__clang__) && defined(__has_attribute)
 #if __has_attribute(__no_sanitize__)
 #define NO_CFI __attribute__((__no_sanitize__("cfi")))
 #endif
