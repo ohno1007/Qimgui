@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 namespace {
 
@@ -43,6 +44,11 @@ AppState app;
  * not the userspace build's file, because the two describe different features.
  */
 constexpr unsigned long kSettingsLimit = 4096;
+
+/* The kernel stack is a few pages for everything: these buffers live here
+ * instead. Only the frame worker touches them, one call at a time.
+ */
+char settings_buffer[kSettingsLimit + 1];
 
 bool Changed()
 {
@@ -108,19 +114,21 @@ void Apply(const char *key, const char *value)
         ui.last_full_size.y = (float)number;
 }
 
-void Load()
+void Load(const char *text)
 {
-    char buffer[kSettingsLimit + 1];
-    long got;
     char *cursor;
+    unsigned long length = 0;
 
-    if (!app.settings_path)
+    if (!text)
         return;
-    got = qk_file_read(app.settings_path, buffer, kSettingsLimit);
-    if (got <= 0)
+    while (length < kSettingsLimit && text[length])
+        length++;
+    if (!length)
         return;
-    buffer[got] = 0;
-    for (cursor = buffer; *cursor;) {
+    /* Parsing splits the text in place, so it works on this copy. */
+    __builtin_memcpy(settings_buffer, text, length);
+    settings_buffer[length] = 0;
+    for (cursor = settings_buffer; *cursor;) {
         char *line = cursor, *separator;
 
         while (*cursor && *cursor != '\n')
@@ -165,9 +173,13 @@ void Heavy() {}
 } // namespace aimgui
 
 extern "C" void qk_app_init(int mode, int dark, int scale_percent,
-                            const char *settings_path)
+                            const char *settings_path, const char *settings_text)
 {
-    app = AppState{};
+    /* Rebuilt in place: UiState carries a few kilobytes of rects, and
+     * assigning a temporary would put all of it on the kernel's stack.
+     */
+    app.~AppState();
+    new (&app) AppState();
     app.mode = mode == QK_APP_GALLERY ? QK_APP_GALLERY : QK_APP_MAIN;
     app.settings_path = settings_path;
     app.ui.md3_dark = dark != 0;
@@ -185,7 +197,7 @@ extern "C" void qk_app_init(int mode, int dark, int scale_percent,
     app.ui.block_touch = false;
     app.ui.block_touch_ok = false;
     app.ui.permeate_record = false;
-    Load();
+    Load(settings_text);
     app.loaded = true;
 }
 
@@ -222,12 +234,11 @@ extern "C" int qk_app_wants_exit(void)
 
 extern "C" int qk_app_save_settings(void)
 {
-    char buffer[kSettingsLimit];
     int length;
 
     if (!app.settings_path || !app.loaded || !Changed())
         return 0;
-    length = std::snprintf(buffer, sizeof(buffer),
+    length = std::snprintf(settings_buffer, kSettingsLimit,
                            "dark=%d\nhaptics=%d\nscale=%.3f\npage=%d\n"
                            "component_page=%d\nstage=%d\nball_scale=%.3f\n"
                            "window_x=%.1f\nwindow_y=%.1f\nwindow_w=%.1f\nwindow_h=%.1f\n",
@@ -238,9 +249,10 @@ extern "C" int qk_app_save_settings(void)
                            (double)app.ui.last_full_pos.y,
                            (double)app.ui.last_full_size.x,
                            (double)app.ui.last_full_size.y);
-    if (length <= 0 || (unsigned)length >= sizeof(buffer))
+    if (length <= 0 || (unsigned long)length >= kSettingsLimit)
         return -22;
-    const int ret = qk_file_write(app.settings_path, buffer, (unsigned long)length);
+    const int ret = qk_file_write(app.settings_path, settings_buffer,
+                                  (unsigned long)length);
     if (ret)
         return ret;
     Remember();

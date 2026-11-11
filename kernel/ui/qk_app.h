@@ -15,8 +15,13 @@ enum qk_app_mode {
     QK_APP_GALLERY,      /* The MD3 component gallery on its own. */
 };
 
-/* Called once, before the first frame. */
-void qk_app_init(int mode, int dark, int scale_percent, const char *settings_path);
+/* Called once, before the first frame. settings_text is the settings file's
+ * contents, already read by the caller: reading a file sleeps, and this runs
+ * inside the floating-point region, which may not. settings_path is kept for
+ * saving, which happens between frames.
+ */
+void qk_app_init(int mode, int dark, int scale_percent, const char *settings_path,
+                 const char *settings_text);
 /* Draws one frame's worth of UI. Inside the ImGui frame and the FP region. */
 void qk_app_draw(void);
 /* True once the user has asked the window to close. */

@@ -38,6 +38,7 @@ struct qk_ui_config {
     s32 scale_percent;      /* UI scale; 100 is 1x. 0 follows the display. */
     s32 mode;               /* enum qk_app_mode: main window or gallery. */
     const char *settings_path;  /* NULL keeps settings in memory only. */
+    const char *settings_text;  /* The settings file, already read by the caller. */
     /* A font read from the device, merged over the built-in Latin subset so
      * the interface can show Chinese. The buffer must outlive the context.
      */

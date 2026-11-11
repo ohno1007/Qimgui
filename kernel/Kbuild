@@ -63,7 +63,9 @@ QK_CXXFLAGS = $(filter-out -include %.h $(QK_CXX_DROP),$(c_flags)) \
               -fno-use-cxa-atexit -nostdinc++ -fno-math-errno \
               -I$(src)/kernel/compat/include \
               -Wno-unused-parameter -Wno-missing-field-initializers \
-              -Wno-class-memaccess -Wno-invalid-offsetof
+              -Wno-invalid-offsetof -Wno-unknown-warning-option \
+              -Wno-unused-function -Wno-unused-variable \
+              -Wno-error=frame-larger-than
 
 quiet_cmd_qk_cxx = CXX [M]  $@
       cmd_qk_cxx = $(QK_CXX) $(QK_CXXFLAGS) -c -o $@ $<

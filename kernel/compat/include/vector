@@ -50,7 +50,7 @@ public:
             return;
         T* grown = static_cast<T*>(::operator new(wanted * sizeof(T)));
         for (size_t i = 0; i < count_; i++) {
-            new (grown + i) T(move(items_[i]));
+            new (grown + i) T(std::move(items_[i]));
             items_[i].~T();
         }
         ::operator delete(items_);
@@ -75,12 +75,12 @@ public:
     }
     void push_back(T&& value) {
         grow();
-        new (items_ + count_) T(move(value));
+        new (items_ + count_) T(std::move(value));
         count_++;
     }
     template <class... Args> T& emplace_back(Args&&... arguments) {
         grow();
-        new (items_ + count_) T(forward<Args>(arguments)...);
+        new (items_ + count_) T(std::forward<Args>(arguments)...);
         return items_[count_++];
     }
     void pop_back() {
@@ -93,7 +93,7 @@ public:
         if (index >= count_)
             return end();
         for (size_t i = index; i + 1 < count_; i++)
-            items_[i] = move(items_[i + 1]);
+            items_[i] = std::move(items_[i + 1]);
         items_[--count_].~T();
         return items_ + index;
     }

@@ -428,7 +428,7 @@ extern "C" int qk_ui_init(const struct qk_ui_config* config)
     md::SetFonts(ui.font, ui.font);
     md::SetTheme(ui.dark, ui.scale);
     qk_app_init(config->mode, config->dark, config->scale_percent,
-                config->settings_path);
+                config->settings_path, config->settings_text);
     if (qk_arena_exhausted()) {
         ImGui::DestroyContext();
         return -12;

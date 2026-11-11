@@ -12,6 +12,7 @@
 
 #include "qk_app.h"
 #include "qk_arena.h"
+#include "qk_file.h"
 #include "qk_fpu.h"
 #include "qk_frame.h"
 #include "qk_input.h"
@@ -22,6 +23,12 @@
 
 #define QK_EVENT_BATCH   64
 #define QK_SNAPSHOT_MAX  (4u << 20)
+#define QK_SETTINGS_MAX  4096
+
+/* Read before the frame loop starts: file access sleeps, and the UI runs
+ * where nothing may. Static because the kernel stack has no room for it.
+ */
+static char settings_text[QK_SETTINGS_MAX + 1];
 
 static struct {
     struct workqueue_struct *queue;
@@ -240,6 +247,13 @@ int qk_frame_start(struct qk_window *window, const struct qk_frame_config *setup
     config.scale_percent = setup->scale_percent;
     config.mode = setup->mode;
     config.settings_path = setup->settings_path;
+    if (setup->settings_path) {
+        const long got = qk_file_read(setup->settings_path, settings_text,
+                                      QK_SETTINGS_MAX);
+
+        settings_text[got > 0 ? got : 0] = 0;
+        config.settings_text = settings_text;
+    }
     config.extra_font = setup->font;
     config.extra_font_size = setup->font_size;
     /* The UI allocates its context and font atlas here, in a context that may

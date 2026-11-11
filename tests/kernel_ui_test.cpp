@@ -115,6 +115,8 @@ struct Session {
     Surface target;
     s32 width, height;
 
+    char settings_text[4097] = {};
+
     Session(s32 width, s32 height, bool dark, int scale_percent = 100,
             int mode = QK_APP_MAIN, const char* settings = nullptr)
         : target(width, height), width(width), height(height) {
@@ -125,6 +127,13 @@ struct Session {
         config.scale_percent = scale_percent;
         config.mode = mode;
         config.settings_path = settings;
+        if (settings) {
+            // The module reads the file before the frame loop starts, where
+            // sleeping is still allowed; do the same here.
+            const long got = qk_file_read(settings, settings_text, 4096);
+            settings_text[got > 0 ? got : 0] = 0;
+            config.settings_text = settings_text;
+        }
         assert(qk_ui_init(&config) == 0);
         // A second init on a live context is refused rather than leaking one.
         assert(qk_ui_init(&config) == -16);

@@ -33,9 +33,9 @@ pair<First, Second> make_pair(First first, Second second) {
 }
 
 template <class T> void swap(T& left, T& right) {
-    T held = move(left);
-    left = move(right);
-    right = move(held);
+    T held = std::move(left);
+    left = std::move(right);
+    right = std::move(held);
 }
 
 } // namespace qkstd

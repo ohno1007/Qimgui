@@ -17,7 +17,9 @@ if [[ -z "$module" || -z "$kernel" ]]; then
     exit 2
 fi
 [[ -f "$module" ]] || { echo "no such module: $module" >&2; exit 2; }
-lists=("$kernel"/android/abi_gki_aarch64*)
+# The symbol lists only; abi_gki_aarch64.stg beside them is an ABI dump, and
+# matching against its text would call almost anything allowed.
+mapfile -t lists < <(ls "$kernel"/android/abi_gki_aarch64* 2>/dev/null | grep -v '\.stg')
 if [[ ! -f "${lists[0]}" ]]; then
     echo "no GKI symbol lists under $kernel/android: not a GKI tree?" >&2
     exit 2

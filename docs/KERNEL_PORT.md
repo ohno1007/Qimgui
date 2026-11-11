@@ -197,6 +197,9 @@ android15-6.6 的列表核过，只有 `filp_open`、`kernel_read`、`kernel_wri
 kernel/check-gki-symbols.sh kernel/.build/qimgui.ko /path/to/kernel-source
 ```
 
+已用 `android15-6.6`（6.6.144）实际构建验证：clang 18 + kCFI + Shadow Call Stack + MODVERSIONS，
+88 个符号带上了 CRC，全部符号都在 KMI 列表内。
+
 **vermagic 必须对上。** 模块记录了编译时的内核版本串，和运行内核不一致就会被拒。
 同一个 KMI 代次内接口是冻结的，所以用该代次的 common 内核编出来的模块通常能用，
 `kernel/set-vermagic.sh` 可以把版本串改成设备自己的：
@@ -262,8 +265,9 @@ echo 0 > /sys/module/qimgui/parameters/enabled  # 撤下画面（模块仍在）
 - DRM plane 筛选、atomic_check 注入、提交，以及与 Android 合成的实际共存。
 - `input_handler` 的 filter 与回放在真实触摸驱动上的行为。
 - `kernel_neon_begin()` 区间内运行整帧 UI 的实际延迟影响，以及 `may_use_simd()` 失败的频率。
-- **内核工具链下的编译本身**：这些内核源码还没有对着任何内核树编译过，只做过 freestanding 主机编译和符号检查。
-  第一次用真内核树构建时大概率还要改几处（缺头文件、下游 API 签名差异）。
+- **真机加载与运行**：模块已对 mainline 5.15 和 GKI android15-6.6 两棵树构建通过，但从未在设备上加载过。
+- **栈深度**：内核栈是 16 KiB，而 `RippleLayer`（2304 字节）和按钮组的 `Group`（2528 字节）超过内核 2048 字节的告警线。
+  调用链是 worker → ImGui → MD3 控件，真机上需要留意 `VMAP_STACK` 是否报栈溢出。
 - 真机帧率、功耗，以及录屏兼容性。
 
 ## 已知限制与后续
