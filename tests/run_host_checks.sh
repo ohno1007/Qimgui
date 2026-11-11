@@ -9,10 +9,6 @@ mkdir -p build/host-checks
     -o build/host-checks/ui-render
 build/host-checks/ui-render
 "${CXX:-g++}" -std=c++17 -O1 -g -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
-    tests/java_bridge_test.cpp -o build/host-checks/java-bridge
-if build/host-checks/java-bridge; then
-    :
-else
-    status=$?
-    [[ "$status" == 77 ]] || exit "$status"
-fi
+    -ffunction-sections -fdata-sections -Wl,--gc-sections -Ithird_party/imgui \
+    tests/keyboard_input_test.cpp -o build/host-checks/keyboard-input
+build/host-checks/keyboard-input

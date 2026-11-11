@@ -1,13 +1,14 @@
+#include <algorithm>
 #include <string>
 #include "ui/main_ui.h"
+#include "ui/md3_showcase.h"
+#include "ui/md3.h"
 
 #include "ui/ui.h"
 #include "ui/ui_internal.h"
 #include "ui/icons.h"
 #include "imgui.h"
 #include "platform/ANativeWindowCreator.h"
-#include "core/clipboard.h"
-#include "core/java_bridge.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -110,88 +111,17 @@ void DrawDashboard(const UiState* state) {
 }
 
 void DrawWidgets() {
-    ImGui::SeparatorText(u8"基础控件");
-
-    static int    counter = 0;
-    static float  slider  = 0.5f;
-    static bool   toggle  = false;
-    static ImVec4 tint(0.40f, 0.70f, 1.00f, 1.0f);
-
-    const bool hit = ImGui::Button(ICON_FA_WAND u8"  点我");
-    chrome::LastItem();
-    if (hit) counter++;
-    ripple::TouchLastItem();
-    ImGui::SameLine();
-    ImGui::Text(u8"计数 = %d", counter);
-
-    SliderFloatGrabValue(u8"滑块", &slider, 0.0f, 1.0f, "%.3f");
-    ImGui::Checkbox  (u8"开关",   &toggle);
-    chrome::LastItemFrame(u8"开关"); ripple::TouchLastItem();
-
-    ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4(1, 1, 1, 0.07f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1, 1, 1, 0.11f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4(1, 1, 1, 0.15f));
-    ImGui::ColorEdit4(u8"取色器", (float*)&tint);
-    ImGui::PopStyleColor(3);
-
-    ImGui::Spacing();
-
-    if (expander::Begin(u8"列表", ICON_FA_LIST)) {
-        static int    selected = 0;
-        static ImVec2 anim_min = ImVec2(0, 0), anim_max = ImVec2(0, 0);
-        static bool   anim_ok  = false;
-
-        const char* items[] = { u8"第一项", u8"第二项", u8"第三项", u8"第四项" };
-        const int   N  = IM_ARRAYSIZE(items);
-        const float dt = ImGui::GetIO().DeltaTime;
-
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->ChannelsSplit(2);
-        dl->ChannelsSetCurrent(1);
-
-        ImGui::PushStyleColor(ImGuiCol_Header,        IM_COL32(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive,  IM_COL32(0, 0, 0, 0));
-        ImVec2 sel_min(0, 0), sel_max(0, 0);
-        for (int i = 0; i < N; ++i) {
-            if (ImGui::Selectable(items[i], selected == i)) selected = i;
-            ripple::TouchLastItem();
-            if (selected == i) {
-                sel_min = ImGui::GetItemRectMin();
-                sel_max = ImGui::GetItemRectMax();
-            }
-        }
-        ImGui::PopStyleColor(3);
-
-        dl->ChannelsSetCurrent(0);
-        if (sel_max.y > sel_min.y) {
-            if (!anim_ok) {
-                anim_min = sel_min; anim_max = sel_max; anim_ok = true;
-            } else {
-                const float a = 1.0f - std::exp(-15.0f * dt);
-                anim_min.x += (sel_min.x - anim_min.x) * a;
-                anim_min.y += (sel_min.y - anim_min.y) * a;
-                anim_max.x += (sel_max.x - anim_max.x) * a;
-                anim_max.y += (sel_max.y - anim_max.y) * a;
-            }
-            const float rr = (anim_max.y - anim_min.y) * 0.5f;
-            dl->AddRectFilled(anim_min, anim_max,
-                              ImGui::GetColorU32(ImVec4(0.30f, 0.62f, 1.0f, 0.18f)), rr);
-            chrome::Rect(anim_min, anim_max, -1.0f, false, true);
-        }
-        dl->ChannelsMerge();
-    }
-    expander::End();
-
-    if (expander::Begin(u8"进度", ICON_FA_LAYER_GROUP)) {
-        static float progress = 0.0f;
-        progress += ImGui::GetIO().DeltaTime * 0.15f;
-        if (progress > 1.0f) progress -= 1.0f;
-        ImGui::ProgressBar(progress, ImVec2(-1, 0));
-        chrome::LastItem();
-        ImGui::TextDisabled(u8"展开和收起是同一块玻璃在变形");
-    }
-    expander::End();
+    // Keep the full gallery usable in the resizable Android content pane.
+    const float available = ImGui::GetContentRegionAvail().x;
+    const float scale = std::max(0.65f, std::min(1.5f, (available - 48.0f) / 760.0f));
+    md3::SetTheme(md3::GetTheme().dark, scale);
+    md3::PushTheme();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, md3::GetTheme().surface);
+    if (ImGui::BeginChild("MD3 gallery", ImVec2(0,0), ImGuiChildFlags_AlwaysUseWindowPadding))
+        md3::Showcase();
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    md3::PopTheme();
 }
 
 void DrawWindow(UiState* state) {
@@ -335,80 +265,6 @@ void DrawWindow(UiState* state) {
             }
         }
         if (!last.empty()) ImGui::TextDisabled(u8"上次回答：%s", last.c_str());
-    }
-
-    ImGui::Spacing();
-    ImGui::SeparatorText(u8"剪贴板");
-    {
-        static char buf[512] = "";
-        static std::string incoming;
-        static bool        paste_pending = false;
-        static int         last_len      = -1;
-
-        struct Pending { std::string* text; bool* flag; };
-        static Pending pending{&incoming, &paste_pending};
-        auto on_edit = [](ImGuiInputTextCallbackData* d) -> int {
-            Pending* p = (Pending*)d->UserData;
-            if (*p->flag) {
-                *p->flag = false;
-                d->DeleteChars(0, d->BufTextLen);
-                if (!p->text->empty()) d->InsertChars(0, p->text->c_str());
-            }
-            return 0;
-        };
-
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##clip", u8"在这里编辑文本", buf, sizeof(buf),
-                                 ImGuiInputTextFlags_CallbackAlways, on_edit, &pending);
-
-        paste_pending = false;
-        chrome::LastItem(14.0f);
-
-        static std::string ime_status;
-        if (ImGui::Button(ICON_FA_PEN u8"  系统输入法", ImVec2(-FLT_MIN, 0)))
-            ime_status = java_bridge::ShowInputMethod(buf) ? u8"输入后点击应用输入" : java_bridge::LastError();
-        chrome::LastItem(); ripple::TouchLastItem();
-        if (ImGui::Button(u8"应用输入")) {
-            if (java_bridge::GetInputText(&incoming)) {
-                std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());
-                paste_pending = true;
-                java_bridge::HideInputMethod();
-                ime_status = u8"已应用输入";
-            } else ime_status = java_bridge::LastError();
-        }
-        chrome::LastItem(); ripple::TouchLastItem();
-        ImGui::SameLine();
-        if (ImGui::Button(u8"收起键盘")) {
-            ime_status = java_bridge::HideInputMethod() ? u8"已收起键盘" : java_bridge::LastError();
-        }
-        chrome::LastItem(); ripple::TouchLastItem();
-        if (!ime_status.empty()) ImGui::TextDisabled("%s", ime_status.c_str());
-
-        const bool pasted = ImGui::Button(ICON_FA_DOWNLOAD u8"  粘贴系统剪贴板",
-                                          ImVec2(-FLT_MIN, 0));
-        chrome::LastItem();
-        ripple::TouchLastItem();
-        if (pasted) {
-            const char* t = clipboard::Get();
-            incoming      = t ? t : "";
-            last_len      = (int)incoming.size();
-            paste_pending = true;
-            std::snprintf(buf, sizeof(buf), "%s", incoming.c_str());
-        }
-
-        if (last_len >= 0) {
-            if (clipboard::UsedSystem()) {
-                if (last_len == 0) ImGui::TextDisabled(u8"系统剪贴板是空的");
-                else               ImGui::TextDisabled(u8"系统剪贴板  ·  %d 字节", last_len);
-            } else {
-                const char* why = clipboard::SystemError();
-                ImGui::TextDisabled(u8"进程内剪贴板  ·  %d 字节", last_len);
-                if (why && *why) ImGui::TextDisabled(u8"系统剪贴板不可用：%s", why);
-                ImGui::TextDisabled("%s", clipboard::Path());
-            }
-        } else {
-            ImGui::TextDisabled(u8"剪贴板仅通过 Java 系统服务读写");
-        }
     }
 
     ImGui::Spacing();

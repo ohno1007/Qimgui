@@ -1,0 +1,12 @@
+{
+  "name": "qimgui-md3-reference",
+  "private": true,
+  "type": "module",
+  "scripts": { "capture": "node capture.mjs" },
+  "dependencies": {
+    "@material/web": "2.5.0",
+    "@fontsource/roboto": "5.2.8",
+    "esbuild": "0.25.12",
+    "playwright": "1.56.1"
+  }
+}

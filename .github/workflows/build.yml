@@ -11,7 +11,6 @@ permissions:
 
 env:
   NDK_VERSION: 29.0.14206865
-  AIMGUI_REQUIRE_IPC_TEST: "1"
 
 jobs:
   build:
@@ -20,23 +19,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned Android tools
         run: |
-          if [[ ! -f "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties" || ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/d8" ]]; then
+          if [[ ! -f "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties" ]]; then
             SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f -print -quit)"
-            "$SDKMANAGER" "ndk;$NDK_VERSION" "platforms;android-35" "build-tools;35.0.0"
+            "$SDKMANAGER" "ndk;$NDK_VERSION"
           fi
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - name: Verify upstream source manifest
         run: python3 scripts/verify_sources.py
       - name: Verify generated glass shaders
         run: scripts/compile_glass_shaders.sh --check
-      - name: Build Android ARM64 ELF and input helper
+      - name: Build Android ARM64 ELF
         run: |
           ./build.sh
-          scripts/build_ime_host.sh
           file libs/arm64-v8a/AImGui
-          sha256sum libs/arm64-v8a/AImGui libs/arm64-v8a/ime-host.dex
-      - name: Test ImGui rendering and Java bridge under sanitizers
+          sha256sum libs/arm64-v8a/AImGui
+      - name: Test ImGui rendering under sanitizers
         run: tests/run_host_checks.sh
+      - name: Test native MD3 components under sanitizers
+        run: tests/run_md3_checks.sh
       - name: Install software renderer for shader tests
         run: |
           sudo apt-get update -qq
@@ -46,11 +46,43 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: python3 tests/render_glass.py --output build/glass-preview.png
+      - name: Capture native MD3 component gallery
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          build/md3-checks/md3-test --capture build/md3-captures tests/md3_web/fonts/Roboto-400.ttf tests/md3_web/fonts/Roboto-500.ttf
+          python3 tests/render_md3.py build/md3-captures --output build/md3-native
       - uses: actions/upload-artifact@v4
         with:
           name: Qimgui-arm64-v8a
           path: |
             libs/arm64-v8a/AImGui
-            libs/arm64-v8a/ime-host.dex
             build/glass-preview.png
+            build/md3-native/*.png
+          if-no-files-found: error
+
+  md3-web-reference:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tests/md3_web
+    env:
+      MD3_REFERENCE_OUT: ../../build/md3-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/md3_web/package-lock.json
+      - name: Install pinned reference dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Capture official Material Web components
+        run: npm run capture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MD3-web-reference
+          path: build/md3-web
           if-no-files-found: error

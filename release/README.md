@@ -1,11 +1,13 @@
 # Build outputs
 
-Built from this revision with Android NDK r29 (29.0.14206865), CMake Release,
-C++17 and Dear ImGui 1.93.0. Live2D is disabled.
+Build the current revision with `./build.sh`, using Android NDK r29
+(29.0.14206865). The native ARM64 executable is written to
+`libs/arm64-v8a/AImGui`.
 
-- `AImGui`: Android ARM64 native executable.
-- `ime-host.dex`: optional Java 8 bytecode/D8 helper, min API 26. Place beside the ELF.
-- `SHA256SUMS`: SHA-256 of both files (`sha256sum -c SHA256SUMS`).
+GitHub Actions publishes the executable in the **Qimgui-arm64-v8a** artifact
+for each successful pull request or main-branch build. Use the artifact from
+the commit you are testing; older checked-in executables are removed so they
+cannot be mistaken for the native MD3 build.
 
-These binaries pass build/host checks, but are not a substitute for Android
-on-device compatibility checks. See the root README for deployment and limits.
+The Java input/clipboard host has been removed. Deploy only the ELF; see the
+root README for external-keyboard input and Android device validation limits.

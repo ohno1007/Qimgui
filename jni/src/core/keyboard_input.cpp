@@ -3,6 +3,7 @@
 #include "imgui.h"
 
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -96,22 +97,87 @@ std::vector<int>          g_fds;
 std::vector<std::thread>  g_threads;
 std::atomic<int>          g_volume_presses{0};
 
-bool LooksLikeKeyboard(int fd) {
-    uint8_t bits[(KEY_MAX / 8) + 1] = {};
-    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) < 0) return false;
+bool LooksLikeKeyboardKeys(const uint8_t* bits) {
     auto has = [&](int k) -> bool {
         return (bits[k / 8] & (1u << (k % 8))) != 0;
     };
+    // Linux KEY_* values follow scan-code order, not alphabetical order.
     int letters = 0;
-    for (int k = KEY_A; k <= KEY_Z; ++k) if (has(k)) ++letters;
-    if (letters >= 20) return true;
+    for (const auto& mapping : kMap)
+        if (mapping.ascii >= 'a' && mapping.ascii <= 'z' && has(mapping.linux_code))
+            ++letters;
+    return letters >= 20 || has(KEY_VOLUMEUP) || has(KEY_VOLUMEDOWN);
+}
 
-    if (has(KEY_VOLUMEUP) || has(KEY_VOLUMEDOWN)) return true;
-    return false;
+bool LooksLikeKeyboard(int fd) {
+    uint8_t bits[(KEY_MAX / 8) + 1] = {};
+    return ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) >= 0 &&
+           LooksLikeKeyboardKeys(bits);
+}
+
+struct Modifiers {
+    bool left_shift = false, right_shift = false;
+    bool left_ctrl = false, right_ctrl = false;
+    bool left_alt = false, right_alt = false;
+    bool left_super = false, right_super = false;
+};
+
+void QueueKey(ImGuiKey key, bool down) {
+    PendingEvent event{};
+    event.kind = PendingEvent::Key;
+    event.k.key = key;
+    event.k.down = down;
+    g_queue.push_back(event);
+}
+
+// Called while holding g_mtx; ImGui receives these events only in Flush().
+void HandleKeyEvent(unsigned code, int value, Modifiers& mods) {
+    const bool down = value != 0;
+    const bool press = value == 1;
+    if (press && (code == KEY_VOLUMEUP || code == KEY_VOLUMEDOWN)) {
+        g_volume_presses.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    bool* side = nullptr;
+    ImGuiKey physical = ImGuiKey_None;
+    switch (code) {
+        case KEY_LEFTSHIFT:  side = &mods.left_shift;  physical = ImGuiKey_LeftShift;  break;
+        case KEY_RIGHTSHIFT: side = &mods.right_shift; physical = ImGuiKey_RightShift; break;
+        case KEY_LEFTCTRL:   side = &mods.left_ctrl;   physical = ImGuiKey_LeftCtrl;   break;
+        case KEY_RIGHTCTRL:  side = &mods.right_ctrl;  physical = ImGuiKey_RightCtrl;  break;
+        case KEY_LEFTALT:    side = &mods.left_alt;    physical = ImGuiKey_LeftAlt;    break;
+        case KEY_RIGHTALT:   side = &mods.right_alt;   physical = ImGuiKey_RightAlt;   break;
+        case KEY_LEFTMETA:   side = &mods.left_super;  physical = ImGuiKey_LeftSuper;  break;
+        case KEY_RIGHTMETA:  side = &mods.right_super; physical = ImGuiKey_RightSuper; break;
+    }
+    if (side) {
+        *side = down;
+        QueueKey(physical, down);
+        QueueKey(ImGuiMod_Shift, mods.left_shift || mods.right_shift);
+        QueueKey(ImGuiMod_Ctrl, mods.left_ctrl || mods.right_ctrl);
+        QueueKey(ImGuiMod_Alt, mods.left_alt || mods.right_alt);
+        QueueKey(ImGuiMod_Super, mods.left_super || mods.right_super);
+        return;
+    }
+
+    const KeyMapping* mapping = Lookup(code);
+    if (!mapping) return;
+    QueueKey(mapping->imgui_key, down);
+    const bool shift = mods.left_shift || mods.right_shift;
+    const char ch = shift ? mapping->ascii_shift : mapping->ascii;
+    const bool shortcut = mods.left_ctrl || mods.right_ctrl || mods.left_alt ||
+                          mods.right_alt || mods.left_super || mods.right_super;
+    if ((press || value == 2) && ch && !shortcut) {
+        PendingEvent event{};
+        event.kind = PendingEvent::Char;
+        event.ch = static_cast<unsigned char>(ch);
+        g_queue.push_back(event);
+    }
 }
 
 void ReaderLoop(int fd) {
-    bool shift = false;
+    Modifiers mods;
     input_event ev[16];
     while (g_running.load(std::memory_order_relaxed)) {
 
@@ -134,34 +200,7 @@ void ReaderLoop(int fd) {
         std::lock_guard<std::mutex> lk(g_mtx);
         for (size_t i = 0; i < count; ++i) {
             if (ev[i].type != EV_KEY) continue;
-            const bool down  = (ev[i].value != 0);
-            const bool press = (ev[i].value == 1);
-
-            if (press && (ev[i].code == KEY_VOLUMEUP ||
-                          ev[i].code == KEY_VOLUMEDOWN)) {
-                g_volume_presses.fetch_add(1, std::memory_order_relaxed);
-                continue;
-            }
-
-            if (ev[i].code == KEY_LEFTSHIFT || ev[i].code == KEY_RIGHTSHIFT) {
-                shift = down;
-            }
-
-            const KeyMapping* m = Lookup(ev[i].code);
-            if (!m) continue;
-
-            PendingEvent pe{};
-            pe.kind  = PendingEvent::Key;
-            pe.k.key = m->imgui_key;
-            pe.k.down = down;
-            g_queue.push_back(pe);
-
-            if ((press || ev[i].value == 2) && (shift ? m->ascii_shift : m->ascii)) {
-                PendingEvent ce{};
-                ce.kind = PendingEvent::Char;
-                ce.ch   = (unsigned int)(shift ? m->ascii_shift : m->ascii);
-                g_queue.push_back(ce);
-            }
+            HandleKeyEvent(ev[i].code, ev[i].value, mods);
         }
     }
 }
@@ -172,7 +211,7 @@ void Init() {
     if (g_running.exchange(true)) return;
 
     DIR* dir = opendir("/dev/input");
-    if (!dir) return;
+    if (!dir) { g_running.store(false); return; }
     while (dirent* e = readdir(dir)) {
         if (std::strncmp(e->d_name, "event", 5) != 0) continue;
         char path[64];
@@ -188,8 +227,10 @@ void Init() {
 
 void Shutdown() {
     g_running.store(false);
+    // poll() has a 200 ms timeout. Join before closing so readers never race
+    // with a reused file descriptor or outlive the input state.
+    for (auto& t : g_threads) if (t.joinable()) t.join();
     for (int fd : g_fds) ::close(fd);
-    for (auto& t : g_threads) if (t.joinable()) t.detach();
     g_threads.clear();
     g_fds.clear();
     std::lock_guard<std::mutex> lk(g_mtx);

@@ -1,7 +1,5 @@
 #include "core/font.h"
 #include "core/keyboard_input.h"
-#include "core/clipboard.h"
-#include "core/java_bridge.h"
 #include "core/config.h"
 #include "core/haptics.h"
 #include "core/screen_mirror.h"
@@ -43,7 +41,7 @@ int main(int argc, char** argv) {
     ImGui::CreateContext();
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr; io.LogFilename = nullptr;
-    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange | ImGuiConfigFlags_NavEnableKeyboard;
 
     io.ConfigWindowsMoveFromTitleBarOnly = true;
 
@@ -51,7 +49,6 @@ int main(int argc, char** argv) {
     ImGui::StyleColorsDark();
     BOOT("fonts");
     aimgui::LoadDefaultAndSystemCJKFont(25.0f);
-    aimgui::clipboard::Install();
 
     aimgui::UiState st;
     st.display_w = info.width; st.display_h = info.height;
@@ -251,7 +248,6 @@ int main(int argc, char** argv) {
 #endif
 
     aimgui::config::Save(&st);
-    aimgui::java_bridge::Shutdown();
     haptics.Shutdown();
     tilt.Shutdown();
     aimgui::kbd_input::Shutdown();

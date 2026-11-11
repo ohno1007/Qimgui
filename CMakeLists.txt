@@ -73,8 +73,6 @@ add_library(aimgui_core STATIC
     ${JNI}/src/core/text_outline.cpp
     ${JNI}/src/core/haptics.cpp
     ${JNI}/src/core/config.cpp
-    ${JNI}/src/core/clipboard.cpp
-    ${JNI}/src/core/java_bridge.cpp
     ${JNI}/src/core/glass_gl.cpp
     ${JNI}/src/core/glass_vk.cpp)
 target_compile_definitions(aimgui_core PRIVATE
@@ -84,6 +82,15 @@ target_include_directories(aimgui_core
     PUBLIC  ${JNI}/src
     PRIVATE ${JNI}/include)
 target_link_libraries(aimgui_core PUBLIC imgui aimgui_platform)
+
+# Native Material Design 3 components share the pinned ImGui configuration.
+# No Android, Java, WebView or renderer dependency is required by this library.
+file(GLOB AIMGUI_MD3_SOURCES CONFIGURE_DEPENDS ${JNI}/src/ui/md3/*.cpp)
+add_library(aimgui_md3 STATIC ${AIMGUI_MD3_SOURCES})
+target_include_directories(aimgui_md3
+    PUBLIC ${JNI}/include
+    PRIVATE ${JNI}/src/ui/md3)
+target_link_libraries(aimgui_md3 PUBLIC imgui)
 
 # ── Executable ───────────────────────────────────────────────────────────
 # ui/ is one layer split by what each file owns: ui.cpp is the shell (the
@@ -105,7 +112,7 @@ add_executable(AImGui
     ${JNI}/src/ui/main_ui.cpp)
 target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
-    aimgui_core aimgui_platform imgui
+    aimgui_core aimgui_platform aimgui_md3 imgui
     log android EGL GLESv3)
 
 # ── Optional Live2D Cubism layer ─────────────────────────────────────────
