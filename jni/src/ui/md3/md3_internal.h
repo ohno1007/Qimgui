@@ -34,6 +34,9 @@ struct ItemState {
 };
 ItemState Item(const char *label, ImVec2 size, ImGuiButtonFlags flags = 0);
 float Animate(ImGuiID id, int channel, float target, float rate = 18.f);
+// Bounded per-context press wave, clipped to the rounded component outline.
+void RippleLayer(ImGuiID id, const ImRect &rect, ImVec4 color, float radius, bool held,
+                 bool enabled = true, ImDrawFlags corners = 0);
 void StateLayer(const ItemState &item, ImVec4 color, float radius);
 void DrawCheck(ImVec2 center, ImVec4 color, float size = 12.f);
 void DrawClose(ImVec2 center, ImVec4 color, float size = 12.f);

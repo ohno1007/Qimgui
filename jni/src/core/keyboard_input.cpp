@@ -214,7 +214,7 @@ void Init() {
     if (!dir) { g_running.store(false); return; }
     while (dirent* e = readdir(dir)) {
         if (std::strncmp(e->d_name, "event", 5) != 0) continue;
-        char path[64];
+        char path[sizeof(e->d_name) + sizeof("/dev/input/")];
         std::snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
         int fd = ::open(path, O_RDONLY | O_NONBLOCK);
         if (fd < 0) continue;

@@ -48,6 +48,7 @@ void stateLayer(ImDrawList* dl, ImRect rect, ImVec4 color, bool hovered, bool he
                 bool enabled, float rounding = 0, ImDrawFlags flags = 0) {
     const float opacity = detail::Animate(GImGui->LastItemData.ID, 20, enabled ? (held ? .12f : hovered ? .08f : 0.f) : 0.f);
     if (opacity > .001f) dl->AddRectFilled(rect.Min, rect.Max, col(color, opacity), rounding, flags);
+    detail::RippleLayer(GImGui->LastItemData.ID, rect, color, rounding, held, enabled, flags);
     if (enabled) ImGui::RenderNavCursor(rect, GImGui->LastItemData.ID, ImGuiNavRenderCursorFlags_None, rounding);
 }
 void shadow(ImDrawList* dl, ImRect rect, float radius) {

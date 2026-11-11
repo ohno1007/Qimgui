@@ -24,6 +24,8 @@ aimgui::md3::PopTheme();
 
 链接 CMake target `aimgui_md3`。独立使用时编译 `jni/src/ui/md3/*.cpp` 与本仓库固定的 ImGui 核心。内部使用 ImGui 控件 API，升级 ImGui 后需重新验证。
 
+Android MD3 使用与对照截图相同的 Roboto 400／500。CMake 通过 `scripts/embed_md3_fonts.py` 校验并嵌入 `tests/md3_web/fonts/` 的固定 TTF 字节，不需要 npm 或浏览器参与 Android 构建。正文和标签均采用 `2400 / 2048` 的字体尺寸修正，与截图程序一致；中文由设备系统字体补充，不覆盖拉丁字形。`PushTheme` 同时设置 14dp 正文字体，`PopTheme` 恢复调用方字体。
+
 尺寸为逻辑 dp，按 `Theme::scale` 换算。`GetTheme()` 可修改颜色。基础控件使用 `BeginDisabled/EndDisabled`；部分组合控件另有 enabled 参数。标签支持 `文字##唯一ID`。
 
 `BeginCard` 无论返回值如何都必须 `EndCard`。菜单、对话框和面板只在 Begin 返回 true 后调用 End。对话框／面板的 open 状态由调用方持有。日期范围先选起点，再选终点；倒序会整理为升序。
@@ -46,5 +48,5 @@ aimgui::md3::PopTheme();
 - 组件库和展示页已接入；旧窗口外壳及其他设置页面未整体重写。
 - 移除 DEX 后不自动唤起 Android 系统软键盘；evdev 支持外接键盘。
 - 未接入 TalkBack 语义树，也未从壁纸生成动态色。
-- 应用字体仍沿用 Inter 与系统中文回退；对照截图固定 Roboto。
+- MD3 使用固定 Roboto 与系统中文回退；旧窗口外壳继续使用 Inter，中文外观依设备字体而异。
 - Android 真机触摸、旋转、输入与 GLES／Vulkan 一致性需要设备验证。

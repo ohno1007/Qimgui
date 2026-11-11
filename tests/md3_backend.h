@@ -29,12 +29,19 @@ inline void DestroyContext() {
     }
     ImGui::DestroyContext();
 }
+// CSS font-size uses units-per-em; stb_truetype uses ascent-minus-descent.
+// The pinned Roboto fonts have hhea span 2400 and unitsPerEm 2048.
+inline ImFont* LoadComparisonFont(const char* path) {
+    ImFontConfig config;config.ExtraSizeScale=2400.f/2048.f;
+    auto* font=ImGui::GetIO().Fonts->AddFontFromFileTTF(path,14,&config);
+    assert(font);return font;
+}
 inline void ConfigureContext(const char* font = nullptr) {
     ImGui::CreateContext(); auto& io=ImGui::GetIO();
     io.IniFilename=nullptr; io.LogFilename=nullptr; io.DisplaySize=ImVec2(1000,1000); io.DeltaTime=1.f/60;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
-    if(font) assert(io.Fonts->AddFontFromFileTTF(font,14));
+    if(font) LoadComparisonFont(font);
 }
 template<class T> inline void Write(std::ofstream& f,T value) { f.write(reinterpret_cast<const char*>(&value),sizeof(value)); }
 inline void DumpDrawData(const std::string& path) {

@@ -11,3 +11,5 @@ cannot be mistaken for the native MD3 build.
 
 The Java input/clipboard host has been removed. Deploy only the ELF; see the
 root README for external-keyboard input and Android device validation limits.
+
+MD3 页面内嵌 Roboto 400/500。分发构建产物时保留字体许可证 `tests/md3_web/fonts/OFL.txt`；CI 下载包已包含该许可证。

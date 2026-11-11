@@ -1,6 +1,7 @@
 #include "font.h"
 
 #include "font_data.h"
+#include "md3_fonts.h"
 #include "imgui.h"
 
 #include <android/log.h>
@@ -102,7 +103,7 @@ bool LooksLikeRealFont(const char* path) {
     return st.st_size >= 200 * 1024;
 }
 
-bool TryAddFontFromFile(const char* path, float SizePixels, bool merge) {
+bool TryAddFontFromFile(const char* path, float SizePixels, bool merge, bool md3 = false) {
     if (!LooksLikeRealFont(path)) {
         LOGW("skip %s (too small to be a CJK font)", path);
         return false;
@@ -118,6 +119,17 @@ bool TryAddFontFromFile(const char* path, float SizePixels, bool merge) {
     static const ImWchar kIconExclude[] = {
         aimgui::font_data::kIconFirst, aimgui::font_data::kIconLast, 0 };
     if (merge) cfg.GlyphExcludeRanges = kIconExclude;
+    if (md3) {
+        // Preserve fractional metrics in MD3, while keeping Latin entirely in
+        // the pinned Roboto source. System CJK metrics are device-specific.
+        static const ImWchar kMd3Exclude[] = {
+            0x0020, 0x024f,
+            aimgui::font_data::kIconFirst, aimgui::font_data::kIconLast, 0 };
+        cfg.GlyphExcludeRanges = kMd3Exclude;
+        cfg.PixelSnapH = false;
+        cfg.OversampleH = 0;
+        cfg.OversampleV = 0;
+    }
     cfg.Flags      |= ImFontFlags_NoLoadError;
 
     ImFont* f = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, SizePixels, &cfg);
@@ -129,20 +141,20 @@ bool TryAddFontFromFile(const char* path, float SizePixels, bool merge) {
     return true;
 }
 
-bool TryKnownNames(float SizePixels, bool merge) {
+bool TryKnownNames(float SizePixels, bool merge, bool md3 = false) {
     char path[256];
     for (const char* dir : kFontDirs) {
         if (access(dir, R_OK) != 0) continue;
         for (const char* name : kKnownNames) {
             std::snprintf(path, sizeof(path), "%s/%s", dir, name);
             if (access(path, R_OK) != 0) continue;
-            if (TryAddFontFromFile(path, SizePixels, merge)) return true;
+            if (TryAddFontFromFile(path, SizePixels, merge, md3)) return true;
         }
     }
     return false;
 }
 
-bool TryDirScan(float SizePixels, bool merge) {
+bool TryDirScan(float SizePixels, bool merge, bool md3 = false) {
     char path[256];
     for (const char* dir : kFontDirs) {
         DIR* d = opendir(dir);
@@ -158,7 +170,7 @@ bool TryDirScan(float SizePixels, bool merge) {
             if (!NameLooksCJK(n)) continue;
             std::snprintf(path, sizeof(path), "%s/%s", dir, n);
             if (access(path, R_OK) != 0) continue;
-            if (TryAddFontFromFile(path, SizePixels, merge)) {
+            if (TryAddFontFromFile(path, SizePixels, merge, md3)) {
                 closedir(d);
                 return true;
             }
@@ -218,6 +230,30 @@ ImFont* LoadDefaultAndSystemCJKFont(float size_pixels) {
     LOGI("font: Inter %.0fpx + system CJK + Font Awesome %.0fpx",
          size_pixels, icon_px);
     return io.Fonts->Fonts.back();
+}
+
+Md3Fonts LoadMd3Fonts(float size_pixels) {
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    const auto load = [atlas, size_pixels](const unsigned char* data, int bytes,
+                                          const char* name) -> ImFont* {
+        ImFontConfig config;
+        config.FontDataOwnedByAtlas = false;
+        // CSS font-size uses units-per-em; stb_truetype uses ascent-descent.
+        // These pinned fonts use 2048 units/em and a 2400 hhea span. Match
+        // tests/md3_backend.h::LoadComparisonFont exactly for Latin rendering.
+        config.ExtraSizeScale = 2400.0f / 2048.0f;
+        std::snprintf(config.Name, sizeof(config.Name), "%s", name);
+        ImFont* font = atlas->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), bytes,
+                                                  size_pixels, &config);
+        if (font && !TryKnownNames(size_pixels, true, true) && !TryDirScan(size_pixels, true, true))
+            LOGW("no CJK fallback for %s on this device", name);
+        return font;
+    };
+    Md3Fonts fonts;
+    fonts.body = load(md3_font_data::kRobotoRegular, sizeof(md3_font_data::kRobotoRegular), "MD3 Roboto Regular");
+    fonts.label = load(md3_font_data::kRobotoMedium, sizeof(md3_font_data::kRobotoMedium), "MD3 Roboto Medium");
+    LOGI("MD3 font: pinned Roboto 400/500 %.0fpx + system CJK", size_pixels);
+    return fonts;
 }
 
 }

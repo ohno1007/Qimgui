@@ -58,7 +58,21 @@ target_include_directories(aimgui_platform PUBLIC ${JNI}/src)
 target_link_libraries(aimgui_platform PUBLIC imgui)
 
 # ── aimgui_core: renderers, bloom, font, keyboard, window-session ────────
+# Android embeds the same pinned OFL Roboto 400/500 bytes as the native/web
+# comparison captures. No npm packages or browser are required for this step.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(MD3_FONT_DIR ${CMAKE_SOURCE_DIR}/tests/md3_web/fonts)
+set(MD3_FONT_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/md3_fonts.h)
+add_custom_command(
+    OUTPUT ${MD3_FONT_HEADER}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/embed_md3_fonts.py
+            --font-dir ${MD3_FONT_DIR} --output ${MD3_FONT_HEADER}
+    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/embed_md3_fonts.py
+            ${MD3_FONT_DIR}/Roboto-400.ttf ${MD3_FONT_DIR}/Roboto-500.ttf
+    COMMENT "Embedding pinned MD3 Roboto fonts"
+    VERBATIM)
 add_library(aimgui_core STATIC
+    ${MD3_FONT_HEADER}
     ${JNI}/src/core/renderer_factory.cpp
     ${JNI}/src/core/renderer_gl.cpp
     ${JNI}/src/core/renderer_vk.cpp
@@ -80,7 +94,7 @@ target_compile_definitions(aimgui_core PRIVATE
     IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 target_include_directories(aimgui_core
     PUBLIC  ${JNI}/src
-    PRIVATE ${JNI}/include)
+    PRIVATE ${JNI}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(aimgui_core PUBLIC imgui aimgui_platform)
 
 # Native Material Design 3 components share the pinned ImGui configuration.

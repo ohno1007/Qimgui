@@ -15,9 +15,9 @@ Android 组件使用 Dear ImGui 原生输入与绘制。`tests/md3_web` 仅是�
 | --- | --- | --- |
 | Actions | Filled / tonal / outlined / elevated / text buttons | `Button`，启用与禁用 |
 | Actions | Standard / filled / tonal / outlined icon buttons | `+` |
-| Actions | Small / medium / large / extended FAB | `+`，`Create` |
+| Actions | Small / medium / large / extended FAB | `variant="primary"`，`+`，`Create` |
 | Actions | Assist / filter / input / suggestion chips | 启用、选中、删除、禁用 |
-| Inputs | Checkbox / radio / switch | 开、关、混合、禁用 |
+| Inputs | Checkbox / radio / switch | 开、关、混合、禁用；Switch 使用 `icons` |
 | Inputs | Continuous / discrete / range sliders | 0–100，40；范围 20–70 |
 | Inputs | Filled / outlined text fields | `Label` / `Input text` / `Supporting text`；错误、禁用 |
 | Layout | Primary / secondary tabs | `Overview` / `Activity` / `Settings` |

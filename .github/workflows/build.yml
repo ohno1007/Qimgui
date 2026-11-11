@@ -57,6 +57,7 @@ jobs:
           name: Qimgui-arm64-v8a
           path: |
             libs/arm64-v8a/AImGui
+            tests/md3_web/fonts/OFL.txt
             build/glass-preview.png
             build/md3-native/*.png
           if-no-files-found: error

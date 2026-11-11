@@ -12,6 +12,7 @@
 #include "platform/ANativeWindowCreator.h"
 #include "platform/TouchHelperA.h"
 #include "ui/ui.h"
+#include "ui/md3.h"
 #include "ui/icons.h"
 #ifdef AIMGUI_LIVE2D
 #include "live2d/live2d_view.h"
@@ -48,7 +49,9 @@ int main(int argc, char** argv) {
     io.ConfigErrorRecoveryEnableAssert = false;
     ImGui::StyleColorsDark();
     BOOT("fonts");
-    aimgui::LoadDefaultAndSystemCJKFont(25.0f);
+    io.FontDefault = aimgui::LoadDefaultAndSystemCJKFont(25.0f);
+    const aimgui::Md3Fonts md3_fonts = aimgui::LoadMd3Fonts();
+    aimgui::md3::SetFonts(md3_fonts.body, md3_fonts.label);
 
     aimgui::UiState st;
     st.display_w = info.width; st.display_h = info.height;

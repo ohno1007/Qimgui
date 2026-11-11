@@ -116,7 +116,7 @@ bool Calendar(const char* id, Date selected, const DateRange* range, Date* picke
                 const float right = p.x + (CompareDates(current, range->end) == 0 ? S(20) : S(40));
                 ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(left,p.y),ImVec2(right,p.y+S(40)),C(t.secondaryContainer));
             }
-            char label[20]; std::snprintf(label,sizeof(label),"%d##day%d",day,day);
+            char label[32]; std::snprintf(label,sizeof(label),"%d##day%d",day,day);
             if (Action(label,ImVec2(40,40),endpoint)) { *picked=current; changed=true; }
         }
         ImGui::PopStyleVar();
