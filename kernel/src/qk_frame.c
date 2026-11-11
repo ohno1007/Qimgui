@@ -120,16 +120,16 @@ static void qk_run_frame(void)
 
     count = qk_input_drain(events, QK_EVENT_BATCH);
     started = now;
-    /* Floating point only inside this region, and nothing that sleeps. */
-    ret = qk_fpu_begin();
-    if (ret) {
+    if (!qk_fpu_available()) {
         frame.fpu_busy++;
         return;
     }
+    /* Floating point only inside this region, and nothing that sleeps. */
+    QK_FPU_BEGIN();
     ret = qk_ui_frame(frame.last_frame_ns ? div_u64(now - frame.last_frame_ns, 1000)
                                           : 16667,
                       events, count, &data);
-    qk_fpu_end();
+    QK_FPU_END();
     frame.last_frame_ns = now;
     frame.ui_ns_total += ktime_get_ns() - started;
     if (ret || !data) {
@@ -195,9 +195,10 @@ static void qk_worker(struct work_struct *work)
             if (width != frame.window->width || height != frame.window->height ||
                 x != frame.window->x || y != frame.window->y) {
                 qk_window_place(frame.window, x, y, width, height);
-                if (qk_fpu_begin() == 0) {
+                if (qk_fpu_available()) {
+                    QK_FPU_BEGIN();
                     qk_ui_resize(width, height);
-                    qk_fpu_end();
+                    QK_FPU_END();
                 }
             }
             frame.dirty[0] = frame.dirty[1] = (struct qk_clip){ 0, 0, 0, 0 };
@@ -256,14 +257,16 @@ int qk_frame_start(struct qk_window *window, const struct qk_frame_config *setup
     }
     config.extra_font = setup->font;
     config.extra_font_size = setup->font_size;
-    /* The UI allocates its context and font atlas here, in a context that may
-     * sleep and may use floating point only inside the guard.
+    /* The UI allocates its context and font atlas here. The settings file was
+     * read above, because nothing inside the guard may sleep.
      */
-    ret = qk_fpu_begin();
-    if (ret)
+    if (!qk_fpu_available()) {
+        ret = -EBUSY;
         goto free_snapshot;
+    }
+    QK_FPU_BEGIN();
     ret = qk_ui_init(&config);
-    qk_fpu_end();
+    QK_FPU_END();
     if (ret)
         goto free_snapshot;
     frame.ui_ready = true;
@@ -279,9 +282,10 @@ int qk_frame_start(struct qk_window *window, const struct qk_frame_config *setup
     return 0;
 
 stop_ui:
-    if (qk_fpu_begin() == 0) {
+    if (qk_fpu_available()) {
+        QK_FPU_BEGIN();
         qk_ui_shutdown();
-        qk_fpu_end();
+        QK_FPU_END();
     }
     frame.ui_ready = false;
 free_snapshot:
@@ -303,9 +307,10 @@ void qk_frame_stop(void)
         destroy_workqueue(frame.queue);
         frame.queue = NULL;
     }
-    if (frame.ui_ready && qk_fpu_begin() == 0) {
+    if (frame.ui_ready && qk_fpu_available()) {
+        QK_FPU_BEGIN();
         qk_ui_shutdown();
-        qk_fpu_end();
+        QK_FPU_END();
     }
     frame.ui_ready = false;
     vfree(frame.snapshot);

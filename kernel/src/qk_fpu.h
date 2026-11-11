@@ -7,7 +7,17 @@
  * region opened here must not sleep -- hence the arena allocator -- and must
  * stay short, because nothing else runs on this CPU meanwhile.
  *
- * Only the UI frame runs inside it. Rasterising, the DRM commit and the input
+ * Android's arm64 kernels spell those two as an open/close macro pair that
+ * keeps the saved register state on the caller's stack, so they have to appear
+ * in the same block. These macros therefore come in pairs too, rather than the
+ * begin/end functions a single kernel version would allow:
+ *
+ *     if (!qk_fpu_available()) { ... }
+ *     QK_FPU_BEGIN();
+ *     result = something_using_floats();
+ *     QK_FPU_END();
+ *
+ * Only the UI frame runs inside. Rasterising, the DRM commit and the input
  * path are integer code and stay outside.
  */
 #ifndef QK_FPU_H
@@ -18,21 +28,13 @@
 #include <asm/neon.h>
 #include <asm/simd.h>
 
-static inline int qk_fpu_begin(void)
-{
-    if (!may_use_simd())
-        return -EBUSY;
-    kernel_neon_begin();
-    return 0;
-}
-
-static inline void qk_fpu_end(void)
-{
-    kernel_neon_end();
-}
+#define qk_fpu_available()  may_use_simd()
+#define QK_FPU_BEGIN()      kernel_neon_begin()
+#define QK_FPU_END()        kernel_neon_end()
 #else
-static inline int qk_fpu_begin(void) { return 0; }
-static inline void qk_fpu_end(void) { }
+#define qk_fpu_available()  1
+#define QK_FPU_BEGIN()      do {
+#define QK_FPU_END()        } while (0)
 #endif
 
 #endif /* QK_FPU_H */

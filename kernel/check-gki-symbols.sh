@@ -17,18 +17,23 @@ if [[ -z "$module" || -z "$kernel" ]]; then
     exit 2
 fi
 [[ -f "$module" ]] || { echo "no such module: $module" >&2; exit 2; }
-# The symbol lists only; abi_gki_aarch64.stg beside them is an ABI dump, and
-# matching against its text would call almost anything allowed.
-mapfile -t lists < <(ls "$kernel"/android/abi_gki_aarch64* 2>/dev/null | grep -v '\.stg')
-if [[ ! -f "${lists[0]}" ]]; then
-    echo "no GKI symbol lists under $kernel/android: not a GKI tree?" >&2
+# The symbol lists only; the .stg beside them is an ABI dump, and matching
+# against its text would call almost anything allowed. 6.12 moved the lists
+# from android/abi_gki_aarch64* to gki/aarch64/symbols/.
+mapfile -t lists < <({
+    ls "$kernel"/android/abi_gki_aarch64* 2>/dev/null
+    ls "$kernel"/gki/aarch64/symbols/* 2>/dev/null
+} | grep -v '\.stg')
+if (( ${#lists[@]} == 0 )); then
+    echo "no GKI symbol lists in $kernel: not a GKI tree?" >&2
     exit 2
 fi
 
 nm="${NM:-$(command -v llvm-nm || command -v aarch64-linux-gnu-nm || command -v nm)}"
 known=$(mktemp)
 trap 'rm -f "$known"' EXIT
-cat "${lists[@]}" 2>/dev/null | tr -d ' \t' | grep -v '^#' | sort -u > "$known"
+cat "${lists[@]}" 2>/dev/null | tr -d ' \t' | grep -vE '^(#|\[)' | grep -v '^$' |
+    sort -u > "$known"
 
 missing=()
 while read -r symbol; do

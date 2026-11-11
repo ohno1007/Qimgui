@@ -13,7 +13,16 @@
  * upstream MSM prototype or a newer vendor ABI does not substitute: the
  * address resolving does not make the signature right.
  */
-static struct drm_minor *(*minor_acquire_fn)(unsigned int);
+/* DRM 6.9 added an xarray argument to drm_minor_acquire, and the xarray it
+ * wants is a static in drm_drv.c. Both forms are supported: the presence of
+ * that symbol says which kernel this is.
+ */
+union qk_minor_acquire {
+    struct drm_minor *(*plain)(unsigned int);
+    struct drm_minor *(*with_xa)(void *, unsigned int);
+};
+static union qk_minor_acquire minor_acquire_fn;
+static void *minors_xa;
 static int (*atomic_check_fn)(struct drm_atomic_state *);
 static void (*minor_release_fn)(struct drm_minor *);
 static struct drm_gem_object *(*gem_new_fn)(struct drm_device *, u32, u32);
@@ -21,8 +30,6 @@ static void *(*gem_get_vaddr_fn)(struct drm_gem_object *);
 static void (*gem_put_vaddr_fn)(struct drm_gem_object *);
 static struct drm_framebuffer *(*fb_init_fn)(struct drm_device *,
         const struct drm_mode_fb_cmd2 *, struct drm_gem_object **);
-static int (*set_property_fn)(struct drm_atomic_state *, struct drm_file *,
-        struct drm_mode_object *, struct drm_property *, u64);
 
 int qk_symbols_init(void)
 {
@@ -33,14 +40,14 @@ int qk_symbols_init(void)
         return -ENOENT; \
     } \
 } while (0)
-    RESOLVE(minor_acquire_fn, "drm_minor_acquire");
+    RESOLVE(minor_acquire_fn.plain, "drm_minor_acquire");
+    minors_xa = (void *)qk_lookup_name("drm_minors_xa");
     RESOLVE(atomic_check_fn, "drm_atomic_check_only");
     RESOLVE(minor_release_fn, "drm_minor_release");
     RESOLVE(gem_new_fn, "msm_gem_new");
     RESOLVE(gem_get_vaddr_fn, "msm_gem_get_vaddr");
     RESOLVE(gem_put_vaddr_fn, "msm_gem_put_vaddr");
     RESOLVE(fb_init_fn, "msm_framebuffer_init");
-    RESOLVE(set_property_fn, "drm_atomic_set_property");
 #undef RESOLVE
     return 0;
 }
@@ -52,7 +59,9 @@ int NO_CFI qk_atomic_check(struct drm_atomic_state *state)
 
 struct drm_minor *NO_CFI qk_minor_acquire(unsigned int minor)
 {
-    return minor_acquire_fn(minor);
+    if (minors_xa)
+        return minor_acquire_fn.with_xa(minors_xa, minor);
+    return minor_acquire_fn.plain(minor);
 }
 
 void NO_CFI qk_minor_release(struct drm_minor *minor)
@@ -83,11 +92,4 @@ struct drm_framebuffer *NO_CFI qk_fb_init(struct drm_device *dev,
 {
     /* On success this consumes the caller's GEM object references. */
     return fb_init_fn(dev, cmd, objects);
-}
-
-int NO_CFI qk_set_property(struct drm_atomic_state *state,
-        struct drm_mode_object *object, struct drm_property *property, u64 value)
-{
-    /* Scalar and enum properties only: no FB_ID, CRTC_ID or user pointers. */
-    return set_property_fn(state, NULL, object, property, value);
 }

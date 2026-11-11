@@ -84,18 +84,38 @@ static int qk_enum_value(struct drm_property *property, const char *name, u64 *v
     return -ENOENT;
 }
 
-static int qk_set_plane_property(struct drm_atomic_state *state, const char *name,
-                                 u64 value, bool required)
+/* Vendor plane properties go through the driver's own callback rather than
+ * drm_atomic_set_property, whose argument list has changed between kernel
+ * versions with no symbol to tell the two apart. This is the same call the
+ * core makes, with the locks and the plane state it would use, and the
+ * standard properties the core handles itself are set on the state directly
+ * (see qk_apply), so a driver that declines one is not an error.
+ */
+static int qk_set_plane_value(struct drm_plane_state *plane_state,
+                              struct drm_property *prop, u64 value)
+{
+    int ret;
+
+    if (!present.plane->funcs->atomic_set_property)
+        return -EOPNOTSUPP;
+    ret = present.plane->funcs->atomic_set_property(present.plane, plane_state,
+                                                    prop, value);
+    /* -EINVAL means the core owns this property, not the driver. */
+    return ret == -EINVAL ? 0 : ret;
+}
+
+static int qk_set_plane_property(struct drm_plane_state *plane_state,
+                                 const char *name, u64 value, bool required)
 {
     struct drm_property *prop = qk_plane_property(present.plane, name);
 
     if (!prop)
         return required ? -EOPNOTSUPP : 0;
-    return qk_set_property(state, &present.plane->base, prop, value);
+    return qk_set_plane_value(plane_state, prop, value);
 }
 
-static int qk_set_plane_enum(struct drm_atomic_state *state, const char *property,
-                             const char *entry, bool required)
+static int qk_set_plane_enum(struct drm_plane_state *plane_state,
+                             const char *property, const char *entry, bool required)
 {
     struct drm_property *prop = qk_plane_property(present.plane, property);
     u64 value;
@@ -104,7 +124,7 @@ static int qk_set_plane_enum(struct drm_atomic_state *state, const char *propert
     if (!prop)
         return required ? -EOPNOTSUPP : 0;
     ret = qk_enum_value(prop, entry, &value);
-    return ret ? ret : qk_set_property(state, &present.plane->base, prop, value);
+    return ret ? ret : qk_set_plane_value(plane_state, prop, value);
 }
 
 static bool qk_supports_argb_linear(struct drm_plane *plane)
@@ -392,21 +412,21 @@ static int qk_apply(struct drm_atomic_state *state, bool *changed)
      */
     prop = qk_plane_property(present.plane, "zpos");
     ps->zpos = prop->values[1];
-    ret = qk_set_property(state, &present.plane->base, prop, prop->values[1]);
+    ret = qk_set_plane_value(ps, prop, prop->values[1]);
     if (ret)
         return ret;
     prop = qk_plane_property(present.plane, "alpha");
-    ret = qk_set_property(state, &present.plane->base, prop, prop->values[1]);
+    ret = qk_set_plane_value(ps, prop, prop->values[1]);
     if (ret)
         return ret;
-    ret = qk_set_plane_enum(state, "blend_op", "premultiplied", true);
+    ret = qk_set_plane_enum(ps, "blend_op", "premultiplied", true);
     if (ret)
         return ret;
-    ret = qk_set_plane_enum(state, "fb_translation_mode", "non_sec", false);
+    ret = qk_set_plane_enum(ps, "fb_translation_mode", "non_sec", false);
     if (ret)
         return ret;
     for (i = 0; i < ARRAY_SIZE(reset_properties); i++) {
-        ret = qk_set_plane_property(state, reset_properties[i], 0, false);
+        ret = qk_set_plane_property(ps, reset_properties[i], 0, false);
         if (ret)
             return ret;
     }

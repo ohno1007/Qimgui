@@ -26,7 +26,5 @@ void qk_gem_put_vaddr(struct drm_gem_object *object);
 struct drm_framebuffer *qk_fb_init(struct drm_device *dev,
                                    const struct drm_mode_fb_cmd2 *cmd,
                                    struct drm_gem_object **objects);
-int qk_set_property(struct drm_atomic_state *state, struct drm_mode_object *object,
-                    struct drm_property *property, u64 value);
 
 #endif /* QK_SYMBOLS_H */
