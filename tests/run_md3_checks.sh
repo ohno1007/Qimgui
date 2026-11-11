@@ -14,7 +14,9 @@ sources=(tests/md3_test.cpp jni/src/ui/md3/*.cpp third_party/imgui/{imgui,imgui_
 objects=()
 for source in "${sources[@]}"; do
   object="$build/objects/$(basename "${source%.cpp}").o"
-  if [[ ! -f "$object" || "$source" -nt "$object" ]] || [[ -n "$(find config third_party/imgui jni/include/ui jni/src/ui/md3 tests -name '*.h' -newer "$object" -print -quit 2>/dev/null)" ]]; then
+  headers=(config third_party/imgui)
+  if [[ "$source" != third_party/imgui/* ]]; then headers+=(jni/include/ui jni/src/ui/md3 tests); fi
+  if [[ ! -f "$object" || "$source" -nt "$object" ]] || [[ -n "$(find "${headers[@]}" -name '*.h' -newer "$object" -print -quit 2>/dev/null)" ]]; then
     "${CXX:-g++}" "${flags[@]}" -c "$source" -o "$object"
   fi
   objects+=("$object")

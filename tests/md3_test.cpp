@@ -92,6 +92,27 @@ static void ExtraControls() {
     Click(appbar,ImVec2(bar.x+356,bar.y+40));assert(action==2);
     md3test::DestroyContext();
 }
+static void NarrowLayout() {
+    md3test::ConfigureContext();md::SetTheme(false);
+    const char* actions[]={"A","B"};ImVec2 start;int action=-1;float width=120;
+    Draw bar=[&]{
+        start=ImGui::GetCursorScreenPos();auto* list=ImGui::GetWindowDrawList();int first=list->VtxBuffer.Size;
+        int hit=md::TopAppBar("narrow","A very long heading",md::AppBarStyle::Small,"<",actions,2,width);if(hit!=-1)action=hit;
+        for(int i=first;i<list->VtxBuffer.Size;++i){assert(list->VtxBuffer[i].pos.x>=start.x-4);assert(list->VtxBuffer[i].pos.x<=start.x+width+4);}
+    };
+    Frame(bar);Frame(bar);Click(bar,ImVec2(start.x+28,start.y+32));assert(action==-2);
+    Click(bar,ImVec2(start.x+88,start.y+32));assert(action==0);
+    width=40;Frame(bar);Frame(bar);
+    float maximum=0,offset=0;bool scroll=false;
+    Draw narrow=[&]{
+        ImGui::SetNextWindowContentSize(ImVec2(760,0));
+        ImGui::BeginChild("narrow-gallery",ImVec2(320,600),ImGuiChildFlags_None,ImGuiWindowFlags_HorizontalScrollbar);
+        if(scroll)ImGui::SetScrollX(300);
+        maximum=ImGui::GetScrollMaxX();offset=ImGui::GetScrollX();md::Showcase(0);ImGui::EndChild();
+    };
+    Frame(narrow);Frame(narrow);assert(maximum>300);scroll=true;Frame(narrow);Frame(narrow);assert(offset>250);
+    md3test::DestroyContext();
+}
 static void Popups() {
     md3test::ConfigureContext(); md::SetTheme(false);
     bool open=true,openMenu=false,openSub=false;int depth=0;
@@ -171,12 +192,14 @@ static void Capture(const char* directory,const char* font,const char* medium) {
     }
 }
 int main(int argc,char** argv) {
+    std::setvbuf(stdout,nullptr,_IONBF,0);
     if(argc>=3&&std::strcmp(argv[1],"--capture")==0) {
         Capture(argv[2],argc>3?argv[3]:nullptr,argc>4?argv[4]:nullptr);std::puts("PASS: native draw captures exported");return 0;
     }
     Dates();std::puts("PASS: Gregorian date limits and leap-year boundaries");
     Controls();std::puts("PASS: mouse controls, disabled Home/End, range ordering and text input");
     ExtraControls();std::puts("PASS: carousel single-step keyboard navigation and app bar actions");
+    NarrowLayout();std::puts("PASS: narrow app bar bounds and horizontally scrollable gallery");
     Popups();std::puts("PASS: nested Escape closes exactly one popup level");
     Gallery();std::puts("PASS: all gallery pages, themes, scales and context teardown");
 }

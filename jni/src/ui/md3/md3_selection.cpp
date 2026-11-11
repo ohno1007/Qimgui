@@ -43,6 +43,7 @@ void PopupStyle(bool menu = false) {
 }
 void EndPopupStyle() { ImGui::PopFont(); ImGui::PopStyleColor(5); ImGui::PopStyleVar(7); }
 bool Action(const char* label, ImVec2 size, bool selected = false) {
+    if (ImGui::GetCurrentWindow()->SkipItems) return false;
     const auto& t = GetTheme();
     const ImVec2 min = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::InvisibleButton(label, ImVec2(S(size.x), S(size.y)), ImGuiButtonFlags_EnableNav);
@@ -93,25 +94,32 @@ bool Calendar(const char* id, Date selected, const DateRange* range, Date* picke
             ImGui::PopID();
         }
     } else {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, S(4)));
         const char* weekdays[] = {"S","M","T","W","T","F","S"};
         for (int i = 0; i < 7; ++i) {
             if (i) ImGui::SameLine();
             ImVec2 p = ImGui::GetCursorScreenPos();
-            ImGui::Dummy(ImVec2(S(36), S(32))); Center(p, ImGui::GetItemRectMax(), weekdays[i], t.onSurfaceVariant);
+            ImGui::Dummy(ImVec2(S(40), S(32))); Center(p, ImGui::GetItemRectMax(), weekdays[i], t.onSurfaceVariant);
         }
         const int start = Weekday({year, month, 1}), days = DaysInMonth(year, month);
         for (int cell = 0; cell < 42; ++cell) {
             if (cell % 7) ImGui::SameLine();
             const int day = cell - start + 1;
-            if (day < 1 || day > days) { ImGui::Dummy(ImVec2(S(36), S(40))); continue; }
+            if (day < 1 || day > days) { ImGui::Dummy(ImVec2(S(40), S(40))); continue; }
             const Date current{year, month, day};
             const bool endpoint = range ? CompareDates(current, range->start) == 0 || CompareDates(current, range->end) == 0 : CompareDates(current, selected) == 0;
-            const bool interior = range && CompareDates(current, range->start) > 0 && CompareDates(current, range->end) < 0;
+            const bool inRange = range && CompareDates(range->start, range->end) < 0 &&
+                                 CompareDates(current, range->start) >= 0 && CompareDates(current, range->end) <= 0;
             ImVec2 p = ImGui::GetCursorScreenPos();
-            if (interior) ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x-S(2),p.y+S(2)),ImVec2(p.x+S(38),p.y+S(38)),C(t.secondaryContainer));
+            if (inRange) {
+                const float left = p.x + (CompareDates(current, range->start) == 0 ? S(20) : 0);
+                const float right = p.x + (CompareDates(current, range->end) == 0 ? S(20) : S(40));
+                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(left,p.y),ImVec2(right,p.y+S(40)),C(t.secondaryContainer));
+            }
             char label[20]; std::snprintf(label,sizeof(label),"%d##day%d",day,day);
-            if (Action(label,ImVec2(36,40),endpoint)) { *picked=current; changed=true; }
+            if (Action(label,ImVec2(40,40),endpoint)) { *picked=current; changed=true; }
         }
+        ImGui::PopStyleVar();
     }
     ImGui::EndGroup(); ImGui::PopStyleVar(); ImGui::EndDisabled(); ImGui::PopStyleVar();
     storage->SetInt(monthId,month); storage->SetInt(yearId,year); storage->SetBool(modeId,yearMode); ImGui::PopID(); return changed;
@@ -144,7 +152,7 @@ Date ClampDate(Date date) {
     date.day=std::clamp(date.day,1,DaysInMonth(date.year,date.month)); return date;
 }
 bool Select(const char* label,int* selected,const char* const* options,int count,float width,bool outlined,bool enabled,const char* supporting,bool error) {
-    if(!selected||!options||count<=0) return false;
+    if(!selected||!options||count<=0||ImGui::GetCurrentWindow()->SkipItems) return false;
     const auto& t=GetTheme(); bool changed=false; ImGui::PushID(label); ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, .38f);
     ImGui::BeginDisabled(!enabled);
     const ImVec2 pos=ImGui::GetCursorScreenPos();
@@ -185,7 +193,7 @@ bool Select(const char* label,int* selected,const char* const* options,int count
     EndPopupStyle(); ImGui::EndDisabled(); ImGui::PopStyleVar(); ImGui::PopID(); return changed;
 }
 bool SearchBar(const char* label,char* buffer,std::size_t capacity,const char* const* suggestions,int count,float width,bool enabled) {
-    if(!buffer||capacity==0) return false;
+    if(!buffer||capacity==0||ImGui::GetCurrentWindow()->SkipItems) return false;
     ImGui::PushID(label); ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, .38f);
     ImGui::BeginDisabled(!enabled); const auto& t=GetTheme();
     const float w=std::max(S(112),std::min(S(width),ImGui::GetContentRegionAvail().x));
@@ -241,15 +249,15 @@ void MenuDivider() {
     ImGui::Separator(); ImGui::PopStyleColor(); ImGui::PopStyleVar();
 }
 bool DatePicker(const char* id,Date* date,bool enabled) {
-    if(!date) return false;
-    Date value=ClampDate(*date),picked=value; ImGui::PushID(id); char heading[32]; FormatDate(value,heading,sizeof(heading));
+    if(!date||ImGui::GetCurrentWindow()->SkipItems) return false;
+    Date value=ClampDate(*date),picked=value; ImGui::PushID(id); ImGui::PushFont(detail::Font(),S(14)); char heading[32]; FormatDate(value,heading,sizeof(heading));
     ImGui::TextUnformatted("Select date"); ImGui::PushFont(detail::Font(),S(28)); ImGui::TextUnformatted(heading); ImGui::PopFont();
-    const bool hit=Calendar("calendar",value,nullptr,&picked,enabled); ImGui::PopID();
+    const bool hit=Calendar("calendar",value,nullptr,&picked,enabled); ImGui::PopFont(); ImGui::PopID();
     if(hit&&CompareDates(picked,*date)!=0) { *date=picked; return true; } return false;
 }
 bool DateRangePicker(const char* id,DateRange* range,bool enabled) {
-    if(!range) return false;
-    ImGui::PushID(id);
+    if(!range||ImGui::GetCurrentWindow()->SkipItems) return false;
+    ImGui::PushID(id); ImGui::PushFont(detail::Font(),S(14));
     DateRange value{ClampDate(range->start),ClampDate(range->end)};
     if(CompareDates(value.start,value.end)>0) std::swap(value.start,value.end);
     auto* storage=ImGui::GetStateStorage(); const ImGuiID pendingId=ImGui::GetID("pending-end"); bool pending=storage->GetBool(pendingId,false);
@@ -261,11 +269,11 @@ bool DateRangePicker(const char* id,DateRange* range,bool enabled) {
         else { value.end=picked; if(CompareDates(value.start,value.end)>0) std::swap(value.start,value.end); pending=false; }
         changed=CompareDates(value.start,range->start)!=0||CompareDates(value.end,range->end)!=0; *range=value;
     }
-    storage->SetBool(pendingId,pending); ImGui::PopID(); return changed;
+    storage->SetBool(pendingId,pending); ImGui::PopFont(); ImGui::PopID(); return changed;
 }
 bool TimePicker(const char* id,Time* time,bool use24Hour,bool enabled) {
-    if(!time) return false;
-    ImGui::PushID(id); ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, .38f);
+    if(!time||ImGui::GetCurrentWindow()->SkipItems) return false;
+    ImGui::PushID(id); ImGui::PushFont(detail::Font(),S(14)); ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, .38f);
     ImGui::BeginDisabled(!enabled);
     const auto& t=GetTheme(); auto* storage=ImGui::GetStateStorage(); const ImGuiID modeId=ImGui::GetID("minutes-mode");
     bool minutes=storage->GetBool(modeId,false); Time value{std::clamp(time->hour,0,23),std::clamp(time->minute,0,59)}; bool interacted=false;
@@ -308,7 +316,7 @@ bool TimePicker(const char* id,Time* time,bool use24Hour,bool enabled) {
             interacted=true;
         }
     }
-    ImGui::SetCursorScreenPos(origin); ImGui::Dummy(ImVec2(face,face)); storage->SetBool(modeId,minutes); ImGui::EndDisabled(); ImGui::PopStyleVar(); ImGui::PopID();
+    ImGui::SetCursorScreenPos(origin); ImGui::Dummy(ImVec2(face,face)); storage->SetBool(modeId,minutes); ImGui::EndDisabled(); ImGui::PopStyleVar(); ImGui::PopFont(); ImGui::PopID();
     if(interacted&&(time->hour!=value.hour||time->minute!=value.minute)) { *time=value; return true; } return false;
 }
 }

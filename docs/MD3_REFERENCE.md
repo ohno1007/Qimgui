@@ -18,15 +18,16 @@ Android 组件使用 Dear ImGui 原生输入与绘制。`tests/md3_web` 仅是�
 | Actions | Small / medium / large / extended FAB | `+`，`Create` |
 | Actions | Assist / filter / input / suggestion chips | 启用、选中、删除、禁用 |
 | Inputs | Checkbox / radio / switch | 开、关、混合、禁用 |
-| Inputs | Continuous / discrete / range sliders | 0–100，40；范围 20–80 |
+| Inputs | Continuous / discrete / range sliders | 0–100，40；范围 20–70 |
 | Inputs | Filled / outlined text fields | `Label` / `Input text` / `Supporting text`；错误、禁用 |
-| Layout | Primary / secondary tabs | `First` / `Second` / `Third` |
+| Layout | Primary / secondary tabs | `Overview` / `Activity` / `Settings` |
 | Layout | List / divider | 一行、两行、三行支持文本 |
 | Layout | Cards / navigation bar | 官方实验性 `labs` 组件 |
-| Feedback | Linear / circular progress | 40% |
-| Feedback | Filled / outlined select / menu | `First` / `Second` / `Disabled` |
-| Feedback | Segmented buttons / badges | 官方实验性 `labs` 组件 |
-| Dialog | Basic modal dialog | 标题、正文、取消/确认 |
+| Feedback | Linear / circular progress | 40% / 75% |
+| Feedback | Filled / outlined select | `Fruit`，Apple / Banana / Cherry，`Choose a fruit` |
+| Feedback | Menu / submenu | New item / Show details / More actions / Delete；含嵌套 Export |
+| Feedback | Segmented buttons / badges | Day / Week / Month，单选 Day、多选 Day+Week；Badge 3；官方实验性 `labs` |
+| Dialog | Basic modal dialog | Save changes? / Your changes will be saved to this project. / Cancel / Save |
 
 该发布包没有日期、日期范围、时间、搜索栏/搜索视图、导航轨、底部/侧边面板、Snackbar、Tooltip 的对应组件。这些原生扩展不能宣称已经与官方网页组件逐像素对齐；需分别记录原生截图和交互验证。普通模态对话框另有 `md-dialog` 基准；全屏对话框没有在此包中单独实现。
 
@@ -41,6 +42,10 @@ Android 组件使用 Dear ImGui 原生输入与绘制。`tests/md3_web` 仅是�
 | Slider | 轨道高 4；圆形手柄 20 | `tokens/versions/v0_192/_md-comp-slider.scss` |
 | Segmented button | 高 40，图标 18 | `tokens/versions/v0_192/_md-comp-outlined-segmented-button.scss` |
 | Navigation bar | 高 80，图标 24 | `tokens/versions/v0_192/_md-comp-navigation-bar.scss` |
+
+示例文字和数值以 `jni/src/ui/md3/md3_showcase.cpp` 为准：按钮宽 112、高 40；卡片 208 × 112；标签和导航宽 680；列表宽 656；范围滑块宽 584。导航为 Home / Activity（Badge 3）/ Settings；列表标题均为 Headline，左侧 A / B / C，右侧 100+ / 24 / 56，第三行支持文字为 Supporting text / Second supporting line。
+
+仍需区分组件能力差异：官方 `md-list-item` 没有原生图库的 selected 属性，所以第二行参考保持官方默认背景；官方 Input Chip 始终显示移除按钮，而原生图库的禁用 Input Chip 未传移除目标。截图必须保留并报告这些差异，不用修改官方内部样式隐藏它们。
 
 截图统一主色 `#6750A4` / 暗色 `#D0BCFF`，表面色 `#FEF7FF` / 暗色 `#141218`。文本、数值、主题、缩放和字体应相同后再比较。
 

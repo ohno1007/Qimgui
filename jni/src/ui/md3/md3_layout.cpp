@@ -288,16 +288,48 @@ bool Navigation(const char* id,int* selected,const NavigationItem* items,int cou
 }
 
 int TopAppBar(const char* id,const char* title,AppBarStyle style,const char* navigationIcon,const char* const* actions,int actionCount,float width) {
-    ImGui::PushID(id);ImGui::BeginGroup();auto p=ImGui::GetCursorScreenPos();float w=widthPx(width),h=px(style==AppBarStyle::Medium?112:style==AppBarStyle::Large?152:64);
-    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.surface));int result=-1;
-    float left=p.x+px(16),right=p.x+w-px(8);
-    if(navigationIcon){ImRect r(ImVec2(p.x+px(4),p.y+px(8)),ImVec2(p.x+px(52),p.y+px(56)));ImGui::SetCursorScreenPos(r.Min);if(smallAction("navigation",r,navigationIcon,t.onSurface,false,24))result=-2;left=p.x+px(64);}
-    for(int i=actionCount-1;actions&&i>=0;i--){ImGui::PushID(i);ImRect r(ImVec2(right-px(48),p.y+px(8)),ImVec2(right,p.y+px(56)));ImGui::SetCursorScreenPos(r.Min);if(smallAction("action",r,actions[i],t.onSurfaceVariant,false,24))result=i;right-=px(48);ImGui::PopID();}
-    const bool expanded=style==AppBarStyle::Medium||style==AppBarStyle::Large;float size=style==AppBarStyle::Large?36:style==AppBarStyle::Medium?28:22;
-    ImRect tr(expanded?ImVec2(p.x+px(16),p.y+px(64)):ImVec2(left,p.y),expanded?ImVec2(p.x+w-px(16),p.y+h-px(12)):ImVec2(ImMax(left,right),p.y+px(64)));
-    if(style==AppBarStyle::CenterAligned){const auto ts=measure(title,size);float x=ImClamp(p.x+(w-ts.x)*.5f,tr.Min.x,ImMax(tr.Min.x,tr.Max.x-ts.x));textAt(dl,ImVec2(x,tr.GetCenter().y-ts.y*.5f),title,size,t.onSurface,&tr);}
-    else textAt(dl,ImVec2(tr.Min.x,tr.GetCenter().y-px(size)*.5f),title,size,t.onSurface,&tr);
-    ImGui::SetCursorScreenPos(p);ImGui::Dummy(ImVec2(w,h));ImGui::EndGroup();ImGui::PopID();return result;
+    ImGui::PushID(id); ImGui::BeginGroup();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = widthPx(width);
+    const bool expanded = style == AppBarStyle::Medium || style == AppBarStyle::Large;
+    const float h = px(style == AppBarStyle::Medium ? 112 : style == AppBarStyle::Large ? 152 : 64);
+    auto* dl = ImGui::GetWindowDrawList(); const auto& t = GetTheme();
+    dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.surface));
+    int result = -1;
+    float left = p.x + ImMin(px(16),w), right = p.x + ImMax(0.f,w-px(8));
+    // Keep each action's hit rectangle inside this bar. On narrow surfaces,
+    // navigation has priority; then the first actions that fit are shown.
+    if (navigationIcon && w >= px(56)) {
+        const ImRect rect(ImVec2(p.x+px(4),p.y+px(8)),ImVec2(p.x+px(52),p.y+px(56)));
+        ImGui::SetCursorScreenPos(rect.Min);
+        if (smallAction("navigation",rect,navigationIcon,t.onSurface,false,24)) result=-2;
+        left=p.x+px(64);
+    }
+    const int availableActions = static_cast<int>(ImMax(0.f,right-left)/px(48));
+    const int visibleActions = actions ? ImMin(ImMax(0,actionCount),availableActions) : 0;
+    for (int i=visibleActions-1;i>=0;--i) {
+        ImGui::PushID(i);
+        const ImRect rect(ImVec2(right-px(48),p.y+px(8)),ImVec2(right,p.y+px(56)));
+        ImGui::SetCursorScreenPos(rect.Min);
+        if (smallAction("action",rect,actions[i],t.onSurfaceVariant,false,24)) result=i;
+        right-=px(48); ImGui::PopID();
+    }
+    const float fontSize=style==AppBarStyle::Large?36:style==AppBarStyle::Medium?28:22;
+    const float titleLeft=expanded?p.x+ImMin(px(16),w):ImMin(left,p.x+w);
+    const float titleRight=expanded?p.x+ImMax(0.f,w-px(16)):right;
+    const ImRect titleRect(ImVec2(titleLeft,expanded?p.y+px(64):p.y),
+                          ImVec2(ImMax(titleLeft,titleRight),expanded?p.y+h-px(12):p.y+px(64)));
+    if (titleRect.GetWidth()>0) {
+        if (style==AppBarStyle::CenterAligned) {
+            const auto size=measure(title,fontSize);
+            const float x=ImClamp(p.x+(w-size.x)*.5f,titleRect.Min.x,ImMax(titleRect.Min.x,titleRect.Max.x-size.x));
+            textAt(dl,ImVec2(x,titleRect.GetCenter().y-size.y*.5f),title,fontSize,t.onSurface,&titleRect);
+        } else {
+            textAt(dl,ImVec2(titleRect.Min.x,titleRect.GetCenter().y-px(fontSize)*.5f),title,fontSize,t.onSurface,&titleRect);
+        }
+    }
+    ImGui::SetCursorScreenPos(p); ImGui::Dummy(ImVec2(w,h)); ImGui::EndGroup(); ImGui::PopID();
+    return result;
 }
 
 void LinearProgress(const char* id,float value,float width){

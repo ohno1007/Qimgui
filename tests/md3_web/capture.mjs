@@ -24,6 +24,35 @@ if(process.env.CHROMIUM_PATH) launchOptions.executablePath=process.env.CHROMIUM_
 const browser=await chromium.launch(launchOptions);
 const context=await browser.newContext({viewport:{width:1000,height:1000},deviceScaleFactor:1,reducedMotion:'reduce'});
 const page=await context.newPage();
+// md-menu and md-dialog hosts are display:contents in Material Web 2.5.0.
+// Capture their rendered open shadow-root surfaces, not the zero-box hosts.
+async function captureSurface(hostSelector, surfaceSelector, name, theme, bounds) {
+ const host=page.locator(hostSelector);
+ const surface=host.locator(surfaceSelector).filter({visible:true});
+ const crop=`web-components/${name}-${theme}.png`;
+ try {
+  await surface.waitFor({state:'visible',timeout:5000});
+  const box=await surface.boundingBox();
+  if(!box || box.width<10 || box.height<10) throw new Error('Rendered surface has no usable area');
+  await surface.screenshot({path:resolve(out,crop),animations:'disabled',timeout:5000});
+  bounds.push({name,box,crop,hostSelector,surfaceSelector});
+ } catch(error) {
+  const diagnostics=await host.evaluate((element,selector)=>{
+   const snapshot=node=>{
+    const style=getComputedStyle(node), rect=node.getBoundingClientRect();
+    return {tag:node.localName,classes:node.className,open:node.open,
+     display:style.display,visibility:style.visibility,opacity:style.opacity,
+     rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height}};
+   };
+   return {host:snapshot(element),surfaceSelector:selector,
+    surfaces:[...(element.shadowRoot?.querySelectorAll(selector)||[])].map(snapshot)};
+  },surfaceSelector).catch(e=>({diagnosticError:String(e)}));
+  const diagnosticFile=`web-${name}-${theme}-failure.json`;
+  await writeFile(resolve(out,diagnosticFile),JSON.stringify(diagnostics,null,2)+'\n');
+  await page.screenshot({path:resolve(out,`web-${name}-${theme}-failure.png`),fullPage:true}).catch(()=>{});
+  throw new Error(`Cannot capture ${hostSelector} shadow surface ${surfaceSelector}: ${error.message}\n${JSON.stringify(diagnostics)}`);
+ }
+}
 const errors=[];
 page.on('pageerror',e=>errors.push(String(e)));
 const manifest={materialWeb:'2.5.0',sourceCommit:'37aa14b843dcaeb3a46f898679fa6fcd109b1905',fontsourceRoboto:'5.2.8',browser:browser.version(),deviceScaleFactor:1,screenshots:[]};
@@ -55,11 +84,13 @@ try{
    bounds.push({name,box,crop});
   }
   if(group==='feedback'){
-   const menu=page.locator('#reference-menu');
-   await menu.screenshot({path:resolve(out,`web-components/menu-${theme}.png`),animations:'disabled'});
+   // menu/internal/menu.js renders the surface as div.menu. The visible
+   // filter excludes the closed nested submenus without relying on DOM order.
+   await captureSurface('#reference-menu','div.menu','menu',theme,bounds);
   }
   if(group==='dialog'){
-   await page.locator('#reference-dialog').screenshot({path:resolve(out,`web-components/dialog-${theme}.png`),animations:'disabled'});
+   // dialog/internal/dialog.js renders a native dialog in its shadow root.
+   await captureSurface('#reference-dialog','dialog[open]','dialog',theme,bounds);
   }
   manifest.screenshots.push({theme,group,file,viewport:{width:1000,height:1000},probes:bounds});
  }

@@ -113,11 +113,17 @@ void DrawDashboard(const UiState* state) {
 void DrawWidgets() {
     // Keep the full gallery usable in the resizable Android content pane.
     const float available = ImGui::GetContentRegionAvail().x;
-    const float scale = std::max(0.65f, std::min(1.5f, (available - 48.0f) / 760.0f));
+    const float logicalContentWidth = 760.0f;
+    const float scale = std::max(0.65f, std::min(1.5f,
+        (available - ImGui::GetStyle().ScrollbarSize) / (logicalContentWidth + 48.0f)));
     md3::SetTheme(md3::GetTheme().dark, scale);
     md3::PushTheme();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, md3::GetTheme().surface);
-    if (ImGui::BeginChild("MD3 gallery", ImVec2(0,0), ImGuiChildFlags_AlwaysUseWindowPadding))
+    // Preserve readable touch targets at the minimum scale. Narrow panes can
+    // scroll to every fixed-width sample instead of silently clipping controls.
+    ImGui::SetNextWindowContentSize(ImVec2(logicalContentWidth * scale, 0));
+    if (ImGui::BeginChild("MD3 gallery", ImVec2(0,0), ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_HorizontalScrollbar))
         md3::Showcase();
     ImGui::EndChild();
     ImGui::PopStyleColor();

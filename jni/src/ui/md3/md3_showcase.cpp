@@ -210,9 +210,9 @@ void Surfaces(GalleryState& s) {
 }
 void Pickers(GalleryState& s) {
     Heading("Date and time", "Gregorian date, date range and clock selection");
-    if(BeginCard("date-card",ImVec2(328,424),CardStyle::Filled)) DatePicker("date",&s.date);
+    if(BeginCard("date-card",ImVec2(328,448),CardStyle::Filled)) DatePicker("date",&s.date);
     EndCard(); ImGui::SameLine(0,Dp(24));
-    if(BeginCard("range-card",ImVec2(328,424),CardStyle::Filled)) DateRangePicker("range",&s.range);
+    if(BeginCard("range-card",ImVec2(328,448),CardStyle::Filled)) DateRangePicker("range",&s.range);
     EndCard();
     Section("Time picker");
     ImGui::BeginGroup(); TimePicker("time",&s.time,s.use24Hour); ImGui::EndGroup();
