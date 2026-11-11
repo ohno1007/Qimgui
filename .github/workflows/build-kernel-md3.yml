@@ -1,0 +1,34 @@
+name: build-kernel-md3
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'kernel/md3/**'
+      - 'scripts/generate_kernel_md3_assets.py'
+      - '.github/workflows/build-kernel-md3.yml'
+
+permissions:
+  contents: read
+jobs:
+  gki-612-arm64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build GKI 6.12 external module
+        uses: feicong/android-kernel-build-action@v2
+        with:
+          tag: android16-6.12
+          arch: aarch64
+          module-path: kernel/md3
+          module-name: qimgui_md3
+          registry: ghcr
+      - name: Upload module source and build notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: qimgui-md3-gki-612-arm64
+          path: |
+            kernel/md3/qimgui_md3.ko
+            kernel/md3/README.md
+            docs/MD3_KERNEL.md
+          if-no-files-found: error
