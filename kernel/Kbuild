@@ -14,9 +14,10 @@ obj-m += qimgui.o
 qimgui-y := \
 	kernel/src/qk_core.o kernel/src/qk_utils.o kernel/src/qk_symbols.o \
 	kernel/src/qk_present.o kernel/src/qk_input.o kernel/src/qk_frame.o \
-	kernel/src/qk_geometry.o \
+	kernel/src/qk_geometry.o kernel/src/qk_file.o \
 	kernel/compat/qk_arena.o kernel/compat/qk_math.o kernel/compat/qk_cxx.o \
-	kernel/raster/qk_raster.o kernel/ui/qk_ui.o \
+	kernel/raster/qk_raster.o kernel/ui/qk_ui.o kernel/ui/qk_app.o \
+	jni/src/ui/ui.o jni/src/ui/main_ui.o \
 	third_party/imgui/imgui.o third_party/imgui/imgui_draw.o \
 	third_party/imgui/imgui_tables.o third_party/imgui/imgui_widgets.o \
 	jni/src/ui/md3/md3_controls.o jni/src/ui/md3/md3_layout.o \

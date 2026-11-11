@@ -10,6 +10,7 @@
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 
+#include "qk_app.h"
 #include "qk_arena.h"
 #include "qk_fpu.h"
 #include "qk_frame.h"
@@ -34,10 +35,13 @@ static struct {
     bool ui_ready;
     unsigned int interval_ms, idle_ms;
     u64 last_frame_ns;
-    u64 frames, skipped_frames, raster_errors, ui_errors, fpu_busy;
+    u64 frames, skipped_frames, raster_errors, ui_errors, fpu_busy, settings_writes;
+    bool exit_seen;
     u64 raster_ns_total, ui_ns_total;
     unsigned int idle_streak;
     struct qk_raster_stats last_stats;
+    /* What each buffer still has ink on, so a frame clears only that. */
+    struct qk_clip dirty[2];
 } frame;
 
 /* The draw data is the whole picture: identical bytes mean identical pixels,
@@ -69,6 +73,7 @@ static bool qk_unchanged(const struct qk_draw_data *data)
 static int qk_render(const struct qk_draw_data *data)
 {
     struct qk_surface surface = { 0 };
+    const int back = qk_present_back_index();
     u32 pitch = 0;
     int ret;
 
@@ -78,11 +83,17 @@ static int qk_render(const struct qk_draw_data *data)
     surface.width = frame.window->width;
     surface.height = frame.window->height;
     surface.pitch = pitch;
-    /* Start transparent: whatever the window does not cover shows Android. */
-    qk_surface_fill(&surface, NULL, 0);
+    /* Transparent is what lets Android show through, so every pixel this
+     * buffer still has ink on is cleared -- and only those: the rest of the
+     * plane was never written and is already clear.
+     */
+    if (back >= 0 && back < 2)
+        qk_surface_fill(&surface, &frame.dirty[back], 0);
     ret = qk_raster_draw(&surface, data, &frame.last_stats);
     if (ret)
         return ret;
+    if (back >= 0 && back < 2)
+        frame.dirty[back] = frame.last_stats.damage;
     return qk_present_swap();
 }
 
@@ -122,6 +133,18 @@ static void qk_run_frame(void)
         return;
     }
     frame.idle_streak = 0;
+    /* Settings touch the filesystem, so they are written here, between
+     * frames, and never from inside the floating-point region.
+     */
+    if (qk_app_save_settings() > 0)
+        frame.settings_writes++;
+    if (qk_ui_wants_exit() && !frame.exit_seen) {
+        frame.exit_seen = true;
+        LOGI("Window closed from the interface; set enabled=1 to show it again");
+        qk_present_set_enabled(false);
+        qk_present_update();
+        return;
+    }
     started = ktime_get_ns();
     ret = qk_render(data);
     frame.raster_ns_total += ktime_get_ns() - started;
@@ -148,8 +171,24 @@ static void qk_worker(struct work_struct *work)
             queue_delayed_work(frame.queue, &frame.work, msecs_to_jiffies(1000));
             return;
         }
-        /* The panel size is known only once a CRTC has been chosen. */
+        /* The panel size, and a window that asked for all of it, are known
+         * only once a CRTC has been chosen.
+         */
         qk_present_panel_size(&frame.window->panel_width, &frame.window->panel_height);
+        {
+            int x = 0, y = 0, width = 0, height = 0;
+
+            qk_present_window_rect(&x, &y, &width, &height);
+            if (width != frame.window->width || height != frame.window->height ||
+                x != frame.window->x || y != frame.window->y) {
+                qk_window_place(frame.window, x, y, width, height);
+                if (qk_fpu_begin() == 0) {
+                    qk_ui_resize(width, height);
+                    qk_fpu_end();
+                }
+            }
+            frame.dirty[0] = frame.dirty[1] = (struct qk_clip){ 0, 0, 0, 0 };
+        }
     }
     if (frame.ui_ready)
         qk_run_frame();
@@ -159,18 +198,18 @@ static void qk_worker(struct work_struct *work)
     queue_delayed_work(frame.queue, &frame.work, msecs_to_jiffies(delay));
 }
 
-int qk_frame_start(struct qk_window *window, unsigned int arena_mb,
-                   unsigned int interval_ms, unsigned int idle_ms)
+int qk_frame_start(struct qk_window *window, const struct qk_frame_config *setup)
 {
     struct qk_ui_config config = { 0 };
     int ret;
 
-    if (!window || window->width <= 0 || window->height <= 0)
+    if (!window || window->width <= 0 || window->height <= 0 || !setup)
         return -EINVAL;
     frame.window = window;
-    frame.interval_ms = interval_ms ? interval_ms : 16;
-    frame.idle_ms = idle_ms ? idle_ms : 200;
-    frame.arena_bytes = (size_t)arena_mb << 20;
+    frame.interval_ms = setup->interval_ms ? setup->interval_ms : 16;
+    frame.idle_ms = setup->idle_ms ? setup->idle_ms : 200;
+    frame.arena_bytes = (size_t)setup->arena_mb << 20;
+    frame.dirty[0] = frame.dirty[1] = (struct qk_clip){ 0, 0, 0, 0 };
     if (frame.arena_bytes < QK_ARENA_MINIMUM)
         frame.arena_bytes = QK_ARENA_MINIMUM;
 
@@ -189,8 +228,12 @@ int qk_frame_start(struct qk_window *window, unsigned int arena_mb,
 
     config.width = window->width;
     config.height = window->height;
-    config.dark = 1;
-    config.scale_percent = 100;
+    config.dark = setup->dark;
+    config.scale_percent = setup->scale_percent;
+    config.mode = setup->mode;
+    config.settings_path = setup->settings_path;
+    config.extra_font = setup->font;
+    config.extra_font_size = setup->font_size;
     /* The UI allocates its context and font atlas here, in a context that may
      * sleep and may use floating point only inside the guard.
      */
@@ -269,6 +312,8 @@ void qk_frame_status(struct seq_file *seq)
                frame.frames, frame.skipped_frames, frame.ui_errors, frame.raster_errors);
     seq_printf(seq, "fpu_unavailable=%llu\ninterval_ms=%u\nidle_ms=%u\nidle_streak=%u\n",
                frame.fpu_busy, frame.interval_ms, frame.idle_ms, frame.idle_streak);
+    seq_printf(seq, "settings_writes=%llu\nclosed_by_user=%u\n",
+               frame.settings_writes, frame.exit_seen);
     if (frame.frames) {
         seq_printf(seq, "ui_us_avg=%llu\nraster_us_avg=%llu\n",
                    div_u64(frame.ui_ns_total / 1000, frame.frames + frame.skipped_frames),

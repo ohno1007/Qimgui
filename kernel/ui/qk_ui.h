@@ -33,9 +33,16 @@ struct qk_ui_event {
 };
 
 struct qk_ui_config {
-    s32 width, height;   /* Window size in pixels. */
-    s32 dark;            /* Start in the dark palette. */
-    s32 scale_percent;   /* UI scale; 100 is 1x. Clamped to 50..300. */
+    s32 width, height;      /* Window size in pixels. */
+    s32 dark;               /* Start in the dark palette. */
+    s32 scale_percent;      /* UI scale; 100 is 1x. 0 follows the display. */
+    s32 mode;               /* enum qk_app_mode: main window or gallery. */
+    const char *settings_path;  /* NULL keeps settings in memory only. */
+    /* A font read from the device, merged over the built-in Latin subset so
+     * the interface can show Chinese. The buffer must outlive the context.
+     */
+    const void *extra_font;
+    s32 extra_font_size;
 };
 
 struct qk_ui_stats {
@@ -53,6 +60,8 @@ int qk_ui_resize(s32 width, s32 height);
 int qk_ui_frame(u64 elapsed_us, const struct qk_ui_event *events, u32 count,
                 const struct qk_draw_data **data);
 void qk_ui_get_stats(struct qk_ui_stats *stats);
+/* True once the user has closed the window from the UI itself. */
+int qk_ui_wants_exit(void);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,133 @@
+/* SPDX-License-Identifier: MIT */
+/* Enough std::string for the UI's dialog text: build it, copy it, read it
+ * back as a C string. Storage comes from operator new, which is the arena.
+ */
+#pragma once
+#include <new>
+#include <stddef.h>
+#include <string.h>
+#include <utility>
+
+namespace std {
+inline namespace qkstd {
+
+class string {
+public:
+    static constexpr size_t npos = (size_t)-1;
+
+    string() { reset(); }
+    string(const char* text) { reset(); assign(text, text ? strlen(text) : 0); }
+    string(const char* text, size_t length) { reset(); assign(text, length); }
+    string(const string& other) { reset(); assign(other.text_, other.length_); }
+    string(string&& other) noexcept {
+        if (other.text_ == other.inline_) {
+            reset();
+            assign(other.text_, other.length_);
+        } else {
+            text_ = other.text_;
+            length_ = other.length_;
+            capacity_ = other.capacity_;
+        }
+        other.reset();
+    }
+    ~string() { release(); }
+
+    string& operator=(const string& other) {
+        if (this != &other) {
+            release();
+            reset();
+            assign(other.text_, other.length_);
+        }
+        return *this;
+    }
+    string& operator=(string&& other) noexcept {
+        if (this != &other) {
+            release();
+            reset();
+            if (other.text_ == other.inline_) {
+                assign(other.text_, other.length_);
+            } else {
+                text_ = other.text_;
+                length_ = other.length_;
+                capacity_ = other.capacity_;
+            }
+            other.reset();
+        }
+        return *this;
+    }
+    string& operator=(const char* text) {
+        release();
+        reset();
+        assign(text, text ? strlen(text) : 0);
+        return *this;
+    }
+
+    const char* c_str() const { return text_; }
+    const char* data() const { return text_; }
+    size_t size() const { return length_; }
+    size_t length() const { return length_; }
+    bool empty() const { return length_ == 0; }
+    void clear() { length_ = 0; text_[0] = 0; }
+    char operator[](size_t index) const { return text_[index]; }
+
+    string& append(const char* text) {
+        const size_t extra = text ? strlen(text) : 0;
+
+        if (extra) {
+            reserve(length_ + extra);
+            memcpy(text_ + length_, text, extra);
+            length_ += extra;
+            text_[length_] = 0;
+        }
+        return *this;
+    }
+    string& operator+=(const char* text) { return append(text); }
+    string& operator+=(const string& other) { return append(other.c_str()); }
+
+    bool operator==(const string& other) const {
+        return length_ == other.length_ && !memcmp(text_, other.text_, length_);
+    }
+    bool operator!=(const string& other) const { return !(*this == other); }
+
+private:
+    void reset() {
+        text_ = inline_;
+        inline_[0] = 0;
+        length_ = 0;
+        capacity_ = sizeof(inline_) - 1;
+    }
+    void release() {
+        if (text_ != inline_)
+            ::operator delete(text_);
+        text_ = inline_;
+    }
+    void reserve(size_t wanted) {
+        if (wanted <= capacity_)
+            return;
+        size_t capacity = capacity_ * 2;
+
+        while (capacity < wanted)
+            capacity *= 2;
+        char* grown = static_cast<char*>(::operator new(capacity + 1));
+        memcpy(grown, text_, length_ + 1);
+        if (text_ != inline_)
+            ::operator delete(text_);
+        text_ = grown;
+        capacity_ = capacity;
+    }
+    void assign(const char* text, size_t length) {
+        if (!length)
+            return;
+        reserve(length);
+        memcpy(text_, text, length);
+        length_ = length;
+        text_[length_] = 0;
+    }
+
+    char* text_;
+    size_t length_, capacity_;
+    char inline_[32];
+};
+
+} // namespace qkstd
+} // namespace std

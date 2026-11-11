@@ -22,8 +22,8 @@ fi
 mv "$build/compiler.new" "$build/compiler"
 
 c_sources=(kernel/compat/qk_math.c kernel/compat/qk_arena.c kernel/raster/qk_raster.c
-  kernel/src/qk_geometry.c)
-cxx_sources=(kernel/ui/qk_ui.cpp jni/src/ui/md3/*.cpp
+  kernel/src/qk_geometry.c kernel/src/qk_file.c)
+cxx_sources=(kernel/ui/qk_ui.cpp kernel/ui/qk_app.cpp jni/src/ui/md3/*.cpp jni/src/ui/ui.cpp jni/src/ui/main_ui.cpp
   third_party/imgui/{imgui,imgui_draw,imgui_tables,imgui_widgets}.cpp)
 
 objects=()
@@ -31,7 +31,9 @@ compile() { # compile <source> <compiler> <flags...>
   local source="$1" compiler="$2"; shift 2
   local object="$build/objects/$(basename "${source%.*}").o"
   local headers=(config kernel third_party/imgui tests)
-  if [[ "$source" != third_party/imgui/* ]]; then headers+=(jni/include/ui jni/src/ui/md3); fi
+  if [[ "$source" != third_party/imgui/* ]]; then
+    headers+=(jni/include/ui jni/src/ui jni/src/ui/md3 jni/src/core)
+  fi
   if [[ ! -f "$object" || "$source" -nt "$object" ]] ||
      [[ "$source" == */md3_shapes.cpp && third_party/material_shapes/material_shapes_data.inc -nt "$object" ]] ||
      [[ -n "$(find "${headers[@]}" -name '*.h' -newer "$object" -print -quit 2>/dev/null)" ]]; then

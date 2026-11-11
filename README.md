@@ -93,9 +93,11 @@ MaterialShapes 支持填充、描边、旋转和缩放，在“组件 → 完整
 
 `kernel/` 把绘制、输入和显示整套放进内核模块：没有用户态进程，不创建 Android Surface，
 界面由内核 CPU 光栅化后经 DRM plane 交给 SDE 与 Android 画面硬件混合。
-组件库源码不变，`third_party/imgui/` 和 `jni/src/ui/md3/` 按原样编入模块。
 
-内核态版本去掉了液体玻璃、辉光、Vulkan／GLES 和 Live2D；字体只有内置拉丁子集，界面为英文。
+应用层源码不变：`AImGui` 的五个页面（`jni/src/ui/`）、MD3 组件（`jni/src/ui/md3/`）和 ImGui
+按原样编入模块，设备中文字体由内核 `filp_open` 读入，设置由内核自己读写。
+
+内核态版本去掉了液体玻璃、辉光、Vulkan／GLES、Live2D 和触感反馈。
 窗口可以被肉眼看到，但系统截图和录屏抓不到它。主机验证用 `tests/run_kernel_checks.sh`，
 真机相关部分（DRM 接入、触摸拦截、NEON 区间延迟）尚未验证，范围见 [内核态移植](docs/KERNEL_PORT.md)。
 

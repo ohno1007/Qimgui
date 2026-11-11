@@ -190,6 +190,17 @@ static int qk_select_output(unsigned int first_plane)
 
     present.panel_width = present.crtc->state->mode.hdisplay;
     present.panel_height = present.crtc->state->mode.vdisplay;
+    /* A window of zero size means the whole panel, which is only knowable
+     * once a CRTC has been chosen.
+     */
+    if (!present.config.width) {
+        present.config.x = 0;
+        present.config.width = present.panel_width;
+    }
+    if (!present.config.height) {
+        present.config.y = 0;
+        present.config.height = present.panel_height;
+    }
     if (present.config.x + present.config.width > present.panel_width ||
         present.config.y + present.config.height > present.panel_height)
         return -ERANGE;
@@ -299,6 +310,23 @@ u32 *qk_present_back_buffer(u32 *pitch)
     if (pitch)
         *pitch = present.pitch;
     return present.buffers[back].pixels;
+}
+
+int qk_present_back_index(void)
+{
+    return READ_ONCE(present.front) ^ 1;
+}
+
+void qk_present_window_rect(int *x, int *y, int *width, int *height)
+{
+    if (x)
+        *x = present.config.x;
+    if (y)
+        *y = present.config.y;
+    if (width)
+        *width = present.config.width;
+    if (height)
+        *height = present.config.height;
 }
 
 /* Process context only; DRM's acquire_ctx propagates -EDEADLK to the caller. */
@@ -452,7 +480,7 @@ static int qk_commit_locked(struct drm_modeset_acquire_ctx *acquire, bool *commi
 
 int qk_present_init(const struct qk_present_config *config)
 {
-    if (!config || config->width <= 0 || config->height <= 0)
+    if (!config || config->width < 0 || config->height < 0)
         return -EINVAL;
     present.config = *config;
     present.front = 0;

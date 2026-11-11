@@ -51,7 +51,7 @@ struct qk_arena_stats {
  * which fails if the headroom disappears), with room for the font atlas and
  * several times the frame's own buffers.
  */
-#define QK_ARENA_MINIMUM (8u << 20)
+#define QK_ARENA_MINIMUM (16u << 20)
 /* Upper bound on the reserve block: any single allocation ImGui makes has to
  * fit, the font atlas included.
  */

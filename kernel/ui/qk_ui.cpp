@@ -4,10 +4,10 @@
 #include "qk_arena.h"
 #include "qk_math.h"
 
+#include "qk_app.h"
+
 #include "imgui.h"
 #include "ui/md3.h"
-#include "ui/md3_layout.h"
-#include "ui/md3_showcase.h"
 #include "core/font_data.h"
 
 namespace md = aimgui::md3;
@@ -202,33 +202,12 @@ void Feed(const qk_ui_event& event)
     }
 }
 
-void Header()
-{
-    const md::Theme &theme = md::GetTheme();
-
-    /* The embedded font is Latin only: the kernel has no access to the
-     * device's CJK fonts, so this UI stays in English. See docs/KERNEL_PORT.md.
-     */
-    ImGui::PushFont(ImGui::GetFont(), 22.f * theme.scale);
-    ImGui::TextUnformatted("Qimgui in kernel space");
-    ImGui::PopFont();
-    md::Divider();
-    /* The gallery owns the dark-theme switch and its own category tabs. */
-}
-
+/* All of the interface lives in qk_app.cpp: the AImGui shell and its pages,
+ * or the component gallery. This layer only owns the context and the frame.
+ */
 void Content()
 {
-    md::PushTheme();
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-    ImGui::Begin("qimgui-kernel", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
-                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
-    Header();
-    /* The gallery owns its own category tabs and page state. */
-    md::Showcase(-1);
-    ImGui::End();
-    md::PopTheme();
+    qk_app_draw();
 }
 
 int SlotFor(ImTextureData* texture)
@@ -431,8 +410,23 @@ extern "C" int qk_ui_init(const struct qk_ui_config* config)
         ImGui::DestroyContext();
         return -12;
     }
+    /* A font read off the device covers what the built-in Latin subset does
+     * not, Chinese above all. ImGui rasterises glyphs on demand, so merging a
+     * whole CJK face costs atlas space only for the characters drawn.
+     */
+    if (config->extra_font && config->extra_font_size > 0) {
+        ImFontConfig merged{};
+
+        merged.FontDataOwnedByAtlas = false;
+        merged.MergeMode = true;
+        io.Fonts->AddFontFromMemoryTTF((void*)config->extra_font,
+                                       config->extra_font_size, 16.f * ui.scale,
+                                       &merged);
+    }
     md::SetFonts(ui.font, ui.font);
     md::SetTheme(ui.dark, ui.scale);
+    qk_app_init(config->mode, config->dark, config->scale_percent,
+                config->settings_path);
     if (qk_arena_exhausted()) {
         ImGui::DestroyContext();
         return -12;
@@ -506,6 +500,11 @@ extern "C" int qk_ui_frame(u64 elapsed_us, const struct qk_ui_event* events, u32
     if (data)
         *data = &ui.draw;
     return 0;
+}
+
+extern "C" int qk_ui_wants_exit(void)
+{
+    return ui.ready ? qk_app_wants_exit() : 0;
 }
 
 extern "C" void qk_ui_get_stats(struct qk_ui_stats* stats)

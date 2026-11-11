@@ -9,9 +9,10 @@
 | `compat/` | 内核侧 C++ 运行时、arena 分配器、libm 子集、ImGui 配置 |
 | `compat/include/` | freestanding 的 C 与 C++ 头文件，替代 libc 与 libstdc++ |
 | `raster/` | 定点软件光栅器，把 ImGui draw data 画成预乘 ARGB8888 |
-| `ui/` | 内核侧的 ImGui 上下文、字体、MD3 页面，以及 draw data 转定点 |
+| `ui/` | 内核侧的 ImGui 上下文与字体、应用层（`UiState`、设置、触感空实现），以及 draw data 转定点 |
 
-组件实现仍在 `jni/src/ui/md3/`，ImGui 仍在 `third_party/imgui/`：这里不复制它们，构建时按原布局暂存编译。
+界面本身不在这里：`AImGui` 主界面仍是 `jni/src/ui/ui.cpp` 和 `jni/src/ui/main_ui.cpp`，
+组件在 `jni/src/ui/md3/`，ImGui 在 `third_party/imgui/`。构建时按原布局暂存编译，不复制。
 
 ## 构建
 
@@ -27,11 +28,12 @@ make -C kernel KDIR=/path/to/kernel/source \
 
 ```bash
 adb push kernel/.build/qimgui.ko /data/local/tmp/
-adb shell su -c 'insmod /data/local/tmp/qimgui.ko width=640 height=1280 pos_x=220 pos_y=560'
+adb shell su -c 'insmod /data/local/tmp/qimgui.ko'          # 整屏 plane，主界面
 adb shell su -c 'cat /proc/qimgui'
 adb shell su -c 'dmesg | grep qimgui'
 ```
 
+`gallery=1` 只显示组件画廊；`font_path=` 指定中文字体；`settings_path=` 改设置文件位置。
 `enabled=0` 撤下画面，`grab=0` 把触摸完全交还 Android。
 **接入成功后模块会钉住自己直到重启**，不要强制 `rmmod`。
 

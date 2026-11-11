@@ -22,7 +22,8 @@ STAGED := \
 	kernel/src kernel/compat kernel/raster kernel/ui \
 	config/aimgui_imconfig.h \
 	third_party/imgui third_party/material_shapes \
-	jni/include/ui jni/include/qimgui jni/src/ui/md3 jni/src/core/font_data.h
+	jni/include/ui jni/include/qimgui jni/src/ui jni/src/core/font_data.h \
+	jni/src/core/glass.h jni/src/core/haptics.h
 
 .PHONY: all modules stage clean help
 

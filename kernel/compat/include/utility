@@ -14,6 +14,24 @@ template <class T> constexpr T&& forward(remove_reference_t<T>&& value) noexcept
 template <class T> constexpr remove_reference_t<T>&& move(T&& value) noexcept {
     return static_cast<remove_reference_t<T>&&>(value);
 }
+template <class First, class Second>
+struct pair {
+    First first;
+    Second second;
+
+    pair() : first(), second() {}
+    pair(const First& a, const Second& b) : first(a), second(b) {}
+    pair(const pair&) = default;
+    pair(pair&&) = default;
+    pair& operator=(const pair&) = default;
+    pair& operator=(pair&&) = default;
+};
+
+template <class First, class Second>
+pair<First, Second> make_pair(First first, Second second) {
+    return pair<First, Second>(first, second);
+}
+
 template <class T> void swap(T& left, T& right) {
     T held = move(left);
     left = move(right);

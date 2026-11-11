@@ -20,7 +20,7 @@ struct qk_present_config {
     unsigned int crtc_id;   /* 0 selects the active DSI CRTC. */
     unsigned int plane_id;  /* 0 selects an idle primary/overlay plane. */
     int x, y;               /* Window origin on the panel. */
-    int width, height;      /* Window size; the image buffers match it. */
+    int width, height;      /* Window size; 0 takes the whole panel. */
 };
 
 int qk_present_init(const struct qk_present_config *config);
@@ -38,6 +38,12 @@ void qk_present_set_enabled(bool enabled);
 
 /* CPU address of the buffer the UI may draw into, and its row stride. */
 u32 *qk_present_back_buffer(u32 *pitch);
+/* Which of the two buffers that is: the caller tracks what it dirtied. */
+int qk_present_back_index(void);
+/* The rect finally in use, which may differ from the requested one when the
+ * window was asked to cover the whole panel.
+ */
+void qk_present_window_rect(int *x, int *y, int *width, int *height);
 /* Publishes the back buffer and commits it. */
 int qk_present_swap(void);
 /* Panel size discovered from the CRTC mode, for placing the window. */

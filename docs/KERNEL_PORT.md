@@ -3,8 +3,11 @@
 把 Qimgui 的绘制、输入和显示全部搬进内核模块：没有用户态进程，不创建 Android Surface，不经过 SurfaceFlinger。
 界面由内核 CPU 光栅化到 MSM GEM 内存，经 DRM plane 交给原 MSM/SDE 驱动混合输出。
 
-组件库本身没有改动。`third_party/imgui/` 和 `jni/src/ui/md3/` 的源码在内核模块里按原样编译，
-新增的是一层让它们能在内核运行的适配，以及替代 Android 宿主的显示和输入实现。
+**应用层源码没有改动。** `third_party/imgui/`、`jni/src/ui/md3/` 以及 `AImGui` 主界面本身
+（`jni/src/ui/ui.cpp`、`jni/src/ui/main_ui.cpp`）在内核模块里按原样编译 —— 概览、组件、设置、性能、关于五个页面，
+导航栏、对话框、折叠形态都是同一份实现。新增的只有让它们能在内核运行的适配，以及替代 Android 宿主的显示、输入、字体和设置存储。
+
+`gallery=1` 可以改为只显示 MD3 组件画廊。
 
 ## 与用户态版本的取舍
 
@@ -26,7 +29,7 @@ flowchart TD
     A[input handler filter<br/>触摸／按键] --> B[事件环形缓冲]
     B --> C[帧工作队列 qk_frame]
     C --> D{kernel_neon_begin}
-    D --> E[ImGui + MD3 组件<br/>浮点，arena 分配]
+    D --> E[AImGui 主界面 + MD3 组件<br/>浮点，arena 分配]
     E --> F[ImDrawData → 定点 draw data]
     F --> G{kernel_neon_end}
     G --> H[定点光栅器 qk_raster<br/>可抢占，无浮点]
@@ -84,6 +87,31 @@ arm64 内核用 `-mgeneral-regs-only` 编译，内核态使用 FP/SIMD 寄存器
 实测余量：1080×2400 整窗画廊的峰值约 520 KiB，默认 16 MiB 区域用掉约 3%。
 `tests/kernel_ui_test.cpp` 里有一条断言要求峰值不超过容量的一半，新页面把余量吃掉时会在主机上先失败。
 
+## 应用层
+
+`kernel/ui/qk_app.cpp` 持有 `UiState` 并调用 `aimgui::DrawUi()` —— 与用户态 `AImGui` 完全相同的入口。
+它另外负责三件 Android 宿主原本提供、内核里需要自己实现的事：
+
+- **玻璃、录屏镜像、防录屏、传感器**在 `UiState` 里一律标记为不可用。主界面本来就要处理这些情况，
+  所以显示的是 MD3 实色表面，顶部开关会说明"当前设备不可用"。
+- **触感反馈**是空实现：从 input filter 里驱动力反馈设备不值得这个风险。
+- **设置**通过 `kernel/src/qk_file.c`（`filp_open` / `kernel_read` / `kernel_write`）存成
+  `key=value` 文本。保存只在帧与帧之间、浮点区间之外进行，而且只在值真的变了的时候写。
+  文件损坏、键未知、值越界都只是被忽略。
+
+界面里"退出"会让窗口撤下（`enabled=0`），模块仍在；`enabled=1` 重新显示。
+
+## 字体
+
+内核读不到 Android 的字体配置，但读得到文件。模块在启动帧循环之前（读文件会睡眠，不能在浮点区间内）
+按顺序尝试 `/data/local/tmp/qimgui.ttf` 和 `/system/fonts/` 下的常见中文字体，用 `vmalloc` 整份读入，
+以 `MergeMode` 合并到内置 Inter 子集之上。ImGui 1.93 按需光栅化字形，所以合并一份完整 CJK 字体
+只为真正画出来的字付出图集空间。
+
+`font_path=` 可以指定具体文件，`font_mb=` 限制大小（默认 32 MiB）。
+**必须是 TrueType 轮廓**（`.ttf` / `.ttc`）：字形光栅器读不了 CFF，`.otf` 会被跳过。
+没有找到任何字体时界面仍可用，只是中文显示为缺字符号。
+
 ## 显示
 
 `kernel/src/qk_present.c`，流程沿用已在该设备上验证过的 DRM overlay 做法：
@@ -93,6 +121,7 @@ arm64 内核用 `-mgeneral-regs-only` 编译，内核态使用 FP/SIMD 寄存器
 3. 筛选空闲物理 plane：类型为 PRIMARY 或 OVERLAY、当前无 fb 且未绑定 CRTC、`possible_crtcs` 允许、
    支持 ARGB8888 + linear、不带 `multirect_mode`（SDE 虚拟平面）、具备 `alpha` / `zpos` 范围属性和 `blend_op=premultiplied`。
 4. 分配**两块** GEM 缓冲区和两个 framebuffer，行距按 `ALIGN(width*4, 256)`。
+   `width=0 height=0`（默认）表示整屏：主界面自己画浮动窗口，其余区域保持透明，Android 透出来。
 5. 复制 `mode_config.funcs`，只把副本的 `atomic_check` 换成自己的，用 `cmpxchg` 发布。
 6. 每帧画完背缓冲 → `wmb()` → 翻转 front → 提交。
 
@@ -130,16 +159,18 @@ filter 在原子上下文运行，而一个触点的 X、Y 是分开到达、到
 2. 取出输入事件，进 NEON 区间跑 UI 帧，出区间。
 3. 把本帧 draw data（顶点＋索引＋命令）与上一帧逐字节比较。**完全相同就直接跳过**光栅化和提交 ——
    静止界面不产生任何显示流量。
-4. 有变化则清空背缓冲、光栅化、翻转提交。
+4. 有变化则清空背缓冲、光栅化、翻转提交。清空只针对**该缓冲区上一次画过的矩形** ——
+   其余像素从未写过，本来就是透明的。窗口只占屏幕一部分时这省下大部分写入。
 5. 连续 30 帧无变化后，节奏从 `interval_ms`（默认 16 ms）降到 `idle_ms`（默认 200 ms）；输入到达时立刻唤醒。
 
 ## 性能
 
 主机 x86-64、`-O2`、无 sanitizer，整窗每帧全部重绘（`tests/kernel_ui_test.cpp` 输出）：
 
-| 窗口 | 三角形 | 混合像素 | 每帧耗时 |
-| --- | --- | --- | --- |
-| 1080×2400 | 2634 | 2.76 M | 3.8 ms |
+| 内容 | 平面 | 三角形 | 混合像素 | 每帧耗时 |
+| --- | --- | --- | --- | --- |
+| 主界面（浮动窗口） | 1080×2400 | 1488 | 1.18 M | 约 2 ms |
+| 组件画廊（铺满） | 1080×2400 | 2634 | 2.76 M | 3.8 ms |
 
 早期逐像素做内外测试的版本是 67 ms/帧；现在按扫描线解边不等式求跨度，并对不透明纯色走直写路径。
 手机 CPU 比这台主机慢，**真机数字需要实测**；窗口越小越便宜，而且静止时整帧被跳过。
@@ -161,13 +192,16 @@ make -C kernel KDIR=/path/to/kernel/source \
 加载与查看：
 
 ```bash
-insmod qimgui.ko width=640 height=1280 pos_x=220 pos_y=560 arena_mb=16
+insmod qimgui.ko                      # 整屏 plane，主界面，自动找中文字体
+insmod qimgui.ko gallery=1            # 只看组件画廊
+insmod qimgui.ko width=640 height=1280 pos_x=220 pos_y=560   # 固定区域 plane
 cat /proc/qimgui
 echo 0 > /sys/module/qimgui/parameters/grab     # 把触摸完全还给 Android
 echo 0 > /sys/module/qimgui/parameters/enabled  # 撤下画面（模块仍在）
 ```
 
-主要参数：`card`、`crtc_id`、`plane_id`、`pos_x/pos_y/width/height`、`grab`、`arena_mb`、
+主要参数：`card`、`crtc_id`、`plane_id`、`pos_x/pos_y/width/height`（尺寸为 0 表示整屏）、
+`gallery`、`dark`、`scale_percent`、`settings_path`、`font_path`、`font_mb`、`grab`、`arena_mb`、
 `interval_ms`、`idle_ms`、`touch_max_x/touch_max_y`、`swap_xy`、`invert_x`、`invert_y`。
 触摸设备上报自己的分辨率时要设置 `touch_max_*`，否则按面板像素处理。
 
@@ -181,7 +215,7 @@ echo 0 > /sys/module/qimgui/parameters/enabled  # 撤下画面（模块仍在）
 | `kernel_arena_test` | 对齐、拆分、双向合并、6 万轮随机分配压力、耗尽走保留块、重复释放与越界指针 |
 | `kernel_raster_test` | 覆盖率、共享边不重复混合、渐变插值精度、裁剪、两种纹理格式、退化三角形、全部入参校验 |
 | `kernel_geometry_test` | 窗口夹取、触摸坐标缩放与旋转、边界包含、手势归属状态机 |
-| `kernel_ui_test` | 真实 ImGui + MD3 画廊跑完整管线渲出像素：明暗主题、触摸与按键、改尺寸、arena 下限与余量、性能 |
+| `kernel_ui_test` | 真实的 `AImGui` 主界面和 MD3 画廊跑完整管线渲出像素：明暗主题、触摸与按键、改尺寸、设置文件往返、设备字体合并后中文真的变了像素、arena 下限与余量、性能 |
 | freestanding 构建 | 用 `kernel/compat/include` 和内核同款开关重编全部 C++ 源码，并检查目标文件没有内核提供不了的未定义符号 |
 
 渲染结果会写到 `build/kernel-checks/*.ppm`，可以直接看。
@@ -196,10 +230,11 @@ echo 0 > /sys/module/qimgui/parameters/enabled  # 撤下画面（模块仍在）
 
 ## 已知限制与后续
 
-- **没有中文**：内核读不到 `/system/fonts`，目前只内置 Inter 拉丁子集，界面文案改成了英文。
-  后续可在 `qk_ui_init()` 里用 `filp_open` + `kernel_read` 读设备 CJK 字体并 merge 进图集。
-- **整屏窗口偏贵**：每帧重绘整个窗口。后续可用 `qk_raster_stats.damage` 做局部重绘，
-  但双缓冲下需要同时跟踪两帧的脏区。
+- **中文依赖设备字体**：找不到 TrueType 中文字体（例如只有 `.otf`）时显示缺字符号。
+- **每帧重绘整个界面**：清空已按脏区收敛，但光栅化本身仍是整窗。后续可做增量重绘，
+  双缓冲下需要同时跟踪两帧的脏区。
+- **顶部仍有"液体玻璃"开关**，内核里永远是"当前设备不可用"：主界面是和用户态共用的同一份源码。
+- **没有触感反馈**。
 - **接入后不能卸载**，与参考模块同因。
 - **窗口移动中途的触摸判定**可能错一帧：filter 在原子上下文读窗口矩形，不加锁。
 - **多指只驱动一个 ImGui 指针**，其余被认领的触点仅做拦截。
