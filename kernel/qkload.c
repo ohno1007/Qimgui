@@ -54,7 +54,7 @@ static int looks_like_module(const char *name)
 }
 
 /* 4K and 16K page kernels disagree about the layout of most structures, so
- * their modules are not interchangeable: pick the one that can work here.
+ * their modules are not interchangeable.
  */
 static int suits_page_size(const char *name)
 {
@@ -64,48 +64,122 @@ static int suits_page_size(const char *name)
     return wants_16k ? is_16k : !is_16k;
 }
 
-static int scan(const char *directory, char *found, size_t size, int strict)
+/* Copies the module's version magic release string, the part before the
+ * first space, into `release`. Returns 0 when there is none.
+ */
+static int module_release(const char *path, char *release, size_t size)
 {
-    struct dirent *entry;
-    DIR *dir = opendir(directory);
-    int hit = 0;
+    char window[8192];
+    FILE *file = fopen(path, "rb");
+    size_t got, keep = 0;
+    char *hit = NULL;
 
-    if (!dir)
+    if (!file)
         return 0;
-    while ((entry = readdir(dir))) {
-        if (!looks_like_module(entry->d_name))
-            continue;
-        if (strict && !suits_page_size(entry->d_name))
-            continue;
-        snprintf(found, size, "%s/%s", directory, entry->d_name);
-        hit = 1;
-        break;
+    /* The string is somewhere in .modinfo; scan with an overlap so it is not
+     * split across two reads.
+     */
+    while ((got = fread(window + keep, 1, sizeof(window) - keep - 1, file)) > 0) {
+        size_t total = keep + got;
+        size_t i;
+
+        window[total] = 0;
+        for (i = 0; i + 9 < total; i++) {
+            if (!memcmp(window + i, "vermagic=", 9)) {
+                hit = window + i + 9;
+                break;
+            }
+        }
+        if (hit)
+            break;
+        keep = total > 64 ? 64 : total;
+        memmove(window, window + total - keep, keep);
     }
-    closedir(dir);
-    return hit;
+    fclose(file);
+    if (!hit)
+        return 0;
+    snprintf(release, size, "%s", hit);
+    release[strcspn(release, " ")] = 0;
+    return 1;
 }
 
-/* Returns 1 and fills `found` with a module path, or 0. */
+/* Same major.minor, which is what struct module's layout tracks. */
+static int same_series(const char *left, const char *right)
+{
+    int a1 = 0, a2 = 0, b1 = 0, b2 = 0;
+
+    if (sscanf(left, "%d.%d", &a1, &a2) != 2)
+        return 0;
+    if (sscanf(right, "%d.%d", &b1, &b2) != 2)
+        return 0;
+    return a1 == b1 && a2 == b2;
+}
+
+/* Candidates are ranked by how well they match this kernel, because a device
+ * usually ends up with several of these lying about.
+ */
+static int rank(const char *path, const char *running)
+{
+    char release[128];
+    int score = 0;
+
+    if (module_release(path, release, sizeof(release))) {
+        if (!strcmp(release, running))
+            score += 100;
+        else if (same_series(release, running))
+            score += 50;
+    }
+    if (suits_page_size(path))
+        score += 10;
+    return score;
+}
+
 static int discover(const char *self, char *found, size_t size)
 {
-    char own[1024];
+    char own[1024], candidate[1024], best[1024] = "";
+    const char *running = "";
+    struct utsname host;
+    struct dirent *entry;
+    int best_score = -1;
     unsigned i;
-    int strict;
+    DIR *dir;
 
-    /* Twice: first insisting on the right page-size variant, then taking
-     * whatever is there so the report can explain the mismatch.
-     */
-    for (strict = 1; strict >= 0; strict--) {
-        if (self) {
+    if (!uname(&host))
+        running = host.release;
+
+    for (i = 0; i <= sizeof(kSearchDirs) / sizeof(*kSearchDirs); i++) {
+        const char *directory;
+
+        if (i == 0) {
+            if (!self)
+                continue;
             snprintf(own, sizeof(own), "%s", self);
-            if (scan(dirname(own), found, size, strict))
-                return 1;
+            directory = dirname(own);
+        } else {
+            directory = kSearchDirs[i - 1];
         }
-        for (i = 0; i < sizeof(kSearchDirs) / sizeof(*kSearchDirs); i++)
-            if (scan(kSearchDirs[i], found, size, strict))
-                return 1;
+        dir = opendir(directory);
+        if (!dir)
+            continue;
+        while ((entry = readdir(dir))) {
+            int score;
+
+            if (!looks_like_module(entry->d_name))
+                continue;
+            snprintf(candidate, sizeof(candidate), "%s/%s", directory, entry->d_name);
+            score = rank(candidate, running);
+            printf("candidate : %s (match %d)\n", candidate, score);
+            if (score > best_score) {
+                best_score = score;
+                snprintf(best, sizeof(best), "%s", candidate);
+            }
+        }
+        closedir(dir);
     }
-    return 0;
+    if (best_score < 0)
+        return 0;
+    snprintf(found, size, "%s", best);
+    return 1;
 }
 
 /* /sdcard is FUSE and /storage is noexec; neither is a good source for a
@@ -339,7 +413,7 @@ int main(int argc, char **argv)
             printf("Put qimgui*.ko in one of those, or name it on the command line.\n");
             return 2;
         }
-        printf("found     : %s\n", discovered);
+        printf("chosen    : %s\n", discovered);
         if (!suits_page_size(discovered))
             printf("            WARNING: this looks like the %s-page build and\n"
                    "            this kernel uses %ld-byte pages. Most symbol CRCs\n"
@@ -372,7 +446,9 @@ int main(int argc, char **argv)
     switch (errno) {
     case ENOEXEC:
         printf("  The kernel parsed the file and refused it. The log below says\n"
-               "  why: version magic, a symbol CRC, or a malformed section.\n");
+               "  why: version magic, a symbol CRC, or a malformed section.\n"
+               "  \"struct module size\" there means the module was built against\n"
+               "  a different kernel: nothing but rebuilding fixes that one.\n");
         break;
     case ENOENT:
         printf("  A symbol this module needs is not exported by this kernel.\n");
