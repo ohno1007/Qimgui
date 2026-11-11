@@ -38,6 +38,21 @@ adb shell su -c 'dmesg | grep qimgui'
 `enabled=0` 撤下画面，`grab=0` 把触摸完全交还 Android。
 **接入成功后模块会钉住自己直到重启**，不要强制 `rmmod`。
 
+## 加载失败时
+
+`insmod` 只给一个 errno，而 `ENOEXEC` 可以是十几种不同的拒绝。`kernel/qkload.c` 是个诊断加载器：
+它检查文件本身（ELF 头、大小、vermagic、有无符号 CRC），调用 `finit_module`，
+然后**自己通过系统调用读内核环形缓冲区**（设备上 dmesg 常被限制），把相关的那几行打出来。
+
+```bash
+aarch64-linux-gnu-gcc -static -O2 -o qkload kernel/qkload.c
+adb push qkload /data/local/tmp/ && adb shell su -c 'chmod 755 /data/local/tmp/qkload'
+adb shell su -c '/data/local/tmp/qkload /data/local/tmp/qimgui.ko'
+```
+
+`-n` 只检查不加载；`-f` 忽略 vermagic（符号 CRC 仍然校验，所以仍是安全的那一半）。
+它**不会**设置 `MODULE_INIT_IGNORE_MODVERSIONS`：结构体定义对不上还硬装，是把机器搞坏的标准做法。
+
 ## 主机验证
 
 ```bash
