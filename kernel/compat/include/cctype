@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <ctype.h>
+namespace std { inline namespace qkstd {
+using ::isdigit; using ::isspace; using ::isalpha; using ::isalnum;
+using ::isprint; using ::isupper; using ::islower; using ::toupper; using ::tolower;
+} }

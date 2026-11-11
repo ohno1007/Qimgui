@@ -1,0 +1,65 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <initializer_list>
+#include <utility>
+
+namespace std {
+inline namespace qkstd {
+
+template <class T> constexpr const T& min(const T& left, const T& right) {
+    return right < left ? right : left;
+}
+template <class T> constexpr const T& max(const T& left, const T& right) {
+    return left < right ? right : left;
+}
+template <class T> constexpr const T& clamp(const T& value, const T& low,
+                                            const T& high) {
+    return value < low ? low : (high < value ? high : value);
+}
+template <class T, class Compare>
+constexpr const T& min(const T& left, const T& right, Compare before) {
+    return before(right, left) ? right : left;
+}
+template <class T, class Compare>
+constexpr const T& max(const T& left, const T& right, Compare before) {
+    return before(left, right) ? right : left;
+}
+template <class T> constexpr T min(initializer_list<T> values) {
+    T smallest = *values.begin();
+    for (const T& value : values)
+        if (value < smallest)
+            smallest = value;
+    return smallest;
+}
+template <class T> constexpr T max(initializer_list<T> values) {
+    T largest = *values.begin();
+    for (const T& value : values)
+        if (largest < value)
+            largest = value;
+    return largest;
+}
+template <class Iterator> void reverse(Iterator first, Iterator last) {
+    while (first != last && first != --last) {
+        swap(*first, *last);
+        ++first;
+    }
+}
+template <class Iterator, class T>
+Iterator find(Iterator first, Iterator last, const T& value) {
+    for (; first != last; ++first)
+        if (*first == value)
+            return first;
+    return last;
+}
+template <class Input, class Output> Output copy(Input first, Input last, Output to) {
+    for (; first != last; ++first, ++to)
+        *to = *first;
+    return to;
+}
+template <class Iterator, class T> void fill(Iterator first, Iterator last, const T& value) {
+    for (; first != last; ++first)
+        *first = value;
+}
+
+} // namespace qkstd
+} // namespace std

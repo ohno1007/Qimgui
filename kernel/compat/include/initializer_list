@@ -1,0 +1,34 @@
+/* SPDX-License-Identifier: MIT */
+/* The compiler requires this exact shape: a pointer and a length, directly in
+ * namespace std.
+ */
+#pragma once
+#include <stddef.h>
+
+namespace std {
+template <class T>
+class initializer_list {
+public:
+    using value_type = T;
+    using size_type = size_t;
+    using iterator = const T*;
+
+    constexpr initializer_list() noexcept : first_(nullptr), length_(0) {}
+    constexpr size_t size() const noexcept { return length_; }
+    constexpr const T* begin() const noexcept { return first_; }
+    constexpr const T* end() const noexcept { return first_ + length_; }
+
+private:
+    constexpr initializer_list(const T* first, size_t length) noexcept
+        : first_(first), length_(length) {}
+    const T* first_;
+    size_t length_;
+};
+
+template <class T> constexpr const T* begin(initializer_list<T> list) noexcept {
+    return list.begin();
+}
+template <class T> constexpr const T* end(initializer_list<T> list) noexcept {
+    return list.end();
+}
+} // namespace std

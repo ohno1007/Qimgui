@@ -12,6 +12,7 @@
 | 查看左右布局和可选液体玻璃 | `AImGui` | `./build.sh`；[主界面](docs/MD3_MAIN.md) |
 | 从 SDK 编写新的 Android 应用 | `examples/md3_clock/` → `MD3Clock / Tempo` | [先安装 SDK，再编译示例](docs/MD3_CLOCK.md) |
 | 验证无窗口的外部工程接入 | `examples/md3_consumer/` | [独立消费样例](docs/MD3_FRAMEWORK.md#可运行消费样例与验证) |
+| 不要用户态进程，整套跑在内核 | `kernel/` → `qimgui.ko` | [内核态移植](docs/KERNEL_PORT.md)；需目标内核工具链 |
 
 `AImGui` 使用 Vulkan，并在初始化失败时回退 GLES 3；支持主题、字体回退、触感反馈、设置持久化及可选 Live2D。`MD3Demo` 和 `MD3Clock` 共用可选 `Qimgui::AndroidOverlay` 宿主，以 GLES 3 提交帧。Android 程序通过 SurfaceFlinger 创建窗口，无需 APK 或 Activity。
 
@@ -77,6 +78,7 @@ MD3 控件支持 ImGui 的键盘导航，按 Tab 切换焦点。
 | `jni/src/platform/`、`jni/src/core/` | 平台适配、输入、字体、GL／VK 后端和玻璃等应用能力 |
 | `third_party/`、`config/` | 固定上游源码、许可、来源记录和统一 ImGui 配置 |
 | `scripts/`、`tests/` | 资源生成、来源校验、行为回归和软件预览 |
+| `kernel/` | 内核模块：软件光栅器、DRM plane 接入、input handler 和内核侧 C++ 运行时 |
 | `docs/`、`release/` | 使用文档、开发说明和构建产物获取说明 |
 
 目录边界、依赖方向、开发位置和测试选择见 [代码结构](docs/ARCHITECTURE.md)。
@@ -86,6 +88,16 @@ MD3 接入与组件清单见 [使用文档](docs/MD3.md)，网页参考与截图
 组件库可通过 `<qimgui/md3.hpp>` 与 `Qimgui::MD3` 独立接入，支持 CMake 安装和 `find_package`，详见 [框架接入](docs/MD3_FRAMEWORK.md)。工具栏、分割按钮、连接按钮组和波浪进度位于“表现力组件”分类，详见 [Expressive 组件](docs/MD3_EXPRESSIVE.md)。
 MaterialShapes 支持填充、描边、旋转和缩放，在“组件 → 完整组件 → 形状”或独立测试窗口的“形状”分类查看；接口与官方曲线再生见 [形状文档](docs/MD3_SHAPES.md)。
 主界面采用 24 单位网格的语义轮廓矢量图标，不依赖图标字体；这些图形并非官方 Material Symbols 字形的精确复刻。
+
+## 内核态
+
+`kernel/` 把绘制、输入和显示整套放进内核模块：没有用户态进程，不创建 Android Surface，
+界面由内核 CPU 光栅化后经 DRM plane 交给 SDE 与 Android 画面硬件混合。
+组件库源码不变，`third_party/imgui/` 和 `jni/src/ui/md3/` 按原样编入模块。
+
+内核态版本去掉了液体玻璃、辉光、Vulkan／GLES 和 Live2D；字体只有内置拉丁子集，界面为英文。
+窗口可以被肉眼看到，但系统截图和录屏抓不到它。主机验证用 `tests/run_kernel_checks.sh`，
+真机相关部分（DRM 接入、触摸拦截、NEON 区间延迟）尚未验证，范围见 [内核态移植](docs/KERNEL_PORT.md)。
 
 ## 液体玻璃
 

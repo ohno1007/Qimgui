@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <stdlib.h>
+namespace std { inline namespace qkstd {
+using ::malloc; using ::calloc; using ::realloc; using ::free; using ::qsort;
+using ::abs;
+} }

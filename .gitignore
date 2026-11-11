@@ -10,3 +10,4 @@ java/build/
 __pycache__/
 *.pyc
 node_modules/
+kernel/.build/

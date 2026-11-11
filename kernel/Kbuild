@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: GPL-2.0
+# Kbuild for the staged tree that ../Makefile populates: a copy of this
+# repository's kernel/, third_party/imgui/, jni/ and config/ sources, keeping
+# their layout because the sources include each other by relative path.
+#
+# Two things here are not ordinary kernel module practice, and both are
+# explained in docs/KERNEL_PORT.md:
+#   - C++ sources, for ImGui and the MD3 component library.
+#   - Objects built without -mgeneral-regs-only, because the UI computes in
+#     floating point. They run only inside kernel_neon_begin(): see qk_fpu.h.
+
+obj-m += qimgui.o
+
+qimgui-y := \
+	kernel/src/qk_core.o kernel/src/qk_utils.o kernel/src/qk_symbols.o \
+	kernel/src/qk_present.o kernel/src/qk_input.o kernel/src/qk_frame.o \
+	kernel/src/qk_geometry.o \
+	kernel/compat/qk_arena.o kernel/compat/qk_math.o kernel/compat/qk_cxx.o \
+	kernel/raster/qk_raster.o kernel/ui/qk_ui.o \
+	third_party/imgui/imgui.o third_party/imgui/imgui_draw.o \
+	third_party/imgui/imgui_tables.o third_party/imgui/imgui_widgets.o \
+	jni/src/ui/md3/md3_controls.o jni/src/ui/md3/md3_layout.o \
+	jni/src/ui/md3/md3_theme.o jni/src/ui/md3/md3_icons.o \
+	jni/src/ui/md3/md3_extra.o jni/src/ui/md3/md3_selection.o \
+	jni/src/ui/md3/md3_shapes.o jni/src/ui/md3/md3_progress.o \
+	jni/src/ui/md3/md3_toolbar.o jni/src/ui/md3/md3_split_button.o \
+	jni/src/ui/md3/md3_button_group.o jni/src/ui/md3/md3_showcase.o \
+	jni/src/ui/md3/md3_layout_gallery.o jni/src/ui/md3/md3_selection_gallery.o \
+	jni/src/ui/md3/md3_expressive_gallery.o
+
+QK_INCLUDES := -I$(src)/kernel/src -I$(src)/kernel/compat -I$(src)/kernel/raster \
+               -I$(src)/kernel/ui -I$(src)/config -I$(src)/third_party/imgui \
+               -I$(src)/jni/include -I$(src)/jni/src
+
+ccflags-y := $(QK_INCLUDES) -DIMGUI_USER_CONFIG='"qk_imconfig.h"'
+
+# qk_math.c is the only C file that computes in floating point.
+# Kbuild keys these by object basename, not by path.
+CFLAGS_REMOVE_qk_math.o := -mgeneral-regs-only
+CFLAGS_qk_math.o := -fno-math-errno
+
+# C++ builds with the kernel's own flags, minus the C-only ones and minus
+# -mgeneral-regs-only, plus a freestanding C++ setup: no exceptions, no RTTI,
+# no guard variables, and kernel/compat/include instead of libstdc++.
+QK_CXX ?= $(CROSS_COMPILE)g++
+QK_CXX_DROP := -std=gnu11 -std=gnu90 -std=gnu99 -mgeneral-regs-only \
+               -Wdeclaration-after-statement -Werror=implicit-function-declaration \
+               -Werror=implicit-int -Werror=strict-prototypes -Wstrict-prototypes \
+               -Wmissing-prototypes -Wold-style-definition -Wno-pointer-sign \
+               -Werror=designated-init -Wnested-externs -Wno-pointer-to-int-cast \
+               -Wenum-conversion
+QK_CXXFLAGS = $(filter-out $(QK_CXX_DROP),$(c_flags)) \
+              -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics \
+              -fno-use-cxa-atexit -nostdinc++ -fno-math-errno \
+              -I$(src)/kernel/compat/include \
+              -Wno-unused-parameter -Wno-missing-field-initializers \
+              -Wno-class-memaccess -Wno-invalid-offsetof
+
+quiet_cmd_qk_cxx = CXX [M]  $@
+      cmd_qk_cxx = $(QK_CXX) $(QK_CXXFLAGS) -c -o $@ $<
+
+$(obj)/%.o: $(src)/%.cpp FORCE
+	$(call if_changed_dep,qk_cxx)

@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <string.h>
+namespace std { inline namespace qkstd {
+using ::memcpy; using ::memmove; using ::memset; using ::memcmp; using ::memchr;
+using ::strlen; using ::strcmp; using ::strncmp; using ::strcpy; using ::strncpy;
+using ::strchr; using ::strrchr; using ::strstr;
+} }

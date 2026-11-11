@@ -58,6 +58,8 @@ flowchart TD
 | `jni/src/ui/ui.cpp`、`jni/src/ui/main_ui.cpp` | `AImGui` 外壳、导航、页面与对话框 |
 | `jni/src/core/` | 应用渲染器、玻璃、字体、输入辅助、配置、诊断等能力 |
 | `jni/src/platform/` | Surface 私有接口适配、显示信息解析和触摸接入 |
+| `kernel/src/` | 内核模块入口、DRM 显示接入、input handler、帧循环、窗口与触摸判定 |
+| `kernel/compat/`、`kernel/raster/`、`kernel/ui/` | 内核侧 C++ 运行时与 libm 子集、定点光栅器、内核侧 ImGui 页面 |
 | `third_party/` | 上游代码、预设数据、许可证和固定版本记录 |
 | `scripts/` | 来源同步、字体／着色器／形状数据生成、设备诊断 |
 | `tests/` | 按功能命名的主机回归程序、平台桩和软件渲染工具 |
@@ -72,6 +74,7 @@ flowchart TD
 - 主窗口功能：修改 `jni/include/ui/main_ui.h`、`jni/src/ui/main_ui.cpp` 及需要的状态／配置；玻璃实现留在 `core`。
 - Android 生命周期、字体、录屏适配：优先检查共享 `RunOverlay` 和平台适配。`MD3Demo`、`MD3Clock` 使用同一循环，避免只修复其中一个入口。
 - 上游或生成数据：使用现有脚本更新并校验来源记录；保留相应许可。形状数据再生见 [MaterialShapes](MD3_SHAPES.md)。
+- 内核态：组件和 ImGui 不在 `kernel/` 下复制，改动仍回到 `jni/src/ui/md3/`；`kernel/` 只放内核适配、显示、输入和光栅化。浮点只能出现在 `kernel_neon_begin()` 区间内，见 [内核态移植](KERNEL_PORT.md)。
 
 ## 按改动选择验证
 
@@ -91,6 +94,7 @@ flowchart TD
 | 背景采集生命周期 | `tests/run_screen_mirror_checks.sh` |
 | 传感器、触摸与崩溃诊断 | `tests/run_sensor_checks.sh`、`tests/run_touch_checks.sh`、`tests/run_crash_checks.sh`；传感器检查需要 NDK 头文件 |
 | ImGui 集成与键盘输入 | `tests/run_host_checks.sh` |
+| 内核态移植（数学、分配器、光栅器、输入判定、整帧渲染） | `tests/run_kernel_checks.sh`；真机范围见 [内核态移植](KERNEL_PORT.md) |
 | 上游同步与玻璃着色器 | `python3 scripts/verify_sources.py`、`scripts/compile_glass_shaders.sh --check`、`python3 tests/render_glass.py` |
 
 原生截图通过对应测试程序的 `--capture` 导出绘制数据，再使用 `tests/render_md3.py`；主界面玻璃预览使用 `tests/render_md3_main.py`。软件渲染依赖在 `tests/requirements.txt`，中文预览需要主机字体。CI 的执行次序与上传产物见 [build.yml](../.github/workflows/build.yml)。

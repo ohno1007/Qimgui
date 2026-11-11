@@ -1,0 +1,145 @@
+/* SPDX-License-Identifier: MIT */
+/* Enough std::vector for the MD3 sources: growth, indexing, iteration. Memory
+ * comes from operator new, which is the frame arena.
+ */
+#pragma once
+#include <new>
+#include <stddef.h>
+#include <utility>
+
+namespace std {
+inline namespace qkstd {
+
+template <class T>
+class vector {
+public:
+    using value_type = T;
+    using iterator = T*;
+    using const_iterator = const T*;
+
+    vector() = default;
+    vector(const vector& other) { assign(other.items_, other.count_); }
+    vector(vector&& other) noexcept
+        : items_(other.items_), count_(other.count_), capacity_(other.capacity_) {
+        other.items_ = nullptr;
+        other.count_ = other.capacity_ = 0;
+    }
+    ~vector() { release(); }
+
+    vector& operator=(const vector& other) {
+        if (this != &other) {
+            clear();
+            assign(other.items_, other.count_);
+        }
+        return *this;
+    }
+    vector& operator=(vector&& other) noexcept {
+        if (this != &other) {
+            release();
+            items_ = other.items_;
+            count_ = other.count_;
+            capacity_ = other.capacity_;
+            other.items_ = nullptr;
+            other.count_ = other.capacity_ = 0;
+        }
+        return *this;
+    }
+
+    void reserve(size_t wanted) {
+        if (wanted <= capacity_)
+            return;
+        T* grown = static_cast<T*>(::operator new(wanted * sizeof(T)));
+        for (size_t i = 0; i < count_; i++) {
+            new (grown + i) T(move(items_[i]));
+            items_[i].~T();
+        }
+        ::operator delete(items_);
+        items_ = grown;
+        capacity_ = wanted;
+    }
+    void resize(size_t wanted) {
+        if (wanted > count_) {
+            reserve(wanted);
+            for (size_t i = count_; i < wanted; i++)
+                new (items_ + i) T();
+        } else {
+            for (size_t i = wanted; i < count_; i++)
+                items_[i].~T();
+        }
+        count_ = wanted;
+    }
+    void push_back(const T& value) {
+        grow();
+        new (items_ + count_) T(value);
+        count_++;
+    }
+    void push_back(T&& value) {
+        grow();
+        new (items_ + count_) T(move(value));
+        count_++;
+    }
+    template <class... Args> T& emplace_back(Args&&... arguments) {
+        grow();
+        new (items_ + count_) T(forward<Args>(arguments)...);
+        return items_[count_++];
+    }
+    void pop_back() {
+        if (count_)
+            items_[--count_].~T();
+    }
+    iterator erase(iterator position) {
+        const size_t index = (size_t)(position - items_);
+
+        if (index >= count_)
+            return end();
+        for (size_t i = index; i + 1 < count_; i++)
+            items_[i] = move(items_[i + 1]);
+        items_[--count_].~T();
+        return items_ + index;
+    }
+    void clear() {
+        for (size_t i = 0; i < count_; i++)
+            items_[i].~T();
+        count_ = 0;
+    }
+
+    T& operator[](size_t index) { return items_[index]; }
+    const T& operator[](size_t index) const { return items_[index]; }
+    T& front() { return items_[0]; }
+    const T& front() const { return items_[0]; }
+    T& back() { return items_[count_ - 1]; }
+    const T& back() const { return items_[count_ - 1]; }
+    T* data() { return items_; }
+    const T* data() const { return items_; }
+    size_t size() const { return count_; }
+    size_t capacity() const { return capacity_; }
+    bool empty() const { return count_ == 0; }
+    iterator begin() { return items_; }
+    const_iterator begin() const { return items_; }
+    iterator end() { return items_ + count_; }
+    const_iterator end() const { return items_ + count_; }
+
+private:
+    void grow() {
+        if (count_ == capacity_)
+            reserve(capacity_ ? capacity_ * 2 : 8);
+    }
+    void assign(const T* source, size_t count) {
+        reserve(count);
+        for (size_t i = 0; i < count; i++)
+            new (items_ + i) T(source[i]);
+        count_ = count;
+    }
+    void release() {
+        clear();
+        ::operator delete(items_);
+        items_ = nullptr;
+        capacity_ = 0;
+    }
+
+    T* items_ = nullptr;
+    size_t count_ = 0, capacity_ = 0;
+};
+
+} // namespace qkstd
+} // namespace std

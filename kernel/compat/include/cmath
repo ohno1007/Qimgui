@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <math.h>
+
+namespace std {
+inline namespace qkstd {
+
+using ::fabs;  using ::fabsf;  using ::sqrt;  using ::sqrtf;
+using ::floor; using ::floorf; using ::ceil;  using ::ceilf;
+using ::trunc; using ::truncf; using ::round; using ::roundf;
+using ::sin;   using ::sinf;   using ::cos;   using ::cosf;
+using ::tan;   using ::tanf;   using ::asin;  using ::asinf;
+using ::acos;  using ::acosf;  using ::atan;  using ::atanf;
+using ::exp;   using ::expf;   using ::log;   using ::logf;
+using ::fmod;  using ::fmodf;  using ::pow;   using ::powf;
+using ::hypot; using ::hypotf; using ::atan2; using ::atan2f;
+using ::copysign; using ::copysignf;
+using ::lround; using ::lroundf; using ::llround;
+using ::remainder; using ::remainderf;
+
+/* Float overloads, so std::sin(float) does not silently widen. */
+inline float fabs(float x) { return ::fabsf(x); }
+inline float sqrt(float x) { return ::sqrtf(x); }
+inline float floor(float x) { return ::floorf(x); }
+inline float ceil(float x) { return ::ceilf(x); }
+inline float trunc(float x) { return ::truncf(x); }
+inline float round(float x) { return ::roundf(x); }
+inline float sin(float x) { return ::sinf(x); }
+inline float cos(float x) { return ::cosf(x); }
+inline float tan(float x) { return ::tanf(x); }
+inline float asin(float x) { return ::asinf(x); }
+inline float acos(float x) { return ::acosf(x); }
+inline float atan(float x) { return ::atanf(x); }
+inline float exp(float x) { return ::expf(x); }
+inline float log(float x) { return ::logf(x); }
+inline float fmod(float x, float y) { return ::fmodf(x, y); }
+inline float pow(float x, float y) { return ::powf(x, y); }
+inline float hypot(float x, float y) { return ::hypotf(x, y); }
+inline float atan2(float y, float x) { return ::atan2f(y, x); }
+inline float remainder(float x, float y) { return ::remainderf(x, y); }
+
+inline long lround(float x) { return ::lroundf(x); }
+inline int abs(int x) { return x < 0 ? -x : x; }
+inline float abs(float x) { return ::fabsf(x); }
+inline double abs(double x) { return ::fabs(x); }
+
+inline bool isfinite(float x) { return qk_isfinite((double)x) != 0; }
+inline bool isfinite(double x) { return qk_isfinite(x) != 0; }
+inline bool isnan(float x) { return qk_isnan((double)x) != 0; }
+inline bool isnan(double x) { return qk_isnan(x) != 0; }
+inline bool isinf(float x) { return qk_isinf((double)x) != 0; }
+inline bool isinf(double x) { return qk_isinf(x) != 0; }
+
+} // namespace qkstd
+} // namespace std

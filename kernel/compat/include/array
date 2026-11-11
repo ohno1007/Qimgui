@@ -1,0 +1,34 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <stddef.h>
+
+namespace std {
+inline namespace qkstd {
+
+/* Aggregate, like the real one: std::array<T, N> value{} zero-initialises. */
+template <class T, size_t N>
+struct array {
+    T elements[N];
+
+    constexpr T& operator[](size_t index) { return elements[index]; }
+    constexpr const T& operator[](size_t index) const { return elements[index]; }
+    constexpr T* data() { return elements; }
+    constexpr const T* data() const { return elements; }
+    constexpr size_t size() const { return N; }
+    constexpr bool empty() const { return N == 0; }
+    constexpr T* begin() { return elements; }
+    constexpr const T* begin() const { return elements; }
+    constexpr T* end() { return elements + N; }
+    constexpr const T* end() const { return elements + N; }
+    constexpr T& front() { return elements[0]; }
+    constexpr const T& front() const { return elements[0]; }
+    constexpr T& back() { return elements[N - 1]; }
+    constexpr const T& back() const { return elements[N - 1]; }
+    void fill(const T& value) {
+        for (size_t i = 0; i < N; i++)
+            elements[i] = value;
+    }
+};
+
+} // namespace qkstd
+} // namespace std

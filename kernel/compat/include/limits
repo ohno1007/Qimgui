@@ -1,0 +1,50 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#include <float.h>
+#include <limits.h>
+
+namespace std {
+inline namespace qkstd {
+
+template <class T> struct numeric_limits {
+    static constexpr bool is_specialized = false;
+};
+
+template <> struct numeric_limits<float> {
+    static constexpr bool is_specialized = true;
+    static constexpr float min() { return FLT_MIN; }
+    static constexpr float max() { return FLT_MAX; }
+    static constexpr float lowest() { return -FLT_MAX; }
+    static constexpr float epsilon() { return FLT_EPSILON; }
+    static constexpr float infinity() { return __builtin_huge_valf(); }
+    static constexpr float quiet_NaN() { return __builtin_nanf(""); }
+    static constexpr int digits = FLT_MANT_DIG;
+};
+
+template <> struct numeric_limits<double> {
+    static constexpr bool is_specialized = true;
+    static constexpr double min() { return DBL_MIN; }
+    static constexpr double max() { return DBL_MAX; }
+    static constexpr double lowest() { return -DBL_MAX; }
+    static constexpr double epsilon() { return DBL_EPSILON; }
+    static constexpr double infinity() { return __builtin_huge_val(); }
+    static constexpr double quiet_NaN() { return __builtin_nan(""); }
+    static constexpr int digits = DBL_MANT_DIG;
+};
+
+template <> struct numeric_limits<int> {
+    static constexpr bool is_specialized = true;
+    static constexpr int min() { return INT_MIN; }
+    static constexpr int max() { return INT_MAX; }
+    static constexpr int lowest() { return INT_MIN; }
+};
+
+template <> struct numeric_limits<unsigned int> {
+    static constexpr bool is_specialized = true;
+    static constexpr unsigned int min() { return 0; }
+    static constexpr unsigned int max() { return UINT_MAX; }
+    static constexpr unsigned int lowest() { return 0; }
+};
+
+} // namespace qkstd
+} // namespace std

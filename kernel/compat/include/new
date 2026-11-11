@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: MIT */
+/* Allocating new goes to the frame arena; placement new is the compiler's. */
+#pragma once
+#include <stddef.h>
+
+void *operator new(size_t bytes);
+void *operator new[](size_t bytes);
+void operator delete(void *pointer) noexcept;
+void operator delete[](void *pointer) noexcept;
+void operator delete(void *pointer, size_t bytes) noexcept;
+void operator delete[](void *pointer, size_t bytes) noexcept;
+
+inline void *operator new(size_t, void *place) noexcept { return place; }
+inline void *operator new[](size_t, void *place) noexcept { return place; }
+inline void operator delete(void *, void *) noexcept {}
+inline void operator delete[](void *, void *) noexcept {}

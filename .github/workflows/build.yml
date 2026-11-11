@@ -68,6 +68,8 @@ jobs:
         run: tests/run_crash_checks.sh
       - name: Test native MD3 components under sanitizers
         run: tests/run_md3_checks.sh
+      - name: Test kernel-space port on the host
+        run: tests/run_kernel_checks.sh
       - name: Test native MaterialShapes curves and rendering
         run: tests/run_md3_shapes_checks.sh
       - name: Test Material 3 Expressive controls and motion
