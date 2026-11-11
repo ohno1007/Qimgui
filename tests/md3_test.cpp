@@ -76,6 +76,38 @@ static void Controls() {
     Frame(input);Frame(input);Click(input,point);ImGui::GetIO().AddInputCharactersUTF8("Hello");Frame(input);assert(std::strstr(text,"Hello"));
     md3test::DestroyContext();
 }
+static void ChipAndSliderGeometry() {
+    md3test::ConfigureContext();
+    for(float scale:{.75f,1.f,1.5f}) {
+        md::SetTheme(false,scale);
+        bool selected=false,removed=false,disabled=false;ImVec2 size,normal,closePoint;
+        Draw chip=[&]{ImGui::BeginDisabled(disabled);md::Chip("Input",md::ChipStyle::Input,&selected,&removed);size=ImGui::GetItemRectSize();closePoint=ImVec2(ImGui::GetItemRectMax().x-17*scale,Center().y);ImGui::EndDisabled();};
+        Frame(chip);Frame(chip);normal=size;Click(chip,closePoint);assert(removed&&!selected);
+        removed=false;disabled=true;Frame(chip);assert(std::abs(size.x-normal.x)<.01f&&std::abs(size.y-normal.y)<.01f);
+        Click(chip,closePoint);assert(!removed&&!selected);
+        bool filterSelected=true;
+        Frame([&]{float expected=md::detail::Measure("Filter",14,true).x+50*scale;md::Chip("Filter",md::ChipStyle::Filter,&filterSelected);assert(std::abs(ImGui::GetItemRectSize().x-expected)<.01f);});
+        float value=50;ImVec2 left,right;
+        Draw slider=[&]{ImVec2 start=ImGui::GetCursorScreenPos();md::Slider("Endpoint",&value,0,100,240);left=ImVec2(start.x+20*scale,start.y+44*scale);right=ImVec2(start.x+220*scale,left.y);};
+        Frame(slider);Frame(slider);Click(slider,left);assert(std::abs(value)<.001f);Click(slider,right);assert(std::abs(value-100)<.001f);
+        float lower=25,upper=75;
+        Draw range=[&]{ImVec2 start=ImGui::GetCursorScreenPos();md::RangeSlider("Endpoints",&lower,&upper,0,100,240);left=ImVec2(start.x+20*scale,start.y+44*scale);right=ImVec2(start.x+220*scale,left.y);};
+        Frame(range);Frame(range);Click(range,left);assert(std::abs(lower)<.001f);Click(range,right);assert(std::abs(upper-100)<.001f);
+    }
+    md3test::DestroyContext();
+}
+static void SelectFocusAppearance() {
+    md3test::ConfigureContext();md::SetTheme(false);int selected=0;const char* options[]={"Apple","Banana","Cherry"};bool primaryUnderline=false;
+    Draw draw=[&]{
+        ImVec2 start=ImGui::GetCursorScreenPos();auto* list=ImGui::GetWindowDrawList();int first=list->VtxBuffer.Size;
+        md::Select("Fruit",&selected,options,3,280,false);
+        primaryUnderline=false;const ImU32 primary=ImGui::GetColorU32(md::GetTheme().primary);
+        for(int i=first;i<list->VtxBuffer.Size;++i){const auto& v=list->VtxBuffer[i];if(v.pos.y>=start.y+53&&v.pos.y<=start.y+57&&v.col==primary)primaryUnderline=true;}
+    };
+    for(int i=0;i<4;++i)Frame(draw);assert(!primaryUnderline); // Initial NavId is not visible keyboard focus.
+    Key(draw,ImGuiKey_Tab);Frame(draw);assert(primaryUnderline);
+    md3test::DestroyContext();
+}
 static void ExtraControls() {
     md3test::ConfigureContext();md::SetTheme(false);
     const md::CarouselItem cards[]={{"A","First"},{"B","Second"},{"C","Third"},{"D","Fourth"}};
@@ -183,11 +215,11 @@ static void Capture(const char* directory,const char* font,const char* medium) {
         std::string name=std::string(directory)+"/native-"+(dark?"dark-":"light-")+std::to_string(page)+".draw";
         md3test::DumpDrawData(name);md3test::DestroyContext();
     }
-    for(bool dark:{false,true})for(int variant=0;variant<6;++variant) {
+    for(bool dark:{false,true})for(int variant=0;variant<7;++variant) {
         md3test::ConfigureContext(font); md::SetTheme(dark);
         ImFont* body=ImGui::GetIO().Fonts->Fonts[0];
         md::SetFonts(body,medium?md3test::LoadComparisonFont(medium):body);
-        bool open=true,first=true,nested=true; int selected=1;
+        bool open=true,first=true,nested=true; int selected=variant==6?0:1;
         const char* options[]={"Apple","Banana","Cherry"}; ImVec2 selectPoint;
         Draw draw=[&]{
             ImGui::TextUnformatted("Native Material Design 3 / popup states");
@@ -207,15 +239,21 @@ static void Capture(const char* directory,const char* font,const char* medium) {
                 if(first){md::OpenMenu("capture-menu");first=false;}
                 ImGui::SetNextWindowPos(anchor,ImGuiCond_Appearing);
                 if(md::BeginMenuPopup("capture-menu")) {
-                    if(variant==5){if(nested){ImGui::OpenPopup("More actions");nested=false;}if(md::BeginSubMenu("More actions")){md::MenuItem("Duplicate");md::MenuItem("Export");md::EndSubMenu();}}
-                    md::MenuItem("Cut","Ctrl+X"); md::MenuItem("Copy","Ctrl+C"); md::MenuDivider(); md::MenuItem("Paste","Ctrl+V",false,false); md::EndMenuPopup();
+                    if(variant==5){if(nested){ImGui::OpenPopup("More actions");nested=false;}if(md::BeginSubMenu("More actions")){md::MenuItem("Duplicate");md::MenuItem("Export");md::EndSubMenu();}
+                        md::MenuItem("Cut","Ctrl+X");md::MenuItem("Copy","Ctrl+C");md::MenuDivider();md::MenuItem("Paste","Ctrl+V",false,false);
+                    }else{
+                        md::MenuItem("New item","Ctrl+N");md::MenuItem("Show details",nullptr,true);md::MenuDivider();
+                        if(md::BeginSubMenu("More actions")){md::MenuItem("Duplicate","Ctrl+D");md::EndSubMenu();}md::MenuItem("Delete");
+                    }
+                    md::EndMenuPopup();
                 }
             }
             if(variant==4){md::Select("Fruit",&selected,options,3);selectPoint=Center();}
+            if(variant==6){md::Select("Fruit",&selected,options,3,280,false,true,"Choose a fruit");}
         };
         for(int frame=0;frame<8;++frame)Frame(draw);
         if(variant==4){Click(draw,selectPoint);Frame(draw);Frame(draw);}
-        const char* names[]={"dialog","bottom-sheet","side-sheet","menu","select","submenu"};
+        const char* names[]={"dialog","bottom-sheet","side-sheet","menu","select","submenu","select-filled"};
         std::string name=std::string(directory)+"/native-"+(dark?"dark-":"light-")+names[variant]+".draw";
         md3test::DumpDrawData(name);md3test::DestroyContext();
     }
@@ -243,6 +281,8 @@ int main(int argc,char** argv) {
     }
     Dates();std::puts("PASS: Gregorian date limits and leap-year boundaries");
     Controls();std::puts("PASS: mouse controls, disabled Home/End, range ordering and text input");
+    ChipAndSliderGeometry();std::puts("PASS: chip close targets and disabled dimensions; slider endpoints at three densities");
+    SelectFocusAppearance();std::puts("PASS: filled select uses visible keyboard focus, not automatic initial NavId");
     ExtraControls();std::puts("PASS: carousel single-step keyboard navigation and app bar actions");
     Ripples();std::puts("PASS: expanding ripples stay inside rounded bounds and disabled states emit none");
     NarrowLayout();std::puts("PASS: narrow app bar bounds and horizontally scrollable gallery");

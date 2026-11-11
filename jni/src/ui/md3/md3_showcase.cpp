@@ -108,7 +108,7 @@ void Actions(GalleryState& s) {
     ImGui::BeginDisabled();
     Chip("Assist##disabled",ChipStyle::Assist); ImGui::SameLine();
     Chip("Filter##disabled",ChipStyle::Filter,&s.chipFilter); ImGui::SameLine();
-    Chip("Input##disabled",ChipStyle::Input); ImGui::SameLine();
+    Chip("Input##disabled",ChipStyle::Input,&s.chipInput,&s.chipRemoved); ImGui::SameLine();
     Chip("Suggestion##disabled",ChipStyle::Suggestion);
     ImGui::EndDisabled();
     if (s.chipRemoved && Button("Restore input chip",ButtonStyle::Text)) s.chipRemoved=false;

@@ -220,22 +220,29 @@ bool Switch(const char *label, bool *value, bool show_icons) {
 bool Chip(const char *label, ChipStyle style, bool *selected, bool *removed, const char *icon) {
     const Theme &t = GetTheme();
     bool on = selected && *selected, leading = icon || (style == ChipStyle::Filter && on);
-    float w = Measure(label, 14, true).x + Dp(leading ? 44 : 32) + (removed ? Dp(24) : 0);
+    // Official chip tokens: leading icon 8 + 18 + 8dp; plain leading 16dp.
+    // A trailing removal target keeps 8 + 18 + 8dp, including when disabled.
+    const float leadingWidth = leading ? 34.f : 16.f;
+    const float trailingWidth = removed ? 34.f : 16.f;
+    float w = Measure(label, 14, true).x + Dp(leadingWidth + trailingWidth);
     // Split the trailing remove target from the body so keyboard and pointer input
     // never toggle a chip when the user activates its close icon.
     ImGuiWindow *win = ImGui::GetCurrentWindow();
     if (win->SkipItems)
         return false;
     ImVec2 start = win->DC.CursorPos;
-    ItemState s = Item(label, ImVec2(w - (removed ? Dp(32) : 0), Dp(32)));
-    if (!s.visible && !removed)
+    ImGui::BeginGroup();
+    ItemState s = Item(label, ImVec2(w - (removed ? Dp(trailingWidth) : 0), Dp(32)));
+    if (!s.visible && !removed) {
+        ImGui::EndGroup();
         return false;
+    }
     ImRect full(start, Add(start, ImVec2(w, Dp(32))));
     bool remove_hit = false;
     if (removed) {
         ImGui::SameLine(0, 0);
         ImGui::PushID(label);
-        ItemState close = Item("##remove", ImVec2(Dp(32), Dp(32)));
+        ItemState close = Item("##remove", ImVec2(Dp(trailingWidth), Dp(32)));
         ImGui::PopID();
         remove_hit = close.pressed;
         if (remove_hit)
@@ -254,18 +261,18 @@ bool Chip(const char *label, ChipStyle style, bool *selected, bool *removed, con
             bg = Faded(t.onSurface, .12f);
     }
     Background(s, bg, fg, Dp(8), !on);
-    float x = s.rect.Min.x + Dp(16);
+    float x = s.rect.Min.x + Dp(leadingWidth);
     if (leading) {
         if (style == ChipStyle::Filter && on)
-            DrawCheck(ImVec2(x + Dp(6), s.rect.GetCenter().y), fg, 12);
+            DrawCheck(ImVec2(s.rect.Min.x + Dp(17), s.rect.GetCenter().y), fg, 12);
         else
-            Text(ImVec2(x - Dp(4), s.rect.GetCenter().y - Dp(9)), icon, fg, 18);
-        x += Dp(20);
+            Text(ImVec2(s.rect.Min.x + Dp(8), s.rect.GetCenter().y - Dp(9)), icon, fg, 18);
     }
     Text(ImVec2(x, s.rect.GetCenter().y - Dp(7)), label, fg, 14, true);
     if (removed)
-        DrawClose(ImVec2(s.rect.Max.x - Dp(16), s.rect.GetCenter().y), fg, 12);
+        DrawClose(ImVec2(s.rect.Max.x - Dp(17), s.rect.GetCenter().y), fg, 12);
     Mark(s);
+    ImGui::EndGroup();
     return s.pressed || remove_hit;
 }
 namespace {
@@ -294,23 +301,27 @@ bool SliderKeys(ImGuiID id, float *value, float lo, float hi, int steps) {
 void DrawTrack(const ImRect &r, float low, float high, bool disabled, int steps) {
     const Theme &t = GetTheme();
     auto *d = ImGui::GetWindowDrawList();
-    float y = r.GetCenter().y, x0 = r.Min.x + Dp(10), x1 = r.Max.x - Dp(10);
+    // Official web track starts 40/2 - 2 = 18dp from either edge;
+    // thumb/tick centers use the 20dp state-layer inset.
+    float y = r.GetCenter().y, x0 = r.Min.x + Dp(18), x1 = r.Max.x - Dp(18);
+    const float center0 = r.Min.x + Dp(20), span = r.GetWidth() - Dp(40);
     ImVec4 inactive = disabled ? Faded(t.onSurface, .12f) : t.secondaryContainer,
            active = disabled ? Faded(t.onSurface, .38f) : t.primary;
     d->AddRectFilled(ImVec2(x0, y - Dp(2)), ImVec2(x1, y + Dp(2)), Color(inactive), Dp(2));
-    d->AddRectFilled(ImVec2(x0 + (x1 - x0) * low, y - Dp(2)),
-                     ImVec2(x0 + (x1 - x0) * high, y + Dp(2)), Color(active), Dp(2));
+    d->AddRectFilled(ImVec2(low <= 0 ? x0 : center0 + span * low, y - Dp(2)),
+                     ImVec2(high >= 1 ? x1 : center0 + span * high, y + Dp(2)), Color(active),
+                     Dp(2));
     if (steps > 0 && steps <= 100)
         for (int i = 0; i <= steps; ++i) {
             float f = float(i) / steps;
-            d->AddCircleFilled(ImVec2(x0 + (x1 - x0) * f, y), Dp(1),
+            d->AddCircleFilled(ImVec2(center0 + span * f, y), Dp(1),
                                Color(f >= low && f <= high ? t.onPrimary : t.onSecondaryContainer,
                                      disabled ? .38f : 1));
         }
 }
 void DrawThumb(ImGuiID id, const ImRect &r, float ratio, bool hovered, bool held) {
     const Theme &t = GetTheme();
-    ImVec2 c(r.Min.x + Dp(10) + (r.GetWidth() - Dp(20)) * ratio, r.GetCenter().y);
+    ImVec2 c(r.Min.x + Dp(20) + (r.GetWidth() - Dp(40)) * ratio, r.GetCenter().y);
     auto *d = ImGui::GetWindowDrawList();
     if (!Disabled() && (hovered || held || GImGui->NavId == id))
         d->AddCircleFilled(c, Dp(20), Color(t.primary, held ? .12f : .08f));
@@ -350,10 +361,16 @@ bool Slider(const char *label, float *value, float minimum, float maximum, float
         }
         ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, Dp(16));
         ImRect grab;
+        // ImGui adds a fixed 2px grab padding. Offset its behavior rectangle
+        // so the input endpoints exactly match the density-scaled 20dp centers.
+        ImRect behavior_frame = frame;
+        behavior_frame.Min.x += Dp(12) - 2.f;
+        behavior_frame.Max.x -= Dp(12) - 2.f;
         float old = *value;
-        changed = ImGui::SliderBehavior(
-            frame, id, ImGuiDataType_Float, value, &minimum, &maximum, format ? format : "%.0f",
-            ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat, &grab);
+        changed = ImGui::SliderBehavior(behavior_frame, id, ImGuiDataType_Float, value, &minimum,
+                                        &maximum, format ? format : "%.0f",
+                                        ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat,
+                                        &grab);
         ImGui::PopStyleVar();
         if (changed)
             *value = Snap(*value, minimum, maximum, steps);
@@ -390,7 +407,7 @@ bool RangeSlider(const char *label, float *lower, float *upper, float minimum, f
     ImGui::ItemSize(ImRect(start, frame.Max));
     float l = Fraction(std::isfinite(*lower) ? *lower : minimum, minimum, maximum),
           u = Fraction(std::isfinite(*upper) ? *upper : maximum, minimum, maximum);
-    float x0 = frame.Min.x + Dp(10), span = frame.GetWidth() - Dp(20);
+    float x0 = frame.Min.x + Dp(20), span = frame.GetWidth() - Dp(40);
     bool disabled = Disabled(), changed = false;
     int nearest = std::abs(ImGui::GetIO().MousePos.x - (x0 + l * span)) <
                           std::abs(ImGui::GetIO().MousePos.x - (x0 + u * span))
@@ -494,7 +511,8 @@ bool TextField(const char *label, char *buffer, std::size_t capacity, TextFieldS
                   : error   ? t.error
                   : focused ? t.primary
                   : hovered ? t.onSurface
-                            : t.outline;
+                  : style == TextFieldStyle::Filled ? t.onSurfaceVariant
+                                                    : t.outline;
     ImVec4 label_color = disabled  ? Faded(t.onSurface, .38f)
                          : error   ? t.error
                          : focused ? t.primary
@@ -508,8 +526,12 @@ bool TextField(const char *label, char *buffer, std::size_t capacity, TextFieldS
             d->AddRectFilled(ImVec2(p.x + Dp(12), p.y - Dp(7)),
                              ImVec2(p.x + Dp(20) + sz.x, p.y + Dp(7)), Color(t.surface));
         }
-    } else
-        d->AddLine(ImVec2(p.x, field.Max.y), field.Max, Color(edge), Dp(focused ? 3 : 1));
+    } else {
+        // Keep the solid indicator inside the field, matching the web border;
+        // a centered AA stroke would split a 1px line over two pixel rows.
+        const float height = Dp(focused ? 3 : 1);
+        d->AddRectFilled(ImVec2(p.x, field.Max.y - height), field.Max, Color(edge));
+    }
     Text(ImVec2(p.x + Dp(16),
                 p.y + Dp(floating ? (style == TextFieldStyle::Outlined ? -6 : 8) : 20)),
          label, label_color, label_size);

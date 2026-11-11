@@ -60,7 +60,8 @@ MD3 控件支持 ImGui 的键盘导航，按 Tab 切换焦点。
 添加页面主要修改 `jni/include/ui/main_ui.h` 与 `jni/src/ui/main_ui.cpp`。
 [Android 接入记录](docs/ANDROID_NOTES.md)解释了旋转、窗口销毁顺序与录屏兼容性等历史问题。
 
-MD3 接入与组件清单见 [docs/MD3.md](docs/MD3.md)，网页参考与截图复现见 [docs/MD3_REFERENCE.md](docs/MD3_REFERENCE.md)。
+MD3 接入与组件清单见 [使用文档](docs/MD3.md)，网页参考与截图复现见 [参考说明](docs/MD3_REFERENCE.md)。
+实际视觉检查见 [组件对照报告](docs/MD3_COMPARISON.md)，完整原生／网页截图与对照页见 [截图目录](docs/images/md3/README.md)。
 
 ## 液体玻璃
 
@@ -107,13 +108,14 @@ python3 scripts/verify_sources.py
 
 ```bash
 tests/run_host_checks.sh
+tests/run_md3_checks.sh
 python3 -m pip install -r tests/requirements.txt
 python3 tests/render_glass.py --output build/glass-preview.png
 ```
 
-主机检查使用 ASan／UBSan，覆盖图集形状、文字描边、纹理延迟上传、回调和索引。
-GLES 检查使用 Mesa／EGL
-渲染实际着色器，验证坐标、边缘覆盖、framebuffer 方向与屏幕边界。
+主机检查使用 ASan／UBSan，覆盖图集形状、文字描边、纹理延迟上传、回调、索引与原生键盘事件。
+MD3 检查覆盖控件输入、禁用状态、日期边界、嵌套弹层、涟漪、窄窗口及多主题／多上下文。
+GLES 检查使用 Mesa／EGL 渲染实际着色器，验证坐标、边缘覆盖、framebuffer 方向与屏幕边界。
 
 CI 构建 ARM64 ELF，并校验上游源码与生成着色器。Android 真机的触摸、
 屏幕镜像、外接键盘、旋转、GL／VK 视觉一致性和功耗仍需要设备验证；Live2D 需要单独提供 SDK。
@@ -122,6 +124,8 @@ CI 构建 ARM64 ELF，并校验上游源码与生成着色器。Android 真机�
 
 - Qimgui：Apache-2.0，见 [LICENSE](LICENSE)。
 - [Dear ImGui](https://github.com/ocornut/imgui)：Omar Cornut，MIT；许可证随上游源码保留。
+- [Material Web](https://github.com/material-components/material-web)：Apache-2.0；用于 MD3 官方源码参考和独立网页截图。
+- Roboto：OFL-1.1；用于原生 MD3 和网页对照，许可证见 [OFL.txt](tests/md3_web/fonts/OFL.txt)。
 - [AndroidSurfaceImgui-Enhanced](https://github.com/AFan4724/AndroidSurfaceImgui-Enhanced)：窗口／触摸接入来源。
 - Vulkan wrapper：Google NDK samples，Apache-2.0。
 - Live2D Cubism 的 SDK 和模型遵循其各自许可，不包含在本仓库中。

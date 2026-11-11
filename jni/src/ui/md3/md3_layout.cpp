@@ -217,8 +217,10 @@ bool Tabs(const char* id,int* selected,const char* const* labels,int count,float
         ImGui::SetCursorScreenPos(rect.Min);bool hover,held;const bool active=(!enabled||enabled[i])&&parentEnabled();
         if(interactive("tab",rect,active,&hover,&held)&&*selected!=i){*selected=i;changed=true;}
         stateLayer(dl,rect,t.onSurface,hover,held,active);
-        centered(dl,rect,labels[i],14,*selected==i?t.primary:t.onSurfaceVariant,active?1:.38f);
-        if(*selected==i){float iw=primary?ImMin(measure(labels[i],14).x+px(8),segment-px(16)):segment;
+        centered(dl,rect,labels[i],14,*selected==i?(primary?t.primary:t.onSurface):t.onSurfaceVariant,active?1:.38f);
+        // Material Web primary indicators span the label content (medium font),
+        // while secondary indicators span the entire tab.
+        if(*selected==i){float iw=primary?ImMin(detail::Measure(labels[i],14,true).x,ImMax(0.f,segment-px(16))):segment;
             dl->AddRectFilled(ImVec2(rect.GetCenter().x-iw*.5f,rect.Max.y-px(primary?3:2)),ImVec2(rect.GetCenter().x+iw*.5f,rect.Max.y),col(t.primary),px(primary?3:0),ImDrawFlags_RoundTop);}
         ImGui::PopID();
     }
@@ -335,18 +337,22 @@ int TopAppBar(const char* id,const char* title,AppBarStyle style,const char* nav
 
 void LinearProgress(const char* id,float value,float width){
     ImGui::PushID(id);auto p=ImGui::GetCursorScreenPos();float w=widthPx(width),h=px(4);ImGui::Dummy(ImVec2(w,h));
-    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.secondaryContainer),h*.5f);
+    // Pinned Material Web linear-progress tokens: highest surface track,
+    // four-dp height and square ends for both track and active indicator.
+    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.surfaceContainerHighest));
     float start=0,end=ImClamp(std::isfinite(value)?value:0.f,0.f,1.f);
     if(value<0){const float phase=std::fmod(static_cast<float>(ImGui::GetTime())*.7f,1.f);start=ImMax(0.f,phase*1.4f-.4f);end=ImMin(1.f,phase*1.4f);}
-    if(end>start)dl->AddRectFilled(ImVec2(p.x+w*start,p.y),ImVec2(p.x+w*end,p.y+h),col(t.primary),h*.5f);
+    if(end>start)dl->AddRectFilled(ImVec2(p.x+w*start,p.y),ImVec2(p.x+w*end,p.y+h),col(t.primary));
     ImGui::PopID();
 }
 void CircularProgress(const char* id,float value,float diameter){
-    ImGui::PushID(id);auto p=ImGui::GetCursorScreenPos();float d=px(ImMax(8.f,diameter)),thickness=ImMin(px(4),d*.2f),radius=(d-thickness)*.5f;ImGui::Dummy(ImVec2(d,d));
-    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();ImVec2 c(p.x+d*.5f,p.y+d*.5f);dl->AddCircle(c,radius,col(t.secondaryContainer),64,thickness);
+    // Material Web reserves 4dp inside the 48dp host: the visible circle is
+    // 40dp across, with a 10% stroke (4dp at default size) and transparent track.
+    ImGui::PushID(id);auto p=ImGui::GetCursorScreenPos();float d=px(ImMax(8.f,diameter)),inner=ImMax(0.f,d-px(8)),thickness=inner*.1f,radius=(inner-thickness)*.5f;ImGui::Dummy(ImVec2(d,d));
+    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();ImVec2 c(p.x+d*.5f,p.y+d*.5f);
     float begin=-IM_PI*.5f,span=ImClamp(std::isfinite(value)?value:0.f,0.f,1.f)*IM_PI*2;
     if(value<0){const float time=static_cast<float>(ImGui::GetTime());begin=time*4;span=(.2f+.6f*(.5f+.5f*std::sin(time*2)))*IM_PI*2;}
-    if(span>0){dl->PathArcTo(c,radius,begin,begin+span,64);dl->PathStroke(col(t.primary),thickness);}
+    if(span>0&&inner>0){dl->PathArcTo(c,radius,begin,begin+span,64);dl->PathStroke(col(t.primary),thickness);}
     ImGui::PopID();
 }
 void Tooltip(const char* text){

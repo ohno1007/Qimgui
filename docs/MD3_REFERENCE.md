@@ -45,7 +45,7 @@ Android 组件使用 Dear ImGui 原生输入与绘制。`tests/md3_web` 仅是�
 
 示例文字和数值以 `jni/src/ui/md3/md3_showcase.cpp` 为准：按钮宽 112、高 40；卡片 208 × 112；标签和导航宽 680；列表宽 656；范围滑块宽 584。导航为 Home / Activity（Badge 3）/ Settings；列表标题均为 Headline，左侧 A / B / C，右侧 100+ / 24 / 56，第三行支持文字为 Supporting text / Second supporting line。
 
-仍需区分组件能力差异：官方 `md-list-item` 没有原生图库的 selected 属性，所以第二行参考保持官方默认背景；官方 Input Chip 始终显示移除按钮，而原生图库的禁用 Input Chip 未传移除目标。截图必须保留并报告这些差异，不用修改官方内部样式隐藏它们。
+仍需区分组件能力差异：官方 `md-list-item` 没有原生图库的 selected 属性，所以第二行参考保持官方默认背景。禁用 Input Chip 两侧均保留移除按钮，但不接受操作。截图保留并报告列表的状态差异，不用修改官方内部样式隐藏它们。
 
 截图统一主色 `#6750A4` / 暗色 `#D0BCFF`，表面色 `#FEF7FF` / 暗色 `#141218`。文本、数值、主题、缩放和字体应相同后再比较。
 

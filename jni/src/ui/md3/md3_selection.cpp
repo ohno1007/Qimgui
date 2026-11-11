@@ -158,18 +158,25 @@ bool Select(const char* label,int* selected,const char* const* options,int count
     const ImVec2 pos=ImGui::GetCursorScreenPos();
     const float w=std::max(S(112),std::min(S(width),ImGui::GetContentRegionAvail().x));
     const bool hit=ImGui::InvisibleButton("##field",ImVec2(w,S(56)),ImGuiButtonFlags_EnableNav);
-    const bool focus=ImGui::IsItemFocused(); const ImVec2 end=ImGui::GetItemRectMax(); auto* draw=ImGui::GetWindowDrawList();
-    const ImVec4 edge=error?t.error:focus?t.primary:t.outline;
-    if(!outlined) draw->AddRectFilled(pos,end,C(t.surfaceContainerHigh),S(4),ImDrawFlags_RoundTop);
+    // ImGui assigns an initial NavId even before the user navigates. Only
+    // visible keyboard focus or an activated/open select is a focused field.
+    const bool focus = !detail::Disabled() &&
+        (hit || (ImGui::IsItemFocused() && GImGui->NavCursorVisible) || ImGui::IsPopupOpen("options"));
+    const bool hovered = ImGui::IsItemHovered();
+    const ImVec2 end=ImGui::GetItemRectMax(); auto* draw=ImGui::GetWindowDrawList();
+    const ImVec4 edge=error?t.error:focus?t.primary:outlined?t.outline:hovered?t.onSurface:t.onSurfaceVariant;
+    // Material Web filled-select inherits the filled-field tokens: Highest
+    // container, on-surface-variant 1dp idle indicator, 3dp focused indicator.
+    if(!outlined) draw->AddRectFilled(pos,end,C(t.surfaceContainerHighest),S(4),ImDrawFlags_RoundTop);
+    if(hovered) draw->AddRectFilled(pos,end,C(t.onSurface,.08f),S(4),outlined?0:ImDrawFlags_RoundTop);
     if(outlined) draw->AddRect(pos,end,C(edge),S(4),S(focus?2:1),0);
-    else draw->AddLine(ImVec2(pos.x,end.y),end,C(edge),S(focus?2:1));
-    if(ImGui::IsItemHovered()) draw->AddRectFilled(pos,end,C(t.onSurface,.08f),S(4));
+    else draw->AddRectFilled(ImVec2(pos.x,end.y-S(focus?3:1)),end,C(edge));
     if (outlined) {
         const ImVec2 labelSize = detail::Measure(label, 12);
         draw->AddRectFilled(ImVec2(pos.x+S(12),pos.y-S(7)),
                             ImVec2(pos.x+S(20)+labelSize.x,pos.y+S(7)),C(t.surface));
     }
-    Label(ImVec2(pos.x+S(16),pos.y+S(outlined ? -6 : 7)),label,error?t.error:t.onSurfaceVariant,12);
+    Label(ImVec2(pos.x+S(16),pos.y+S(outlined ? -6 : 7)),label,error?t.error:focus?t.primary:t.onSurfaceVariant,12);
     const char* value=*selected>=0&&*selected<count?options[*selected]:"Select an option";
     draw->PushClipRect(ImVec2(pos.x+S(16),pos.y),ImVec2(end.x-S(40),end.y),true);
     Label(ImVec2(pos.x+S(16),pos.y+S(outlined ? 20 : 27)),value?value:"",t.onSurface,16); draw->PopClipRect();
