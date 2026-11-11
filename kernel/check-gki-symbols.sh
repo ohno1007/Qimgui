@@ -21,9 +21,9 @@ fi
 # against its text would call almost anything allowed. 6.12 moved the lists
 # from android/abi_gki_aarch64* to gki/aarch64/symbols/.
 mapfile -t lists < <({
-    ls "$kernel"/android/abi_gki_aarch64* 2>/dev/null
-    ls "$kernel"/gki/aarch64/symbols/* 2>/dev/null
-} | grep -v '\.stg')
+    ls "$kernel"/android/abi_gki_aarch64* 2>/dev/null || true
+    ls "$kernel"/gki/aarch64/symbols/* 2>/dev/null || true
+} | grep -v '\.stg' || true)
 if (( ${#lists[@]} == 0 )); then
     echo "no GKI symbol lists in $kernel: not a GKI tree?" >&2
     exit 2
