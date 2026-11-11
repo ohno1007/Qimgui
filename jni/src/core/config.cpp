@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <cmath>
+#include <string>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "AImGui", __VA_ARGS__)
 
@@ -31,6 +34,9 @@ const Field kFields[] = {
     F(screen_mirror,    Kind::Bool),
     F(permeate_record,  Kind::Bool),
     F(haptics_enabled,  Kind::Bool),
+    F(md3_dark,         Kind::Bool),
+    F(ui_scale,         Kind::Float),
+    F(block_touch,      Kind::Bool),
     F(mirror_hides_window, Kind::Bool),
     F(stage,            Kind::Int),
     F(nav_page,         Kind::Int),
@@ -85,8 +91,8 @@ void Remember(const UiState* s) {
 
 const char* Path() { return kPath; }
 
-void Load(UiState* state) {
-    FILE* f = std::fopen(kPath, "r");
+void Load(UiState* state, const char* path) {
+    FILE* f = std::fopen(path, "r");
     if (!f) return;
 
     char line[160];
@@ -122,8 +128,18 @@ void Load(UiState* state) {
     }
     std::fclose(f);
 
-    if (state->last_full_size.x < 700.0f) state->last_full_size.x = 700.0f;
-    if (state->last_full_size.y < 560.0f) state->last_full_size.y = 560.0f;
+    // Window geometry is fitted to the current display by the MD3 shell.
+    // Legacy preferences retain their key names, including screen_mirror.
+    if (!std::isfinite(state->last_full_pos.x) || !std::isfinite(state->last_full_pos.y))
+        state->last_full_pos = ImVec2(60, 100);
+    if (!std::isfinite(state->last_full_size.x) || state->last_full_size.x <= 0 ||
+        !std::isfinite(state->last_full_size.y) || state->last_full_size.y <= 0)
+        state->last_full_size = ImVec2(900, 620);
+    if (!std::isfinite(state->ui_scale) || state->ui_scale <= 0)
+        state->ui_scale = 0;
+    else state->ui_scale = std::clamp(state->ui_scale, .75f, 2.5f);
+    if (!std::isfinite(state->glass_clarity)) state->glass_clarity = .11f;
+    state->glass_clarity = std::clamp(state->glass_clarity, 0.f, .35f);
     if (state->stage < UiState::StageIsland) state->stage = UiState::StageIsland;
     if (state->stage > UiState::StageWindow) state->stage = UiState::StageWindow;
 
@@ -134,15 +150,14 @@ void Load(UiState* state) {
     Remember(state);
 
     LOGI("[config] loaded %s: mirror=%d permeate=%d stage=%d page=%d haptics=%d",
-         kPath, state->screen_mirror ? 1 : 0, state->permeate_record ? 1 : 0,
+         path, state->screen_mirror ? 1 : 0, state->permeate_record ? 1 : 0,
          state->stage, state->nav_page, state->haptics_enabled ? 1 : 0);
 }
 
-void Save(const UiState* state) {
+void Save(const UiState* state, const char* path) {
 
-    char tmp[128];
-    std::snprintf(tmp, sizeof(tmp), "%s.tmp", kPath);
-    FILE* f = std::fopen(tmp, "w");
+    const std::string tmp = std::string(path) + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "w");
     if (!f) return;
 
     for (const Field& fl : kFields) {
@@ -157,10 +172,10 @@ void Save(const UiState* state) {
                  state->last_full_pos.x, state->last_full_pos.y);
     std::fprintf(f, "last_full_size=%.1f %.1f\n",
                  state->last_full_size.x, state->last_full_size.y);
-    std::fclose(f);
-    std::rename(tmp, kPath);
-
-    Remember(state);
+    const bool written = std::ferror(f) == 0;
+    const bool closed = std::fclose(f) == 0;
+    if (written && closed && std::rename(tmp.c_str(), path) == 0) Remember(state);
+    else std::remove(tmp.c_str());
 }
 
 bool Dirty(const UiState* state) { return !SameAsSaved(state); }

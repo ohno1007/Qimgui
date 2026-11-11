@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AImGui CMake build. Requires Android NDK (r25+). Set ANDROID_NDK_HOME.
+# AImGui and MD3Demo CMake build. Requires Android NDK (r25+).
 set -euo pipefail
 
 NDK="${ANDROID_NDK_HOME:-${NDK_ROOT:-}}"
@@ -32,10 +32,11 @@ cmake --build "$BUILD" -j"$(nproc 2>/dev/null || echo 4)"
 
 mkdir -p "libs/${ABI}"
 cp "${BUILD}/AImGui" "libs/${ABI}/AImGui"
+cp "${BUILD}/MD3Demo" "libs/${ABI}/MD3Demo"
 
-OUT="libs/${ABI}/AImGui"
-if [[ -f "$OUT" ]]; then
+for PROGRAM in AImGui MD3Demo; do
+    OUT="libs/${ABI}/${PROGRAM}"
     SIZE=$(stat -c '%s' "$OUT" 2>/dev/null || wc -c < "$OUT")
     printf '\n  ELF   : %s\n  size  : %s bytes (%.1f KB)\n' \
         "$OUT" "$SIZE" "$(awk -v s="$SIZE" 'BEGIN{print s/1024}')"
-fi
+done

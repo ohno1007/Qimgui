@@ -1,0 +1,34 @@
+{
+  "androidx_commit": "587b8da057e3dfa7fb908e4b62b1bb84271eb20d",
+  "reference": "https://developer.android.com/reference/kotlin/androidx/compose/material3/MaterialShapes",
+  "graphics_shapes": "androidx.graphics:graphics-shapes-desktop:1.1.0",
+  "kotlin_compiler": "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.1.20",
+  "license": "Apache-2.0",
+  "sources": [
+    {
+      "path": "upstream/MaterialShapes.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/MaterialShapes.kt",
+      "sha256": "08c29828003344914ee0d6783f213b37caae650175cd004ba321eaf3a7d6e434"
+    },
+    {
+      "path": "upstream/ShapeUtil.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/internal/ShapeUtil.kt",
+      "sha256": "894f8cc0121eb13b92e7f28aaa06c04a06b89bfbb7d423f09c8787d68b02c0d5"
+    },
+    {
+      "path": "upstream/Matrix.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/ui/ui-graphics/src/commonMain/kotlin/androidx/compose/ui/graphics/Matrix.kt",
+      "sha256": "ac927a2f3f032a403af24c2bd28065ce9cd9e737a51c9ddf3de58d061e201c97"
+    },
+    {
+      "path": "upstream/Offset.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/ui/ui-geometry/src/commonMain/kotlin/androidx/compose/ui/geometry/Offset.kt",
+      "sha256": "653c7d2f9c8067543efdeb0e223176be432ce3d489a50d0d309e330c8e805456"
+    }
+  ],
+  "export_command": "python3 scripts/material_shapes/export.py",
+  "verification_command": "python3 scripts/material_shapes/export.py --check",
+  "shape_count": 35,
+  "cubic_count": 943,
+  "notes": "Original MaterialShapes class body evaluated unchanged with official graphics-shapes JVM library; minimal Compose Offset and 2D Matrix value adapters use the pinned source formulas. Normalization is upstream RoundedPolygon.normalized(); no traced silhouettes or polygon approximations are stored."
+}

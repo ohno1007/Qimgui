@@ -13,6 +13,7 @@ project(AImGui LANGUAGES CXX)
 # Optional Live2D Cubism model layer. OFF by default; requires the user-supplied
 # Cubism SDK (see docs/LIVE2D.md). When OFF, nothing below changes.
 option(AIMGUI_LIVE2D "Build with Live2D Cubism model support" OFF)
+option(AIMGUI_DIAGNOSTICS "Keep symbols/unwind data and enable Android surface diagnostics" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,29 +28,34 @@ add_compile_options(
     -fdata-sections
     -fvisibility=hidden
     -fvisibility-inlines-hidden
-    -fno-unwind-tables
-    -fno-asynchronous-unwind-tables
     -fno-rtti)
-add_compile_definitions(SURFACE_LOG_ENABLE=0)
-add_link_options(-Wl,--gc-sections -Wl,--icf=all -Wl,-s)
+add_link_options(-Wl,--gc-sections -Wl,--icf=all)
+if(AIMGUI_DIAGNOSTICS)
+    add_compile_options(-g -fno-omit-frame-pointer -funwind-tables)
+    add_compile_definitions(SURFACE_LOG_ENABLE=1 AIMGUI_DIAGNOSTICS=1)
+else()
+    add_compile_options(-fno-unwind-tables -fno-asynchronous-unwind-tables)
+    add_compile_definitions(SURFACE_LOG_ENABLE=0)
+    add_link_options(-Wl,-s)
+endif()
 
 set(JNI ${CMAKE_SOURCE_DIR}/jni)
 
-# Compile the pinned upstream sources with the same configuration as callers.
-# scripts/update_imgui.py refreshes sources, headers and provenance together.
+# Reuse the standalone component library and its pinned ImGui core. Android
+# input, surfaces and renderer backends remain outside Qimgui::MD3.
+set(QIMGUI_MD3_BUILD_SHOWCASE ON)
+set(QIMGUI_MD3_BUILD_ANDROID_OVERLAY ON)
+add_subdirectory(libraries/md3)
+add_library(imgui ALIAS qimgui_md3_imgui)
+
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
-add_library(imgui STATIC
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
+add_library(aimgui_imgui_backends STATIC
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp)
-target_include_directories(imgui PUBLIC
-    ${IMGUI_DIR} ${IMGUI_DIR}/backends ${CMAKE_SOURCE_DIR}/config)
-target_compile_definitions(imgui PUBLIC IMGUI_USER_CONFIG="aimgui_imconfig.h")
-target_compile_definitions(imgui PRIVATE
-    VK_USE_PLATFORM_ANDROID_KHR IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
+target_include_directories(aimgui_imgui_backends PUBLIC ${IMGUI_DIR}/backends)
+target_link_libraries(aimgui_imgui_backends PUBLIC Qimgui::ImGui)
+target_compile_definitions(aimgui_imgui_backends PRIVATE
+    IMGUI_IMPL_OPENGL_ES3 VK_USE_PLATFORM_ANDROID_KHR IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 
 # ── aimgui_platform: ANativeWindow + Touch helper ────────────────────────
 add_library(aimgui_platform STATIC
@@ -71,16 +77,23 @@ add_custom_command(
             ${MD3_FONT_DIR}/Roboto-400.ttf ${MD3_FONT_DIR}/Roboto-500.ttf
     COMMENT "Embedding pinned MD3 Roboto fonts"
     VERBATIM)
-add_library(aimgui_core STATIC
+add_library(aimgui_native_support STATIC
     ${MD3_FONT_HEADER}
+    ${JNI}/src/core/font.cpp
+    ${JNI}/src/core/keyboard_input.cpp
+    ${JNI}/src/core/crash_diagnostics.cpp)
+target_include_directories(aimgui_native_support
+    PUBLIC ${JNI}/src
+    PRIVATE ${JNI}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(aimgui_native_support PUBLIC imgui)
+
+add_library(aimgui_core STATIC
     ${JNI}/src/core/renderer_factory.cpp
     ${JNI}/src/core/renderer_gl.cpp
     ${JNI}/src/core/renderer_vk.cpp
     ${JNI}/src/core/vulkan_wrapper.cpp
     ${JNI}/src/core/bloom_gl.cpp
     ${JNI}/src/core/bloom_vk.cpp
-    ${JNI}/src/core/font.cpp
-    ${JNI}/src/core/keyboard_input.cpp
     ${JNI}/src/core/window_session.cpp
     ${JNI}/src/core/screen_mirror.cpp
     ${JNI}/src/core/sensor_tilt.cpp
@@ -95,38 +108,25 @@ target_compile_definitions(aimgui_core PRIVATE
 target_include_directories(aimgui_core
     PUBLIC  ${JNI}/src
     PRIVATE ${JNI}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(aimgui_core PUBLIC imgui aimgui_platform)
+target_link_libraries(aimgui_core PUBLIC imgui aimgui_imgui_backends aimgui_platform aimgui_native_support)
 
-# Native Material Design 3 components share the pinned ImGui configuration.
-# No Android, Java, WebView or renderer dependency is required by this library.
-file(GLOB AIMGUI_MD3_SOURCES CONFIGURE_DEPENDS ${JNI}/src/ui/md3/*.cpp)
-add_library(aimgui_md3 STATIC ${AIMGUI_MD3_SOURCES})
-target_include_directories(aimgui_md3
-    PUBLIC ${JNI}/include
-    PRIVATE ${JNI}/src/ui/md3)
-target_link_libraries(aimgui_md3 PUBLIC imgui)
+# The component test window is independent of the glass shell and effects.
+add_library(aimgui_md3_demo STATIC ${JNI}/src/demo/md3_demo.cpp)
+target_include_directories(aimgui_md3_demo PUBLIC ${JNI}/include)
+target_link_libraries(aimgui_md3_demo PUBLIC Qimgui::MD3Showcase)
+add_executable(MD3Demo ${JNI}/src/demo/main.cpp)
+target_link_libraries(MD3Demo PRIVATE aimgui_md3_demo Qimgui::AndroidOverlay)
 
 # ── Executable ───────────────────────────────────────────────────────────
-# ui/ is one layer split by what each file owns: ui.cpp is the shell (the
-# island/card/window body and the glass panes it submits), and the rest are the
-# pieces it draws with. ui_internal.h is what they share; ui/ui.h is the only
-# surface anything outside this directory sees.
+# ui.cpp owns the two-column MD3 shell and optional glass surface;
+# main_ui.cpp owns the pages. Both use the shared native MD3 library.
 add_executable(AImGui
     ${JNI}/src/main.cpp
     ${JNI}/src/ui/ui.cpp
-    ${JNI}/src/ui/theme.cpp
-    ${JNI}/src/ui/sidebar.cpp
-    ${JNI}/src/ui/content.cpp
-    ${JNI}/src/ui/gestures.cpp
-    ${JNI}/src/ui/dialog.cpp
-    ${JNI}/src/ui/expander.cpp
-    ${JNI}/src/ui/chrome.cpp
-    ${JNI}/src/ui/ripple.cpp
-    ${JNI}/src/ui/dissolve.cpp
     ${JNI}/src/ui/main_ui.cpp)
 target_include_directories(AImGui PRIVATE ${JNI}/include ${JNI}/src)
 target_link_libraries(AImGui PRIVATE
-    aimgui_core aimgui_platform aimgui_md3 imgui
+    aimgui_core aimgui_platform Qimgui::MD3Showcase imgui
     log android EGL GLESv3)
 
 # ── Optional Live2D Cubism layer ─────────────────────────────────────────

@@ -3,6 +3,7 @@
 #include "ui/md3_layout.h"
 #include "ui/md3_selection.h"
 #include "ui/md3_extra.h"
+#include "ui/md3_shapes.h"
 #include "md3_internal.h"
 #include <algorithm>
 #include <cstdint>
@@ -27,6 +28,9 @@ struct GalleryState {
     Date date{2026,11,11};
     DateRange range{{2026,11,11},{2026,11,18}};
     Time time{13,30};
+    int shape = static_cast<int>(MaterialShape::Heart);
+    float shapeSize = 112.f, shapeRotation = 0.f;
+    bool shapeOutlined = false;
 };
 GalleryState* galleryStates = nullptr;
 void ReleaseGallery(ImGuiContext* context, ImGuiContextHook*) {
@@ -255,13 +259,76 @@ void Additional(GalleryState& s) {
     Note("Tab and arrow keys move focus; Enter activates.");
 }
 }
+namespace {
+void Shapes(GalleryState& s) {
+    const auto& theme = GetTheme();
+    const float available = ImGui::GetContentRegionAvail().x / theme.scale;
+    Section("Material Shapes / 35");
+    const char* names[MaterialShapeCount];
+    for (int i = 0; i < MaterialShapeCount; ++i)
+        names[i] = ShapeName(static_cast<MaterialShape>(i));
+    s.shape = std::clamp(s.shape, 0, MaterialShapeCount - 1);
+    // A fixed preview box keeps controls still while the shape changes size.
+    const bool sideBySide = available >= 280.f;
+    const float preview = std::min(144.f, available);
+    const ImVec2 previewPos = ImGui::GetCursorScreenPos();
+    ImGui::BeginGroup();
+    ImGui::Dummy(ImVec2(Dp(preview), Dp(preview)));
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(previewPos, Add(previewPos, ImVec2(Dp(preview), Dp(preview))),
+                        Color(theme.surfaceContainerHigh), Dp(24));
+    const float side = std::min(s.shapeSize, preview - 16.f);
+    const ImVec2 origin = Add(previewPos, ImVec2(Dp((preview-side)*.5f), Dp((preview-side)*.5f)));
+    DrawShape(draw, static_cast<MaterialShape>(s.shape), origin, ImVec2(Dp(side), Dp(side)),
+              s.shapeOutlined ? 0 : Color(theme.primary), s.shapeRotation,
+              s.shapeOutlined ? Color(theme.primary) : 0, Dp(2));
+    ImGui::EndGroup();
+    if (sideBySide) ImGui::SameLine(0, Dp(20));
+    ImGui::BeginGroup();
+    const float controlsWidth = std::max(80.f, std::min(280.f, available - (sideBySide ? preview + 20.f : 0.f)));
+    Select("Shape##material-shape", &s.shape, names, MaterialShapeCount, controlsWidth);
+    Switch("Outline##shape-outline", &s.shapeOutlined);
+    if (Button("Reset##shape-reset", ButtonStyle::Text)) {
+        s.shapeSize = 112.f; s.shapeRotation = 0.f; s.shapeOutlined = false;
+    }
+    ImGui::EndGroup();
+    Slider("Size##shape-size", &s.shapeSize, 48.f, 128.f, std::min(available, 360.f), 0, "%.0f dp");
+    Slider("Rotation##shape-rotation", &s.shapeRotation, -180.f, 180.f, std::min(available, 360.f), 0, "%.0f deg");
+
+    Section("All shapes");
+    Note("Select a shape to preview it above.");
+    constexpr float gap = 12.f;
+    const int columns = std::max(1, static_cast<int>((available + gap) / (128.f + gap)));
+    const float tileWidth = std::max(1.f, (available - gap * (columns - 1)) / columns);
+    for (int i = 0; i < MaterialShapeCount; ++i) {
+        if (i % columns) ImGui::SameLine(0, Dp(gap));
+        ImGui::PushID(i);
+        const auto tile = Item("shape-tile", ImVec2(Dp(tileWidth), Dp(132)));
+        if (tile.pressed) s.shape = i;
+        if (tile.visible) {
+            const bool selected = s.shape == i;
+            draw->AddRectFilled(tile.rect.Min, tile.rect.Max,
+                               Color(selected ? theme.secondaryContainer : theme.surfaceContainer), Dp(16));
+            StateLayer(tile, selected ? theme.onSecondaryContainer : theme.onSurface, Dp(16));
+            if (selected) draw->AddRect(tile.rect.Min, tile.rect.Max, Color(theme.primary), Dp(16), Dp(2));
+            const float edge = std::min(76.f, tileWidth - 16.f);
+            const ImVec2 tileOrigin = Add(tile.rect.Min, ImVec2(Dp((tileWidth-edge)*.5f), Dp(14)));
+            DrawShape(draw, static_cast<MaterialShape>(i), tileOrigin, ImVec2(Dp(edge), Dp(edge)),
+                      Color(selected ? theme.onSecondaryContainer : theme.primary));
+            CenterText(ImRect(Add(tile.rect.Min, ImVec2(0, Dp(96))), tile.rect.Max), names[i],
+                       selected ? theme.onSecondaryContainer : theme.onSurface, 12, true);
+        }
+        ImGui::PopID();
+    }
+}
+}
 void Showcase(int page) {
     GalleryState& state=State();
     ImGui::PushID("md3-showcase");
     if(page<0) {
         bool dark=GetTheme().dark;
         if(Switch("Dark theme",&dark)) SetTheme(dark,GetTheme().scale);
-        const char* pages[] = {"Actions","Inputs","Navigation","Surfaces","Pickers","More"};
+        const char* pages[] = {"Actions","Inputs","Navigation","Surfaces","Pickers","More","Shapes","Expressive"};
         Tabs("categories",&state.page,pages,ShowcasePageCount,0,false);
         ImGui::Dummy(ImVec2(0,Dp(8)));
         page=state.page;
@@ -273,6 +340,8 @@ void Showcase(int page) {
         case 3: Surfaces(state); break;
         case 4: Pickers(state); break;
         case 5: Additional(state); break;
+        case 6: Shapes(state); break;
+        case 7: DrawExpressiveGallery(); break;
     }
     ImGui::PopID();
 }

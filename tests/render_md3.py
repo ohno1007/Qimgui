@@ -16,7 +16,7 @@ class Reader:
     def uint(self):
         return self.read('I')[0]
 
-def render(ctx, path, output):
+def render(ctx, path, output, paint_background=None):
     r = Reader(path)
     width, height, texture_count = r.read('III')
     textures = {}
@@ -52,6 +52,10 @@ def render(ctx, path, output):
     target = ctx.texture((width, height), 4)
     framebuffer = ctx.framebuffer(color_attachments=[target])
     framebuffer.use(); framebuffer.clear(1, 1, 1, 1)
+    if paint_background:
+        paint_background(ctx, width, height, framebuffer)
+        framebuffer.use()
+    ctx.viewport = (0, 0, width, height)
     ctx.enable(moderngl.BLEND)
     ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA,
                       moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA)
@@ -90,6 +94,7 @@ def render(ctx, path, output):
     for texture in textures.values(): texture.release()
     r.file.close()
     print(f'{output}: {width}x{height}, {draw_calls} native draw calls')
+    return {'width': width, 'height': height, 'draw_calls': draw_calls}
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)

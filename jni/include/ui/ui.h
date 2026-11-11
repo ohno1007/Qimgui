@@ -17,6 +17,17 @@ struct UiState {
     bool mirror_hides_window = true;
 
     int nav_page = 0;
+    int component_page = 0;
+
+    bool md3_dark = false;
+    float ui_scale = 0.0f; // Zero follows display density.
+    bool glass_available = false;
+    bool glass_failed = false;
+    bool ui_initialized = false;
+    bool request_center_window = false;
+    bool request_exit = false;
+    ImVec4 interaction_rect{};
+    bool modal_open = false;
 
     bool haptics_enabled = true;
 
@@ -67,7 +78,7 @@ struct UiState {
 
     bool      widget_glass_ok = false;
 
-    bool block_touch    = false;
+    bool block_touch    = true;
     bool block_touch_ok = false;
     bool block_touch_on = false;
 

@@ -154,7 +154,11 @@ bool GlassVK::Init(VkDevice device, VkDescriptorPool pool, VkRenderPass renderPa
 }
 
 void GlassVK::SetScreenImage(VkImageView view) {
-    if (!m_Ready || view == VK_NULL_HANDLE || view == m_ScreenView) return;
+    if (view == VK_NULL_HANDLE) {
+        m_ScreenView = VK_NULL_HANDLE;
+        return;
+    }
+    if (!m_Ready || view == m_ScreenView) return;
     m_ScreenView = view;
 
     VkDescriptorImageInfo ii{};

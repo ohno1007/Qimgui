@@ -33,6 +33,8 @@ bool RadioButton(const char *label, int *value, int option);
 bool Switch(const char *label, bool *value, bool show_icons = true);
 bool Chip(const char *label, ChipStyle style = ChipStyle::Assist, bool *selected = nullptr,
           bool *removed = nullptr, const char *icon = nullptr);
+// Positive steps divide the domain into equal intervals. Arrow keys move one
+// tick, Home/End reach the endpoints; simply focusing never snaps a value.
 bool Slider(const char *label, float *value, float minimum, float maximum, float width = 240.f,
             int steps = 0, const char *format = "%.0f");
 bool RangeSlider(const char *label, float *lower, float *upper, float minimum, float maximum,

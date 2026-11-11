@@ -1,0 +1,9 @@
+AndroidX Material 3 Expressive toolbar and split-button reference
+Copyright 2024, 2025 The Android Open Source Project
+Licensed under the Apache License, Version 2.0.
+
+Original Kotlin files are retained as reference. The native C++ components
+are independently implemented with Dear ImGui, following upstream dimensions
+and color roles. The native input, layout and animation behavior is not a
+Compose runtime port. Semantic icons are hand-drawn, not Material Symbols
+font outlines.

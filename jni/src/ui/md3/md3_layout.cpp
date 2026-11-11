@@ -1,5 +1,7 @@
 #include "ui/md3.h"
 #include "ui/md3_layout.h"
+#include "ui/md3_motion.h"
+#include "ui/md3_icons.h"
 #include "md3_internal.h"
 #include "imgui_internal.h"
 #include <algorithm>
@@ -29,6 +31,11 @@ void centered(ImDrawList* dl, ImRect rect, const char* label, float size, ImVec4
     ImVec4 bounds(rect.Min.x, rect.Min.y, rect.Max.x, rect.Max.y);
     dl->AddText(detail::Font(true), px(size), ImVec2(rect.GetCenter().x - ts.x * .5f, rect.GetCenter().y - ts.y * .5f),
                 col(color, alpha), label, endText(label), 0, &bounds);
+}
+void centeredIcon(ImDrawList* dl, ImRect rect, const char* icon, float size,
+                  ImVec4 color, float alpha = 1) {
+    if (!icons::DrawSymbol(dl, rect.GetCenter(), px(size), col(color, alpha), icon))
+        centered(dl, rect, icon, size, color, alpha);
 }
 bool interactive(const char* id, ImRect rect, bool enabled, bool* hovered, bool* held) {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
@@ -85,7 +92,7 @@ bool smallAction(const char* id, ImRect rect, const char* label, ImVec4 color, b
         const auto c = rect.GetCenter();
         dl->AddLine(ImVec2(c.x-px(5),c.y-px(5)),ImVec2(c.x+px(5),c.y+px(5)),col(color),px(2));
         dl->AddLine(ImVec2(c.x-px(5),c.y+px(5)),ImVec2(c.x+px(5),c.y-px(5)),col(color),px(2));
-    } else centered(dl, rect, label, fontSize, color);
+    } else centeredIcon(dl, rect, label, fontSize, color);
     return pressed;
 }
 
@@ -210,12 +217,38 @@ bool Tabs(const char* id,int* selected,const char* const* labels,int count,float
     ImGui::PushID(id); ImGui::BeginGroup();
     auto p=ImGui::GetCursorScreenPos();const float w=widthPx(width),h=px(48),segment=w/count;
     const auto& t=GetTheme();auto* dl=ImGui::GetWindowDrawList();bool changed=false;
+    bool navigationHandled=false;
     dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.surface));
     dl->AddLine(ImVec2(p.x,p.y+h-px(.5f)),ImVec2(p.x+w,p.y+h-px(.5f)),col(t.outlineVariant),px(1));
     for(int i=0;i<count;i++) {
         ImGui::PushID(i);ImRect rect(ImVec2(p.x+i*segment,p.y),ImVec2(p.x+(i+1)*segment,p.y+h));
         ImGui::SetCursorScreenPos(rect.Min);bool hover,held;const bool active=(!enabled||enabled[i])&&parentEnabled();
         if(interactive("tab",rect,active,&hover,&held)&&*selected!=i){*selected=i;changed=true;}
+        if(active&&!navigationHandled&&ImGui::IsItemFocused()) {
+            int next=i, direction=0;
+            if(ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) direction=-1;
+            else if(ImGui::IsKeyPressed(ImGuiKey_RightArrow)) direction=1;
+            else if(ImGui::IsKeyPressed(ImGuiKey_Home)) {next=count-1;direction=1;}
+            else if(ImGui::IsKeyPressed(ImGuiKey_End)) {next=0;direction=-1;}
+            if(direction) {
+                for(int attempt=0;attempt<count;++attempt) {
+                    next=(next+direction+count)%count;
+                    if(!enabled||enabled[next]) break;
+                }
+                navigationHandled=true;
+                ImGui::NavMoveRequestCancel();
+                if(next!=i) {
+                    changed|=*selected!=next;*selected=next;
+                    ImGui::PopID();ImGui::PushID(next);
+                    const ImGuiID nextId=ImGui::GetID("tab");
+                    ImGui::PopID();ImGui::PushID(i);
+                    const ImRect nextRect(ImVec2(p.x+next*segment,p.y),ImVec2(p.x+(next+1)*segment,p.y+h));
+                    ImGuiWindow* window=ImGui::GetCurrentWindow();
+                    ImGui::SetNavID(nextId,ImGuiNavLayer_Main,GImGui->CurrentFocusScopeId,ImGui::WindowRectAbsToRel(window,nextRect));
+                    ImGui::SetNavCursorVisibleAfterMove();
+                }
+            }
+        }
         stateLayer(dl,rect,t.onSurface,hover,held,active);
         centered(dl,rect,labels[i],14,*selected==i?(primary?t.primary:t.onSurface):t.onSurfaceVariant,active?1:.38f);
         // Material Web primary indicators span the label content (medium font),
@@ -275,12 +308,13 @@ bool Navigation(const char* id,int* selected,const NavigationItem* items,int cou
         if(on)dl->AddRectFilled(indicator.Min,indicator.Max,col(t.secondaryContainer),px(28));
         stateLayer(dl,indicator,on?t.onSecondaryContainer:t.onSurface,hover,held,active,px(28));
         if(bar||rail){
-            centered(dl,indicator,items[i].icon?items[i].icon:items[i].label,items[i].icon?24:14,on?t.onSecondaryContainer:t.onSurfaceVariant,active?1:.38f);
+            if(items[i].icon) centeredIcon(dl,indicator,items[i].icon,24,on?t.onSecondaryContainer:t.onSurfaceVariant,active?1:.38f);
+            else centered(dl,indicator,items[i].label,14,on?t.onSecondaryContainer:t.onSurfaceVariant,active?1:.38f);
             centered(dl,ImRect(ImVec2(r.Min.x+px(4),r.Min.y+px(48)),ImVec2(r.Max.x-px(4),r.Min.y+px(68))),items[i].label,12,on?t.onSurface:t.onSurfaceVariant,active?1:.38f);
             if(items[i].badge)drawBadge(dl,ImVec2(indicator.GetCenter().x+px(14),indicator.Min.y+px(5)),items[i].badge);
         }else{
             float x=indicator.Min.x+px(16);
-            if(items[i].icon){centered(dl,ImRect(ImVec2(x,r.Min.y),ImVec2(x+px(24),r.Max.y)),items[i].icon,24,on?t.onSecondaryContainer:t.onSurfaceVariant,active?1:.38f);x+=px(36);}
+            if(items[i].icon){centeredIcon(dl,ImRect(ImVec2(x,r.Min.y),ImVec2(x+px(24),r.Max.y)),items[i].icon,24,on?t.onSecondaryContainer:t.onSurfaceVariant,active?1:.38f);x+=px(36);}
             ImRect clip(ImVec2(x,r.Min.y),ImVec2(indicator.Max.x-px(items[i].badge?48:16),r.Max.y));
             textAt(dl,ImVec2(x,r.GetCenter().y-px(7)),items[i].label,14,on?t.onSecondaryContainer:t.onSurfaceVariant,&clip,active?1:.38f);
             if(items[i].badge)drawBadge(dl,ImVec2(indicator.Max.x-px(28),r.GetCenter().y),items[i].badge);
@@ -341,7 +375,7 @@ void LinearProgress(const char* id,float value,float width){
     // four-dp height and square ends for both track and active indicator.
     auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.surfaceContainerHighest));
     float start=0,end=ImClamp(std::isfinite(value)?value:0.f,0.f,1.f);
-    if(value<0){const float phase=std::fmod(static_cast<float>(ImGui::GetTime())*.7f,1.f);start=ImMax(0.f,phase*1.4f-.4f);end=ImMin(1.f,phase*1.4f);}
+    if(value<0){const auto& motion=GetMotionSettings();const float phase=(motion.reduced||motion.durationScale<=0.f)?.55f:std::fmod(static_cast<float>(ImGui::GetTime()/std::max(.01f,motion.durationScale))*.7f,1.f);start=ImMax(0.f,phase*1.4f-.4f);end=ImMin(1.f,phase*1.4f);}
     if(end>start)dl->AddRectFilled(ImVec2(p.x+w*start,p.y),ImVec2(p.x+w*end,p.y+h),col(t.primary));
     ImGui::PopID();
 }
@@ -351,7 +385,7 @@ void CircularProgress(const char* id,float value,float diameter){
     ImGui::PushID(id);auto p=ImGui::GetCursorScreenPos();float d=px(ImMax(8.f,diameter)),inner=ImMax(0.f,d-px(8)),thickness=inner*.1f,radius=(inner-thickness)*.5f;ImGui::Dummy(ImVec2(d,d));
     auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();ImVec2 c(p.x+d*.5f,p.y+d*.5f);
     float begin=-IM_PI*.5f,span=ImClamp(std::isfinite(value)?value:0.f,0.f,1.f)*IM_PI*2;
-    if(value<0){const float time=static_cast<float>(ImGui::GetTime());begin=time*4;span=(.2f+.6f*(.5f+.5f*std::sin(time*2)))*IM_PI*2;}
+    if(value<0){const auto& motion=GetMotionSettings();const float time=(motion.reduced||motion.durationScale<=0.f)?0.f:static_cast<float>(ImGui::GetTime()/std::max(.01f,motion.durationScale));begin=time*4;span=(.2f+.6f*(.5f+.5f*std::sin(time*2)))*IM_PI*2;}
     if(span>0&&inner>0){dl->PathArcTo(c,radius,begin,begin+span,64);dl->PathStroke(col(t.primary),thickness);}
     ImGui::PopID();
 }
@@ -363,17 +397,41 @@ void Tooltip(const char* text){
 }
 bool Snackbar(const char* id,const char* message,bool* open,float* remainingSeconds,const char* action,float width,bool dismissible){
     if(!open||!*open)return false;
-    if(remainingSeconds&&*remainingSeconds>0){*remainingSeconds=ImMax(0.f,*remainingSeconds-ImGui::GetIO().DeltaTime);if(*remainingSeconds==0){*open=false;return false;}}
-    ImGui::PushID(id);ImGui::BeginGroup();auto p=ImGui::GetCursorScreenPos();float w=widthPx(width);auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();
-    const float actionWidth=(action&&*action)?measure(action,14).x+px(24):0;
-    const float textWidth=ImMax(1.f,w-px(28)-actionWidth-px(dismissible?40:0));
+    ImGui::PushID(id);ImGui::BeginGroup();
+    const auto p=ImGui::GetCursorScreenPos();const float w=widthPx(width);
+    auto* dl=ImGui::GetWindowDrawList();const auto& t=GetTheme();
+    // Keep every action inside the surface even in a narrow parent. Preserve
+    // a minimum hit target, clipping long labels instead of overlapping it.
+    const bool showDismiss=dismissible&&w>=px(48);
+    const float availableAction=ImMax(0.f,w-px(8)-px(showDismiss?40:0));
+    const float actionWidth=action&&*action&&availableAction>=px(40)
+        ?ImMin(measure(action,14).x+px(24),availableAction):0;
+    const float textWidth=ImMax(1.f,w-px(28)-actionWidth-px(showDismiss?40:0));
     const ImVec2 wrapped=message?detail::Font()->CalcTextSizeA(px(14),FLT_MAX,textWidth,message,endText(message)):ImVec2(0,0);
     const float h=px(wrapped.y>px(21)?68:48),centerY=p.y+h*.5f;
-    dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.inverseSurface),px(4));float right=p.x+w-px(4);bool hit=false;
-    if(dismissible){ImRect r(ImVec2(right-px(40),centerY-px(20)),ImVec2(right,centerY+px(20)));ImGui::SetCursorScreenPos(r.Min);if(smallAction("dismiss",r,nullptr,t.inverseOnSurface,true))*open=false;right-=px(40);}
-    if(action&&*action){ImRect r(ImVec2(right-actionWidth,centerY-px(20)),ImVec2(right,centerY+px(20)));ImGui::SetCursorScreenPos(r.Min);hit=smallAction("action",r,action,t.inversePrimary);if(hit)*open=false;right-=actionWidth;}
+    dl->AddRectFilled(p,ImVec2(p.x+w,p.y+h),col(t.inverseSurface),px(4));
+    float right=p.x+w-px(4);bool hit=false,focused=false;
+    if(showDismiss){
+        ImRect r(ImVec2(right-px(40),centerY-px(20)),ImVec2(right,centerY+px(20)));
+        ImGui::SetCursorScreenPos(r.Min);
+        if(smallAction("dismiss",r,nullptr,t.inverseOnSurface,true))*open=false;
+        focused|=ImGui::IsItemFocused();right-=px(40);
+    }
+    if(actionWidth>0){
+        ImRect r(ImVec2(right-actionWidth,centerY-px(20)),ImVec2(right,centerY+px(20)));
+        ImGui::SetCursorScreenPos(r.Min);hit=smallAction("action",r,action,t.inversePrimary);
+        focused|=ImGui::IsItemFocused();if(hit)*open=false;right-=actionWidth;
+    }
     if(message){ImVec4 bounds(p.x+px(16),p.y+px(12),ImMax(p.x+px(16),right-px(8)),p.y+h-px(12));
         dl->AddText(detail::Font(),px(14),ImVec2(bounds.x,centerY-ImMin(wrapped.y,px(40))*.5f),col(t.inverseOnSurface),message,endText(message),textWidth,&bounds);}
+    const bool hovered=ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)&&
+        ImGui::IsMouseHoveringRect(p,ImVec2(p.x+w,p.y+h));
+    // Never expire an action while the user is reading or navigating it. An
+    // automatic initial NavId is not visible keyboard focus.
+    if(*open&&remainingSeconds&&*remainingSeconds>0&&!hovered&&!(focused&&GImGui->NavCursorVisible)) {
+        *remainingSeconds=ImMax(0.f,*remainingSeconds-ImGui::GetIO().DeltaTime);
+        if(*remainingSeconds==0)*open=false;
+    }
     ImGui::SetCursorScreenPos(p);ImGui::Dummy(ImVec2(w,h));ImGui::EndGroup();ImGui::PopID();return hit;
 }
 

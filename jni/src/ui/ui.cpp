@@ -1,514 +1,316 @@
-#include "ui/ui_internal.h"
-#include "ui/icons.h"
-#include "core/haptics.h"
+#include "ui/ui.h"
+#include "ui/main_ui.h"
+#include "ui/md3.h"
+#include "ui/md3_layout.h"
 
-#include "imgui.h"
-#include "platform/ANativeWindowCreator.h"
-#include "platform/TouchHelperA.h"
+#include "imgui_internal.h"
 
-#ifdef AIMGUI_LIVE2D
-#include "live2d/live2d_view.h"
-#endif
-
-#include <cfloat>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 namespace aimgui {
-
-Shell g_ui;
-
 namespace {
+namespace md = md3;
 
-constexpr float kGlassGap      = 18.0f;
-constexpr float kGlassMerge    = 30.0f;
-constexpr float kGlassStrandAt = 0.46f;
-constexpr float kGlassStrandH  = 96.0f;
-constexpr float kStrandGrip    = 26.0f;
-
-constexpr float kBridgeHold = 20.0f;
-constexpr float kBridgeSnap = 31.0f;
-
-constexpr float kNavFollow = 0.85f;
-constexpr float kNavLagMax = 34.0f;
-
+float UiScale(const UiState& state, ImVec2 display) {
+    float automatic = std::clamp(std::min(display.x, display.y) / 480.f, 1.f, 1.25f);
+    // A floating window sets its own density; a tall phone display should not
+    // enlarge a compact saved window into a nearly full-screen panel.
+    if (std::isfinite(state.last_full_size.x) && state.last_full_size.x > 0 &&
+        std::isfinite(state.last_full_size.y) && state.last_full_size.y > 0)
+        automatic = std::min({automatic, state.last_full_size.x / 560.f,
+                              state.last_full_size.y / 456.f});
+    const float requested = std::isfinite(state.ui_scale) && state.ui_scale > 0 ? state.ui_scale : automatic;
+    // Keep room for both columns and five labelled destinations, even on a
+    // narrow or rotated display. Navigation always stays on the left.
+    const float fitting = std::min({2.5f, (display.x - 24.f) / 560.f, (display.y - 24.f) / 456.f});
+    return std::clamp(requested, .5f, std::max(.5f, fitting));
 }
 
-void DrawUi(UiState* state, bool* keep_running) {
-    ApplyStyleOnce();
-    state->widget_count = 0;
-    chrome::BeginFrame(state->widget_glass && state->widget_glass_ok &&
-                       state->screen_texture_id != 0 && !state->exit_anim_active);
-
-    ImGuiIO& io = ImGui::GetIO();
-    const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
-
-    if (state->exit_anim_active && !g_ui.exit_anim_first_frame) {
-        const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - g_ui.exit_anim_start) / 1.35f;
-        const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
-
-        state->glass_count = 0;
-
-        ripple::DrawAll();
-        dissolve::Step(dt, clamped,
-                      (ImTextureID)(uintptr_t)state->scene_snapshot_id);
-
-        if (t01 >= 1.0f) {
-            state->exit_anim_active = false;
-            *keep_running = false;
+void ClampWindow(UiState& state, ImVec2 display, float scale) {
+    const float margin = std::min(12.f * scale, std::min(display.x, display.y) * .025f);
+    const ImVec2 maximum(std::max(1.f, display.x - margin * 2), std::max(1.f, display.y - margin * 2));
+    const ImVec2 minimum(std::min(maximum.x, 520.f * scale), std::min(maximum.y, 440.f * scale));
+    const bool bad_size = !std::isfinite(state.last_full_size.x) || state.last_full_size.x <= 0 ||
+                          !std::isfinite(state.last_full_size.y) || state.last_full_size.y <= 0;
+    if (!state.ui_initialized) {
+        const bool original_default = state.last_full_size.x == 900.f && state.last_full_size.y == 620.f &&
+                                      state.last_full_pos.x == 60.f && state.last_full_pos.y == 100.f;
+        const bool legacy_tall = !bad_size && state.last_full_size.y > state.last_full_size.x * 1.2f;
+        if (bad_size || original_default || legacy_tall) {
+            const float fit = std::min({1.f, maximum.x / 900.f, maximum.y / 620.f});
+            state.last_full_size = ImVec2(900.f * fit, 620.f * fit);
+            state.request_center_window = true;
         }
+        state.ui_initialized = true;
+    }
+    if (!std::isfinite(state.last_full_size.x) || !std::isfinite(state.last_full_size.y))
+        state.last_full_size = minimum;
+    state.last_full_size.x = std::clamp(state.last_full_size.x, minimum.x, maximum.x);
+    state.last_full_size.y = std::clamp(state.last_full_size.y, minimum.y, maximum.y);
+    if (state.request_center_window || !std::isfinite(state.last_full_pos.x) || !std::isfinite(state.last_full_pos.y)) {
+        state.last_full_pos = ImVec2((display.x - state.last_full_size.x) * .5f,
+                                    (display.y - state.last_full_size.y) * .5f);
+        state.request_center_window = false;
+    }
+    state.last_full_pos.x = std::clamp(state.last_full_pos.x, margin, std::max(margin, display.x - margin - state.last_full_size.x));
+    state.last_full_pos.y = std::clamp(state.last_full_pos.y, margin, std::max(margin, display.y - margin - state.last_full_size.y));
+}
+
+bool GlassLive(const UiState& state) {
+    return state.screen_mirror && state.glass_available && !state.glass_failed &&
+           state.screen_texture_id != 0;
+}
+
+void SubmitGlass(UiState& state, const ImVec4& rect, float rounding) {
+    if (!GlassLive(state) || rect.z <= 1 || rect.w <= 1 || state.glass_count >= kMaxGlassRects) return;
+    GlassRect glass{};
+    glass.x = rect.x; glass.y = rect.y; glass.w = rect.z; glass.h = rect.w;
+    glass.rounding = rounding;
+    glass.edgeWidth = std::clamp(std::min(rect.z, rect.w) * .12f, 24.f, 80.f);
+    glass.blur = 6.f;
+    glass.bend = .65f;
+    glass.lightX = state.glass_light_x;
+    glass.lightY = state.glass_light_y;
+    const auto& theme = md::GetTheme();
+    glass.tintR = theme.surface.x;
+    glass.tintG = theme.surface.y;
+    glass.tintB = theme.surface.z;
+    glass.tintA = std::clamp(std::isfinite(state.glass_clarity) ? state.glass_clarity : .11f, 0.f, .35f);
+    state.glass_rects[state.glass_count++] = glass;
+}
+
+void AppBar(UiState& state, ImVec2 display, float scale) {
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const char* actions[] = {"@minimize", "@close"};
+    char title[96];
+    std::snprintf(title, sizeof(title), "Qimgui · %s", kPages[state.nav_page].label);
+    // Inherit the rounded window surface instead of covering the glass with
+    // an opaque square. Navigation, text and action tokens remain unchanged.
+    auto& theme = md::GetTheme();
+    const float surface_alpha = theme.surface.w;
+    theme.surface.w = 0;
+    const int action = md::TopAppBar("app-bar", title, md::AppBarStyle::Small, nullptr, actions, 2);
+    theme.surface.w = surface_alpha;
+    if (action == 0) state.stage = UiState::StageIsland;
+    if (action == 1) state.request_exit = true;
+
+    const ImVec2 next = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(ImVec2(start.x + 16.f * scale, start.y + 8.f * scale));
+    ImGui::InvisibleButton("window-drag", ImVec2(std::max(1.f, width - 128.f * scale), 48.f * scale));
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        state.last_full_pos.x += ImGui::GetIO().MouseDelta.x;
+        state.last_full_pos.y += ImGui::GetIO().MouseDelta.y;
+        ClampWindow(state, display, scale);
+    }
+    ImGui::SetCursorScreenPos(next);
+}
+
+void GlassSwitch(UiState& state, ImVec2 position, float scale) {
+    ImGui::SetCursorScreenPos(ImVec2(position.x + 16.f * scale, position.y + 64.f * scale));
+    // A saved request must always be switchable off, even if capture support
+    // disappears after a system update or an initialization failure.
+    ImGui::BeginDisabled(!state.glass_available && !state.screen_mirror);
+    if (md::Switch(u8"液体玻璃##glass-toggle", &state.screen_mirror)) state.glass_failed = false;
+    const ImVec2 switch_min = ImGui::GetItemRectMin(), switch_max = ImGui::GetItemRectMax();
+    ImGui::EndDisabled();
+    md::Tooltip(u8"切换窗口材质，导航和控件使用同一套 MD3 样式。");
+    ImGui::SameLine(0, 16.f * scale);
+    ImGui::PushStyleColor(ImGuiCol_Text, md::GetTheme().onSurfaceVariant);
+    const char* status = !state.glass_available ? u8"当前设备不可用"
+        : !state.screen_mirror ? u8"标准外观"
+        : state.glass_failed ? u8"启用失败"
+        : GlassLive(state) ? u8"已开启" : u8"正在启用…";
+    ImVec2 text_pos = ImGui::GetCursorScreenPos();
+    text_pos.y = (switch_min.y + switch_max.y - ImGui::GetFontSize()) * .5f;
+    const float right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - 16.f * scale;
+    ImGui::SetCursorScreenPos(text_pos);
+    ImGui::Dummy(ImVec2(std::max(0.f, right - text_pos.x), ImGui::GetFontSize()));
+    if (right > text_pos.x)
+        ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), text_pos,
+            ImVec2(right, text_pos.y + ImGui::GetFontSize()), right, status, nullptr, nullptr);
+    ImGui::PopStyleColor();
+}
+
+void DrawNavigation(UiState& state, float width) {
+    md::NavigationItem items[5];
+    const int count = std::min(kPagesCount, 5);
+    for (int i = 0; i < count; ++i) items[i] = {kPages[i].label, kPages[i].icon, 0, true};
+    auto& theme = md::GetTheme();
+    const float surface_alpha = theme.surface.w, container_alpha = theme.surfaceContainer.w;
+    if (GlassLive(state)) {
+        theme.surface.w = .30f;
+        theme.surfaceContainer.w = .55f;
+    }
+    md::Navigation("main-navigation", &state.nav_page, items, count, md::NavigationStyle::Drawer, width);
+    theme.surface.w = surface_alpha;
+    theme.surfaceContainer.w = container_alpha;
+}
+
+void Content(UiState& state, ImVec2 pos, ImVec2 size, float scale, bool compact) {
+    ImGui::SetCursorScreenPos(pos);
+    ImGui::PushID(state.nav_page);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2((compact ? 16.f : 24.f) * scale, 16.f * scale));
+    ImVec4 surface = md::GetTheme().surfaceContainerLow;
+    if (GlassLive(state)) surface.w = .60f;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, surface);
+    if (ImGui::BeginChild("main-content", size, ImGuiChildFlags_AlwaysUseWindowPadding))
+        DrawPage(&state, static_cast<Page>(state.nav_page));
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+    ImGui::PopID();
+}
+
+void ResizeGrip(UiState& state, ImVec2 display, float scale) {
+    const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+    const float side = 20.f * scale;
+    const ImVec2 corner(pos.x + size.x - side, pos.y + size.y - side);
+    ImGui::SetCursorScreenPos(corner);
+    ImGui::InvisibleButton("window-resize", ImVec2(side, side));
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        state.last_full_size.x += ImGui::GetIO().MouseDelta.x;
+        state.last_full_size.y += ImGui::GetIO().MouseDelta.y;
+        ClampWindow(state, display, scale);
+    }
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImU32 color = ImGui::GetColorU32(md::GetTheme().outline);
+    for (int i = 0; i < 2; ++i) {
+        const float inset = (7.f + i * 5.f) * scale;
+        draw->AddLine(ImVec2(pos.x + size.x - inset, pos.y + size.y - 5.f * scale),
+                      ImVec2(pos.x + size.x - 5.f * scale, pos.y + size.y - inset), color, scale);
+    }
+}
+
+void ExitDialog(UiState& state, bool* keep_running) {
+    if (md::BeginDialog("exit-confirmation", &state.request_exit, u8"退出 Qimgui", false, 360.f)) {
+        ImGui::TextWrapped(u8"关闭窗口并保存当前设置？");
+        if (md::Button(u8"取消##exit-cancel", md::ButtonStyle::Text)) {
+            state.request_exit = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (md::Button(u8"退出##exit-confirm")) {
+            state.request_exit = false;
+            if (keep_running) *keep_running = false;
+            ImGui::CloseCurrentPopup();
+        }
+        md::EndDialog();
+    }
+}
+
+void CompactWindow(UiState& state, ImVec2 display, float scale) {
+    // A hidden modal must not intercept taps on the restore button. Controlled
+    // page dialogs may reopen when their page becomes visible again.
+    ImGui::ClosePopupsOverWindow(nullptr, false);
+    state.request_exit = false;
+    const ImVec2 size(std::min(224.f * scale, std::max(1.f, display.x - 16.f)), std::min(80.f * scale, display.y));
+    const ImVec2 pos((display.x - size.x) * .5f, std::min(16.f * scale, std::max(0.f, display.y - size.y)));
+    ImGui::SetNextWindowPos(pos);
+    ImGui::SetNextWindowSize(size);
+    ImGui::SetNextWindowBgAlpha(GlassLive(state) ? .35f : 1.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.f * scale, 12.f * scale));
+    if (ImGui::Begin("Qimgui compact###aimgui_compact", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse)) {
+        if (md::Fab("restore-window", "@expand", md::FabSize::Medium, u8"展开 Qimgui"))
+            state.stage = UiState::StageWindow;
+        state.interaction_rect = ImVec4(pos.x, pos.y, size.x, size.y);
+        SubmitGlass(state, state.interaction_rect, 28.f * scale);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+} // namespace
+
+void DrawUi(UiState* state, bool* keep_running) {
+    if (!state) return;
+    state->glass_count = 0;
+    state->widget_count = 0;
+    state->interaction_rect = ImVec4();
+    state->modal_open = false;
+    state->exit_anim_active = false;
+    const ImVec2 display(state->display_w > 0 ? static_cast<float>(state->display_w) : ImGui::GetIO().DisplaySize.x,
+                         state->display_h > 0 ? static_cast<float>(state->display_h) : ImGui::GetIO().DisplaySize.y);
+    if (display.x <= 0 || display.y <= 0) return;
+    const float scale = UiScale(*state, display);
+    ClampWindow(*state, display, scale);
+    state->nav_page = std::clamp(state->nav_page, 0, std::max(0, kPagesCount - 1));
+    state->collapsed = state->stage != UiState::StageWindow;
+    state->expand = state->collapsed ? 0.f : 1.f;
+    md::SetTheme(state->md3_dark, scale);
+    md::PushTheme();
+    const auto& theme = md::GetTheme();
+    ImVec4 scrollbar_hovered = theme.outline, scrollbar_active = theme.primary;
+    scrollbar_hovered.w = .8f;
+    scrollbar_active.w = .8f;
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, theme.outlineVariant);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, scrollbar_hovered);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, scrollbar_active);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 12.f * scale);
+    if (state->collapsed) {
+        CompactWindow(*state, display, scale);
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(4);
+        md::PopTheme();
         return;
     }
 
-    bool l2d_active = false;
-#ifdef AIMGUI_LIVE2D
-    l2d_active = live2d::IsLoaded();
-    if (l2d_active) {
-        const float bdw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
-        const float bdh = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
-        constexpr float kBallHalf = 100.0f;
-        if (state->ball_pos.x < 0.0f)
-            state->ball_pos = ImVec2(bdw * 0.18f, bdh * 0.28f);
-        auto clampf = [](float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); };
-        state->ball_pos.x = clampf(state->ball_pos.x, kBallHalf, bdw - kBallHalf);
-        state->ball_pos.y = clampf(state->ball_pos.y, kBallHalf, bdh - kBallHalf);
+    ImGui::SetNextWindowPos(state->last_full_pos);
+    ImGui::SetNextWindowSize(state->last_full_size);
+    if (ImGui::Begin("Qimgui###aimgui_main", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoScrollWithMouse)) {
+        const ImVec2 position = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+        auto* background = ImGui::GetWindowDrawList();
+        background->ChannelsSplit(2);
+        background->ChannelsSetCurrent(1);
+        AppBar(*state, display, scale);
+        GlassSwitch(*state, position, scale);
+        const float logical_width = size.x / scale;
+        const float inset = 16.f * scale;
+        const float body_top = position.y + 120.f * scale;
+        const float body_bottom = position.y + size.y - inset;
+        const float body_height = std::max(1.f, body_bottom - body_top);
+        const float nav_left = position.x + inset;
+        const float nav_width = std::clamp(logical_width * .25f, 128.f, 230.f) * scale;
+        const float content_left = nav_left + nav_width + inset;
+        const float content_right = position.x + size.x - inset;
+        ImGui::SetCursorScreenPos(ImVec2(nav_left, body_top));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        if (ImGui::BeginChild("navigation-panel", ImVec2(nav_width, body_height), 0,
+                              ImGuiWindowFlags_NoBackground))
+            DrawNavigation(*state, ImGui::GetContentRegionAvail().x / scale);
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        Content(*state, ImVec2(content_left, body_top),
+                ImVec2(std::max(1.f, content_right - content_left), body_height), scale,
+                (content_right - content_left) / scale < 600.f);
+        ResizeGrip(*state, display, scale);
+        ExitDialog(*state, keep_running);
+        state->interaction_rect = ImVec4(position.x, position.y, size.x, size.y);
+        SubmitGlass(*state, state->interaction_rect, 28.f * scale);
 
-        static bool   s_dragging = false, s_moved = false;
-        static ImVec2 s_press(0, 0), s_off(0, 0);
-        if (state->collapsed) {
-            if (ImGui::IsMouseClicked(0) && live2d::HitCollapsed(io.MousePos.x, io.MousePos.y)) {
-                s_dragging = true; s_moved = false; s_press = io.MousePos;
-                s_off = ImVec2(state->ball_pos.x - io.MousePos.x, state->ball_pos.y - io.MousePos.y);
-            }
-            if (s_dragging && ImGui::IsMouseDown(0)) {
-                float mdx = io.MousePos.x - s_press.x, mdy = io.MousePos.y - s_press.y;
-                if (mdx * mdx + mdy * mdy > 24.0f * 24.0f) s_moved = true;
-                if (s_moved) state->ball_pos = ImVec2(io.MousePos.x + s_off.x,
-                                                      io.MousePos.y + s_off.y);
-            }
-            if (s_dragging && ImGui::IsMouseReleased(0)) {
-                s_dragging = false;
-                if (!s_moved) {
-
-                    if (state->stage < UiState::StageWindow) ++state->stage;
-                    live2d::Poke();
-                }
-            }
-        } else {
-            s_dragging = false;
-        }
-    }
-#endif
-
-    if (!g_ui.resize_valid) {
-        g_ui.resize_target_size = state->last_full_size;
-        g_ui.resize_valid = true;
-    }
-
-    HandleResizeInput(state, io);
-
-    if (!g_ui.resizing) {
-        UpdateSpring(&state->last_full_size.x, &g_ui.resize_anim_vel.x,
-                     g_ui.resize_target_size.x, dt);
-        UpdateSpring(&state->last_full_size.y, &g_ui.resize_anim_vel.y,
-                     g_ui.resize_target_size.y, dt);
-    } else {
-
-        state->last_full_size = g_ui.resize_drag_start_size;
-    }
-
-    state->collapsed = (state->stage == UiState::StageIsland);
-
-    if (state->stage != g_ui.haptic_last_stage) {
-        g_ui.haptic_last_stage = state->stage;
-        haptic::Step();
-    }
-
-    if (!dialog::StageMismatch(state->stage)) g_ui.stage_shown = state->stage;
-    const float target = (float)g_ui.stage_shown * 0.5f;
-    UpdateSpring(&state->expand, &g_ui.expand_vel, target, dt);
-    const float t = state->expand;
-    const float lt = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-
-    constexpr float kTiltRange = 70.0f;
-    constexpr float kDotD      = 56.0f;
-    constexpr float kDotGap    = 12.0f;
-    constexpr float kDotMerge  = 30.0f;
-
-    const float dw = state->display_w > 0 ? (float)state->display_w : io.DisplaySize.x;
-
-    {
-        const float d = dt * 5.5f;
-        g_ui.modal_close += dialog::JoinedShell() ? d : -d;
-        if (g_ui.modal_close < 0.0f) g_ui.modal_close = 0.0f;
-        if (g_ui.modal_close > 1.0f) g_ui.modal_close = 1.0f;
-    }
-    const float mclose = g_ui.modal_close;
-
-    const float dot_t = (lt < 0.22f ? 1.0f - lt / 0.22f : 0.0f) * (1.0f - mclose);
-    const float pair_shift = (kDotD + kDotGap) * 0.5f * dot_t;
-
-    const float tilt_w = 1.0f - (lt < 0.55f ? lt / 0.55f : 1.0f);
-    UpdateSpring(&g_ui.island_tilt.x, &g_ui.island_tilt_vel.x,
-                 state->tilt_x * kTiltRange * tilt_w, dt);
-    UpdateSpring(&g_ui.island_tilt.y, &g_ui.island_tilt_vel.y,
-                 state->tilt_y * kTiltRange * tilt_w, dt);
-
-    const ImVec2 island_base = l2d_active
-        ? ImVec2(state->ball_pos.x - kIslandW * 0.5f,
-                 state->ball_pos.y - kIslandH * 0.5f)
-        : ImVec2(dw * 0.5f - kIslandW * 0.5f - pair_shift, kIslandTop);
-
-    {
-        const float dh_ = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
-        const float margin = 12.0f;
-        const float pair_w = kIslandW + (kDotGap + kDotD) * dot_t;
-        auto hold = [](float* v, float* vel, float lo, float hi) {
-            if (lo > hi) { *v = 0.0f; *vel = 0.0f; return; }
-            if (*v < lo) { *v = lo; if (*vel < 0.0f) *vel = 0.0f; }
-            if (*v > hi) { *v = hi; if (*vel > 0.0f) *vel = 0.0f; }
-        };
-        hold(&g_ui.island_tilt.x, &g_ui.island_tilt_vel.x,
-             margin - island_base.x, dw - margin - pair_w - island_base.x);
-        hold(&g_ui.island_tilt.y, &g_ui.island_tilt_vel.y,
-             margin - island_base.y, dh_ - margin - kIslandH - island_base.y);
-    }
-
-    const ImVec2 island_pos(island_base.x + g_ui.island_tilt.x,
-                            island_base.y + g_ui.island_tilt.y);
-    const ImVec2 island_size(kIslandW, kIslandH);
-
-    g_ui.island_rect = ImVec4(island_pos.x, island_pos.y, kIslandW, kIslandH);
-
-    const float dh = state->display_h > 0 ? (float)state->display_h : io.DisplaySize.y;
-    const ImVec2 card_size(560.0f, 360.0f);
-    ImVec2 card_pos(island_pos.x + kIslandW * 0.5f - card_size.x * 0.5f,
-                    island_pos.y + kIslandH * 0.5f - card_size.y * 0.35f);
-    if (card_pos.x < 16.0f) card_pos.x = 16.0f;
-    if (card_pos.y < 16.0f) card_pos.y = 16.0f;
-    if (card_pos.x + card_size.x > dw - 16.0f) card_pos.x = dw - 16.0f - card_size.x;
-    if (card_pos.y + card_size.y > dh - 16.0f) card_pos.y = dh - 16.0f - card_size.y;
-
-    g_ui.shell_rest_rect =
-        state->stage == UiState::StageIsland
-            ? g_ui.island_rect
-            : (state->stage == UiState::StageCard
-                   ? ImVec4(card_pos.x, card_pos.y, card_size.x, card_size.y)
-                   : ImVec4(state->last_full_pos.x, state->last_full_pos.y,
-                            state->last_full_size.x, state->last_full_size.y));
-
-    auto lerp = [](ImVec2 a, ImVec2 b, float u) {
-        return ImVec2(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u);
-    };
-
-    if (state->display_w > 0 && state->display_h > 0) {
-        const float keep = 120.0f;
-        const float max_x = (float)state->display_w - keep;
-        const float max_y = (float)state->display_h - keep;
-        if (state->last_full_pos.x > max_x) state->last_full_pos.x = max_x;
-        if (state->last_full_pos.y > max_y) state->last_full_pos.y = max_y;
-        if (state->last_full_pos.x < 0.0f)  state->last_full_pos.x = 0.0f;
-        if (state->last_full_pos.y < 0.0f)  state->last_full_pos.y = 0.0f;
-        if (state->last_full_size.x > (float)state->display_w)
-            state->last_full_size.x = (float)state->display_w;
-        if (state->last_full_size.y > (float)state->display_h)
-            state->last_full_size.y = (float)state->display_h;
-    }
-
-    ImVec2 win_pos, win_size;
-    if (lt <= 0.5f) {
-        const float k = lt * 2.0f;
-        win_pos  = lerp(island_pos,  card_pos,  k);
-        win_size = lerp(island_size, card_size, k);
-    } else {
-        const float k = (lt - 0.5f) * 2.0f;
-        win_pos  = lerp(card_pos,  state->last_full_pos,  k);
-        win_size = lerp(card_size, state->last_full_size, k);
-    }
-
-    {
-        float j = g_ui.expand_vel * 0.055f;
-        if (j >  0.16f) j =  0.16f;
-        if (j < -0.16f) j = -0.16f;
-        const ImVec2 c(win_pos.x + win_size.x * 0.5f, win_pos.y + win_size.y * 0.5f);
-        win_size.x *= (1.0f + j * 0.55f);
-        win_size.y *= (1.0f - j * 0.85f);
-        win_pos.x = c.x - win_size.x * 0.5f;
-        win_pos.y = c.y - win_size.y * 0.5f;
-    }
-
-    g_ui.shell_rect = ImVec4(win_pos.x, win_pos.y, win_size.x, win_size.y);
-
-    {
-        float bx = win_pos.x, by = win_pos.y;
-        float bx1 = bx + win_size.x, by1 = by + win_size.y;
-        const ImVec4& m = g_ui.modal_rect;
-        if (m.z > 2.0f && m.w > 2.0f) {
-            if (m.x < bx)  bx  = m.x;
-            if (m.y < by)  by  = m.y;
-            if (m.x + m.z > bx1) bx1 = m.x + m.z;
-            if (m.y + m.w > by1) by1 = m.y + m.w;
-        }
-        Touch::SetBlockRegion(bx, by, bx1 - bx, by1 - by,
-                              state->block_touch && !state->exit_anim_active);
-        state->block_touch_on = Touch::Blocking();
-    }
-
-    const bool show_chrome    = (lt > 0.75f);
-    const bool overriding_pos = (lt < 0.999f);
-
-    if (overriding_pos) {
-        ImGui::SetNextWindowPos (win_pos);
-        ImGui::SetNextWindowSize(win_size);
-    } else {
-
-        ImGui::SetNextWindowPos(state->last_full_pos,
-                                g_ui.content_moving ? ImGuiCond_Always
-                                                      : ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(state->last_full_size, ImGuiCond_Always);
-        ImGui::SetNextWindowSizeConstraints(ImVec2(700, 560), ImVec2(FLT_MAX, FLT_MAX));
-    }
-
-    int pushed_glass_text = 0;
-    if (state->screen_texture_id) {
-        const ImVec4 kNone(0, 0, 0, 0);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg,         kNone);
-        ImGui::PushStyleColor(ImGuiCol_TitleBg,          kNone);
-        ImGui::PushStyleColor(ImGuiCol_TitleBgActive,    kNone);
-        ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kNone);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,          kNone);
-        pushed_glass_text = 5;
-    }
-    const float rounding = (kIslandH * 0.5f) * (1.0f - lt) + 12.0f * lt;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, rounding);
-
-    state->glass_count = 0;
-    if (state->screen_texture_id && !state->exit_anim_active) {
-        GlassRect base{};
-        base.rounding = rounding;
-        base.alpha    = 1.0f;
-        base.tintA    = state->glass_clarity;
-        base.lightX   = state->glass_light_x;
-        base.lightY   = state->glass_light_y;
-
-        const float minSide = win_size.x < win_size.y ? win_size.x : win_size.y;
-        if (minSide < 200.0f) {
-            base.edgeWidth = minSide * 0.30f;
-            base.blur      = 5.0f;
-        }
-
-        {
-            const float dt = ImGui::GetIO().DeltaTime;
-            if (g_ui.glass_pos_valid) {
-                g_ui.glass_nav_lag.x -= (win_pos.x - g_ui.glass_prev_pos.x) * kNavFollow;
-                g_ui.glass_nav_lag.y -= (win_pos.y - g_ui.glass_prev_pos.y) * kNavFollow;
-            }
-            g_ui.glass_prev_pos  = win_pos;
-            g_ui.glass_pos_valid = true;
-            UpdateSpring(&g_ui.glass_nav_lag.x, &g_ui.glass_nav_lag_vel.x, 0.0f, dt);
-            UpdateSpring(&g_ui.glass_nav_lag.y, &g_ui.glass_nav_lag_vel.y, 0.0f, dt);
-
-            auto hold = [](float* v, float* vel, float lim) {
-                if (*v < -lim) { *v = -lim; if (*vel < 0.0f) *vel = 0.0f; }
-                if (*v >  lim) { *v =  lim; if (*vel > 0.0f) *vel = 0.0f; }
-            };
-            hold(&g_ui.glass_nav_lag.x, &g_ui.glass_nav_lag_vel.x, kNavLagMax);
-            hold(&g_ui.glass_nav_lag.y, &g_ui.glass_nav_lag_vel.y, kNavLagMax);
-        }
-
-        const float split = (lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f)
-                          * (1.0f - mclose);
-        GlassRect a = base, b = base, strand = base, title = base;
-        bool parted = false;
-        if (split > 0.01f) {
-
-            const ImGuiStyle& stl = ImGui::GetStyle();
-            const float divide  = win_pos.x + stl.WindowPadding.x + kSidebarW;
-            const float title_h = ImGui::GetFontSize() + stl.FramePadding.y * 2.0f;
-            const float gap     = kGlassGap * split;
-            const float win_r   = win_pos.x + win_size.x;
-            const float win_b   = win_pos.y + win_size.y;
-
-            const ImVec2 lag(g_ui.glass_nav_lag.x * split, g_ui.glass_nav_lag.y * split);
-            g_ui.glass_nav_offset = lag;
-
-            constexpr float kTitleOverlap = 4.0f;
-
-            title.x = win_pos.x;
-            title.y = win_pos.y;
-            title.w = win_size.x;
-            title.h = title_h + kTitleOverlap;
-
-            b.x = divide + gap * 0.5f;
-            b.y = win_pos.y;
-            b.w = win_r - b.x;
-            b.h = win_b - b.y;
-            b.hardJoin = true;
-
-            const float nav_y0 = win_pos.y + title_h + kTitleOverlap + gap;
-            a.x = win_pos.x + lag.x;
-            a.y = nav_y0 + lag.y;
-            a.w = (divide - gap * 0.5f) - win_pos.x;
-            a.h = win_b - nav_y0;
-
-            const float nav_r = a.x + a.w;
-            const float slot  = b.x - nav_r;
-            const float u     = (slot - kBridgeHold) / (kBridgeSnap - kBridgeHold);
-            const float uc    = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
-            const float neck  = 1.0f - uc * uc * (3.0f - 2.0f * uc);
-
-            const bool joined = g_ui.strand_joined ? neck > 0.06f : neck > 0.35f;
-            if (joined != g_ui.strand_joined) {
-                g_ui.strand_joined = joined;
-                haptic::Snap();
-            }
-            strand.w = slot + kStrandGrip * neck;
-            strand.h = kGlassStrandH * neck;
-            strand.x = nav_r - kStrandGrip * neck * 0.5f;
-            strand.y = a.y + (win_b - a.y) * kGlassStrandAt - strand.h * 0.5f;
-
-            a.merge = b.merge = strand.merge = title.merge = kGlassMerge;
-            parted = a.w > 2.0f && b.w > 2.0f && a.h > 2.0f;
-        }
-        if (parted) {
-            state->glass_rects[state->glass_count++] = title;
-            state->glass_rects[state->glass_count++] = b;
-            state->glass_rects[state->glass_count++] = a;
-            state->glass_rects[state->glass_count++] = strand;
-        } else {
-            g_ui.glass_nav_offset = ImVec2(0, 0);
-            GlassRect r = base;
-            r.x = win_pos.x; r.y = win_pos.y; r.w = win_size.x; r.h = win_size.y;
-            if (dot_t > 0.02f) {
-
-                GlassRect dot = base;
-                dot.w = dot.h = kDotD * dot_t;
-                dot.x = win_pos.x + win_size.x + kDotGap
-                        + g_ui.glass_nav_lag.x * dot_t;
-                dot.y = win_pos.y + win_size.y * 0.5f - dot.h * 0.5f
-                        + g_ui.glass_nav_lag.y * dot_t;
-                r.merge = dot.merge = kDotMerge;
-                g_ui.dot_center = ImVec2(dot.x + dot.w * 0.5f, dot.y + dot.h * 0.5f);
-                g_ui.dot_radius = dot.w * 0.5f;
-                state->glass_rects[state->glass_count++] = r;
-                state->glass_rects[state->glass_count++] = dot;
-            } else {
-                g_ui.dot_radius = 0.0f;
-                state->glass_rects[state->glass_count++] = r;
-            }
-        }
-    }
-
-    if (dialog::JoinedShell()) {
-        for (int i = 0; i < state->glass_count; ++i) {
-            GlassRect& gr = state->glass_rects[i];
-            if (gr.group != 0 || gr.w < 2.0f || gr.h < 2.0f || gr.alpha <= 0.001f)
-                continue;
-            dialog::BlendMaterial(&gr);
-            break;
-        }
-    }
-
-    const bool l2d_hidden_chrome = l2d_active && lt < 0.999f;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,
-                        (l2d_hidden_chrome || state->screen_texture_id) ? 0.0f : 1.0f);
-    if (l2d_hidden_chrome) ImGui::SetNextWindowBgAlpha(lt);
-
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_NoSavedSettings |
-                             ImGuiWindowFlags_NoResize;
-    if (!show_chrome || g_ui.resizing) {
-        flags |= ImGuiWindowFlags_NoMove;
-    }
-    if (!show_chrome) {
-        flags |= ImGuiWindowFlags_NoTitleBar;
-    }
-
-    char title[64];
-    std::snprintf(title, sizeof(title), "AImGui  v%s###aimgui_main", ImGui::GetVersion());
-
-    if (ImGui::Begin(title, show_chrome ? keep_running : nullptr, flags)) {
-        if (lt >= 0.999f && state->stage == UiState::StageWindow) {
-            state->last_full_pos  = ImGui::GetWindowPos();
-            state->last_full_size = ImGui::GetWindowSize();
-        }
-
-        const float island_alpha = 1.0f - (lt < 0.30f ? lt / 0.30f : 1.0f);
-        if (!l2d_active && island_alpha > 0.01f) {
-            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, island_alpha);
-            DrawIslandContent(state);
-            DrawDotContent(state, island_alpha);
-            ImGui::PopStyleVar();
-
-            if (!show_chrome && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-                if (state->stage < UiState::StageWindow) ++state->stage;
-            }
-        }
-
-        const float card_alpha = (lt <= 0.30f || lt >= 0.72f) ? 0.0f
-                               : (lt < 0.46f ? (lt - 0.30f) / 0.16f
-                                             : (lt > 0.62f ? (0.72f - lt) / 0.10f : 1.0f));
-        if (card_alpha > 0.01f) {
-            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, card_alpha);
-            DrawCardContent(state);
-            ImGui::PopStyleVar();
-
-            static bool   s_press   = false;
-            static ImVec2 s_from    = ImVec2(0, 0);
-            static bool   s_handled = false;
-            if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) {
-                s_press = true; s_handled = false; s_from = io.MousePos;
-            }
-            if (s_press && io.MouseDown[0] && !s_handled) {
-                if (io.MousePos.y - s_from.y < -46.0f) {
-                    state->stage = UiState::StageIsland;
-                    s_handled = true;
-                }
-            }
-            if (s_press && !io.MouseDown[0]) {
-                const float dy = io.MousePos.y - s_from.y;
-                const float dx = io.MousePos.x - s_from.x;
-                if (!s_handled && std::fabs(dy) < 26.0f && std::fabs(dx) < 26.0f &&
-                    state->stage < UiState::StageWindow) {
-                    ++state->stage;
-                }
-                s_press = false;
-            }
-        }
-
-        const float full_alpha = lt > 0.70f ? (lt - 0.70f) / 0.30f : 0.0f;
-        if (full_alpha > 0.01f) {
-            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, full_alpha);
-
-            Page page = (Page)state->nav_page;
-
-            DrawSidebar(page, keep_running, state);
-            state->nav_page = (int)page;
-            DrawContent(state, page);
-
-            ImGui::PopStyleVar();
-        }
+        // Evaluate after the switch. Disabling glass paints an opaque MD3
+        // surface immediately, even while the previous capture texture exists.
+        background->ChannelsSetCurrent(0);
+        ImVec4 fill = md::GetTheme().surface;
+        if (GlassLive(*state)) fill.w = state->md3_dark ? .42f : .32f;
+        background->AddRectFilled(position, ImVec2(position.x + size.x, position.y + size.y),
+                                  ImGui::GetColorU32(fill), 28.f * scale);
+        background->ChannelsMerge();
+        state->modal_open = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup);
+        if (state->modal_open) state->interaction_rect = ImVec4(0, 0, display.x, display.y);
     }
     ImGui::End();
-
-    ImGui::PopStyleVar(2);
-    if (pushed_glass_text) ImGui::PopStyleColor(pushed_glass_text);
-
-    ripple::DrawAll();
-
-    dialog::Draw(state);
-
-    state->widget_count = chrome::Drain(state->widget_rects, kMaxWidgetGlass);
-
-    if (state->exit_anim_active && g_ui.exit_anim_first_frame) {
-        const float now     = (float)ImGui::GetTime();
-        const float t01     = (now - g_ui.exit_anim_start) / 1.35f;
-        const float clamped = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
-        dissolve::Step(dt, clamped,
-                      (ImTextureID)(uintptr_t)state->scene_snapshot_id);
-        g_ui.exit_anim_first_frame = false;
-    }
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(4);
+    md::PopTheme();
 }
-
-}
+} // namespace aimgui

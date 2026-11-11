@@ -32,6 +32,7 @@ bool ListItem(const char* headline, const char* supporting = nullptr,
 // Draw on the preceding item's top-right corner without replacing its item ID.
 void Badge(int count = -1);
 
+// Left/Right select the next enabled tab (wrapping); Home/End select the ends.
 bool Tabs(const char* id, int* selected, const char* const* labels, int count,
           float width = 0, bool primary = true, const bool* enabled = nullptr);
 bool SegmentedButtons(const char* id, int* selected, const char* const* labels,
@@ -55,7 +56,8 @@ void LinearProgress(const char* id, float value, float width = 0);
 void CircularProgress(const char* id, float value, float diameter = 48);
 void Tooltip(const char* text); // Tooltip for the preceding item, with delay.
 // Caller owns open/time state. Set remainingSeconds on each new notification.
-// Zero or negative time means persistent; action activation returns true.
+// Zero or negative time means persistent; hover/keyboard focus pause countdown.
+// Action activation returns true. Narrow surfaces clip action labels.
 bool Snackbar(const char* id, const char* message, bool* open,
               float* remainingSeconds = nullptr, const char* action = nullptr,
               float width = 0, bool dismissible = true);

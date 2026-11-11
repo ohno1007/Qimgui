@@ -39,6 +39,8 @@ bool DatePicker(const char* id, Date* date, bool enabled = true);
 // First click starts a range; the second finishes it (earlier dates are sorted).
 bool DateRangePicker(const char* id, DateRange* range, bool enabled = true);
 // Clock face plus editable hour/minute fields. Time always stores 24-hour values.
+// Drag anywhere on the dial (one-minute precision); arrows adjust its focused value.
+// Releasing an hour selection advances to minutes; click the hour field to switch back.
 bool TimePicker(const char* id, Time* time, bool use24Hour = true,
                 bool enabled = true);
 

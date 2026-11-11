@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+void RunMd3SelectionTests();
+void RunMd3LayoutTests();
 namespace md = aimgui::md3;
 using Draw = std::function<void()>;
 
@@ -94,6 +96,64 @@ static void ChipAndSliderGeometry() {
         Draw range=[&]{ImVec2 start=ImGui::GetCursorScreenPos();md::RangeSlider("Endpoints",&lower,&upper,0,100,240);left=ImVec2(start.x+20*scale,start.y+44*scale);right=ImVec2(start.x+220*scale,left.y);};
         Frame(range);Frame(range);Click(range,left);assert(std::abs(lower)<.001f);Click(range,right);assert(std::abs(upper-100)<.001f);
     }
+    md3test::DestroyContext();
+}
+static void SteppedKeyboard() {
+    md3test::ConfigureContext();md::SetTheme(false);
+    float value=40;ImGuiID id=0;ImGuiWindow* window=nullptr;bool changed=false,disabled=false;
+    Draw slider=[&]{ImGui::BeginDisabled(disabled);changed=md::Slider("Steps",&value,0,100,240,10);id=ImGui::GetItemID();window=ImGui::GetCurrentWindow();ImGui::EndDisabled();};
+    Frame(slider);Frame(slider);ImGui::SetFocusID(id,window);
+    Key(slider,ImGuiKey_RightArrow);assert(value==50);
+    Key(slider,ImGuiKey_LeftArrow);assert(value==40);
+    Key(slider,ImGuiKey_End);assert(value==100);
+    Key(slider,ImGuiKey_Home);assert(value==0);
+    value=35;Frame(slider);assert(value==35&&!changed); // Focus alone must not edit caller state.
+    Key(slider,ImGuiKey_RightArrow);assert(value==40);
+    disabled=true;Key(slider,ImGuiKey_RightArrow);assert(value==40);
+    disabled=false;Frame(slider);ImGui::SetFocusID(id,window);ImGui::SetNavCursorVisibleAfterMove();
+    Key(slider,ImGuiKey_Enter);assert(GImGui->ActiveId==id);
+    Key(slider,ImGuiKey_RightArrow);assert(value==50);
+    Key(slider,ImGuiKey_LeftArrow);assert(value==40);
+    Key(slider,ImGuiKey_RightArrow);assert(value==50);
+    Key(slider,ImGuiKey_Escape);assert(value==40);
+    value=35;Frame(slider);ImGui::SetFocusID(id,window);ImGui::SetNavCursorVisibleAfterMove();
+    Key(slider,ImGuiKey_Enter);assert(GImGui->ActiveId==id);
+    Key(slider,ImGuiKey_RightArrow);assert(value==40);
+    Key(slider,ImGuiKey_Escape);assert(value==35);
+    md3test::DestroyContext();
+}
+static void SliderGamepad() {
+    md3test::ConfigureContext();md::SetTheme(false);
+    auto& io=ImGui::GetIO();io.ConfigFlags|=ImGuiConfigFlags_NavEnableGamepad;
+    io.BackendFlags|=ImGuiBackendFlags_HasGamepad;
+    float value=40;bool activate=false;
+    Draw draw=[&]{
+        if(activate) {
+            const ImGuiID id=ImGui::GetID("Gamepad");
+            ImGui::SetActiveID(id,ImGui::GetCurrentWindow());ImGui::SetFocusID(id,ImGui::GetCurrentWindow());
+            GImGui->ActiveIdSource=ImGuiInputSource_Gamepad;GImGui->NavInputSource=ImGuiInputSource_Gamepad;activate=false;
+        }
+        md::Slider("Gamepad",&value,0,100,240,100);
+    };
+    Frame(draw);Frame(draw);activate=true;Frame(draw);
+    Key(draw,ImGuiKey_GamepadDpadRight);assert(value==41);
+    Key(draw,ImGuiKey_GamepadDpadLeft);assert(value==40);
+    md3test::DestroyContext();
+}
+static void RangeInteractions() {
+    md3test::ConfigureContext();md::SetTheme(false);
+    float lower=50,upper=50;ImVec2 left,right;ImGuiID lower_id=0,upper_id=0;ImGuiWindow* window=nullptr;
+    Draw range=[&]{
+        ImVec2 start=ImGui::GetCursorScreenPos();
+        window=ImGui::GetCurrentWindow();ImGui::PushID("Range");lower_id=window->GetID("lower");upper_id=window->GetID("upper");ImGui::PopID();
+        md::RangeSlider("Range",&lower,&upper,0,100,240,10);
+        left=ImVec2(start.x+20,start.y+44);right=ImVec2(start.x+220,left.y);
+    };
+    Frame(range);Frame(range);Click(range,left);assert(lower==0&&upper==50);
+    lower=upper=50;Frame(range);Click(range,right);assert(lower==50&&upper==100);
+    lower=35;upper=75;Frame(range);ImGui::SetFocusID(lower_id,window);
+    Key(range,ImGuiKey_RightArrow);assert(lower==40&&upper==75);
+    ImGui::SetFocusID(upper_id,window);Key(range,ImGuiKey_LeftArrow);assert(upper==70);
     md3test::DestroyContext();
 }
 static void SelectFocusAppearance() {
@@ -279,9 +339,14 @@ int main(int argc,char** argv) {
     if(argc>=3&&std::strcmp(argv[1],"--capture")==0) {
         Capture(argv[2],argc>3?argv[3]:nullptr,argc>4?argv[4]:nullptr);std::puts("PASS: native draw captures exported");return 0;
     }
+    RunMd3SelectionTests();
+    RunMd3LayoutTests();
     Dates();std::puts("PASS: Gregorian date limits and leap-year boundaries");
     Controls();std::puts("PASS: mouse controls, disabled Home/End, range ordering and text input");
     ChipAndSliderGeometry();std::puts("PASS: chip close targets and disabled dimensions; slider endpoints at three densities");
+    SteppedKeyboard();std::puts("PASS: stepped slider keyboard increments, endpoints and passive focus");
+    SliderGamepad();std::puts("PASS: stepped slider preserves gamepad navigation");
+    RangeInteractions();std::puts("PASS: coincident range thumbs and off-grid keyboard ticks");
     SelectFocusAppearance();std::puts("PASS: filled select uses visible keyboard focus, not automatic initial NavId");
     ExtraControls();std::puts("PASS: carousel single-step keyboard navigation and app bar actions");
     Ripples();std::puts("PASS: expanding ripples stay inside rounded bounds and disabled states emit none");

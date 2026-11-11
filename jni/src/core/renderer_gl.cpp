@@ -2,7 +2,6 @@
 
 #include "bloom_gl.h"
 #include "glass_gl.h"
-#include "text_outline.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -79,7 +78,12 @@ public:
 
     void EndFrame() override {
         ImGui::Render();
-        OutlineText(ImGui::GetDrawData(), kTextOutlineRadius);
+        ImDrawData* draw = ImGui::GetDrawData();
+        if (!draw || draw->DisplaySize.x <= 0 || draw->DisplaySize.y <= 0) return;
+        // UI layout uses the actual screen; drawing maps it to the top-left
+        // of the square native buffer retained across rotations.
+        const ImVec2 layout_size = draw->DisplaySize;
+        draw->DisplaySize = ImVec2(static_cast<float>(m_Width), static_cast<float>(m_Height));
         if (m_Bloom.Ready()) {
             if (m_ScenePreDraw) {
 
@@ -93,7 +97,7 @@ public:
             m_Bloom.BeginScene();
             DrawGlass();
             DrawWidgetGlass();
-            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            ImGui_ImplOpenGL3_RenderDrawData(draw);
             m_Bloom.EndSceneAndComposite();
         } else {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -102,8 +106,9 @@ public:
             if (m_ScenePreDraw) m_ScenePreDraw();
             DrawGlass();
             DrawWidgetGlass();
-            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            ImGui_ImplOpenGL3_RenderDrawData(draw);
         }
+        draw->DisplaySize = layout_size;
         eglSwapBuffers(m_Display, m_Surface);
     }
 
@@ -147,15 +152,10 @@ public:
     }
 
     void Shutdown() override {
+        ReleaseHardwareBuffers();
         m_Bloom.Shutdown();
         m_Glass.Shutdown();
         if (m_CaptureTex) { glDeleteTextures(1, &m_CaptureTex); m_CaptureTex = 0; }
-        static auto destroyImg = (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
-        for (auto& e : m_AhbCache) {
-            if (e.tex) glDeleteTextures(1, &e.tex);
-            if (destroyImg && e.img != EGL_NO_IMAGE_KHR) destroyImg(m_Display, e.img);
-        }
-        m_AhbCache.clear();
         m_BackdropTex = 0;
         if (m_ImGuiReady) ImGui_ImplOpenGL3_Shutdown();
         m_ImGuiReady = false;
@@ -236,7 +236,25 @@ public:
         return (unsigned long long)e.tex;
     }
 
+    void ReleaseHardwareBuffers() override {
+        if (!m_AhbCache.empty()) {
+            glFinish();
+            static auto destroyImg = (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
+            for (const auto& e : m_AhbCache) {
+                // m_BackdropTex may also refer to a standalone CPU image;
+                // this method only releases textures imported from capture.
+                if (m_BackdropTex == e.tex) m_BackdropTex = 0;
+                if (e.tex) glDeleteTextures(1, &e.tex);
+                if (destroyImg && e.img != EGL_NO_IMAGE_KHR) destroyImg(m_Display, e.img);
+            }
+            m_AhbCache.clear();
+        }
+        m_GlassRects = nullptr;
+        m_GlassCount = 0;
+    }
+
     unsigned long long SetBackdropImage(const void* rgba, int w, int h) override {
+        // Legacy static-image API; the MD3 main app only uses AHB capture.
         if (!rgba || w <= 0 || h <= 0) return 0;
         if (m_BackdropTex == 0) {
             glGenTextures(1, &m_BackdropTex);

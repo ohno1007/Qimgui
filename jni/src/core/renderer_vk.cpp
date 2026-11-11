@@ -2,7 +2,6 @@
 
 #include "bloom_vk.h"
 #include "glass_vk.h"
-#include "text_outline.h"
 
 #include <android/hardware_buffer.h>
 #include "vulkan_wrapper.h"
@@ -104,9 +103,13 @@ public:
     void EndFrame() override {
         ImGui::Render();
         ImDrawData* draw = ImGui::GetDrawData();
-        OutlineText(draw, kTextOutlineRadius);
         if (!draw || draw->DisplaySize.x <= 0 || draw->DisplaySize.y <= 0) return;
+        // Keep dialog/layout bounds on the real display while the renderer
+        // maps vertices to the square native surface used during rotation.
+        const ImVec2 layout_size = draw->DisplaySize;
+        draw->DisplaySize = ImVec2(static_cast<float>(m_Width), static_cast<float>(m_Height));
         Submit(draw);
+        draw->DisplaySize = layout_size;
     }
 
     void Shutdown() override {
@@ -118,6 +121,7 @@ public:
             return;
         }
         vkDeviceWaitIdle(m_Device);
+        ReleaseHardwareBuffers();
 #ifdef AIMGUI_LIVE2D
         DestroyLive2DResources();
 #endif
@@ -246,6 +250,25 @@ public:
         m_AhbCache.push_back(e);
         m_ScreenView = e.view;
         return (unsigned long long)(uintptr_t)e.ds;
+    }
+
+    void ReleaseHardwareBuffers() override {
+        if (m_Device != VK_NULL_HANDLE && !m_AhbCache.empty()) {
+            vkDeviceWaitIdle(m_Device);
+            // Forget the old handle even if a later import reuses its value.
+            m_Glass.SetScreenImage(VK_NULL_HANDLE);
+            for (const auto& e : m_AhbCache) {
+                if (e.ds && m_ImGuiReady) ImGui_ImplVulkan_RemoveTexture(e.ds);
+                if (e.view) vkDestroyImageView(m_Device, e.view, nullptr);
+                if (e.image) vkDestroyImage(m_Device, e.image, nullptr);
+                if (e.mem) vkFreeMemory(m_Device, e.mem, nullptr);
+            }
+        }
+        m_AhbCache.clear();
+        m_ScreenView = VK_NULL_HANDLE;
+        m_Glass.SetScreenImage(VK_NULL_HANDLE);
+        m_GlassRects = nullptr;
+        m_GlassCount = 0;
     }
 
     void SetScenePreDraw(void (*fn)()) override { m_ScenePreDraw = fn; }

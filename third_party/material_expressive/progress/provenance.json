@@ -1,0 +1,26 @@
+{
+  "androidx_commit": "587b8da057e3dfa7fb908e4b62b1bb84271eb20d",
+  "license": "Apache-2.0",
+  "sources": [
+    {
+      "file": "WavyProgressIndicator.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/WavyProgressIndicator.kt",
+      "sha256": "b55f9a8b19de9cea573eb179c7d2a9a1e0a2de867d710cd1c21bce4a6e6e6317"
+    },
+    {
+      "file": "LinearProgressIndicatorTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/LinearProgressIndicatorTokens.kt",
+      "sha256": "43c6931eb19698ce8bc1b520882bae4d08e1bb1f7228a054664fac4090858f71"
+    },
+    {
+      "file": "CircularProgressIndicatorTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/CircularProgressIndicatorTokens.kt",
+      "sha256": "19fa92975b296b5bc0a3f22ab533619c67e9747cd665e239eb4f88fcb98c013c"
+    },
+    {
+      "file": "ProgressIndicatorTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/ProgressIndicatorTokens.kt",
+      "sha256": "6e576f0947414aee1bcf35bd291c52facc5dbcedf8ab80947aea14dd05ab2bdc"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+AndroidX MaterialShapes geometry
+Copyright 2024 The Android Open Source Project
+
+This directory includes source snapshots and derived cubic geometry from
+AndroidX, distributed under the Apache License, Version 2.0. See LICENSE.
+Individual upstream files retain their original copyright notices.
+
+The geometry was generated for Qimgui from the unmodified MaterialShapes class
+body using AndroidX graphics-shapes-desktop 1.1.0. The exporter supplies minimal
+Compose Offset and 2D Matrix adapters derived from the pinned AndroidX sources.
+The native C++ renderer and exporter integration are Qimgui additions.
+
+Exact source URLs, commit and SHA-256 digests are in provenance.json.
+Reproduction dependency URLs and SHA-256 digests are in
+../../scripts/material_shapes/dependencies.lock.json. Those JVM dependencies
+are development tools only and are not shipped in the native application.

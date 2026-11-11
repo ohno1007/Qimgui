@@ -304,6 +304,46 @@ bool TimePicker(const char* id,Time* time,bool use24Hour,bool enabled) {
         if(Action("PM",ImVec2(96,40),value.hour>=12)) { value.hour=value.hour%12+12; interacted=true; }
     }
     const ImVec2 origin=ImGui::GetCursorScreenPos(); const float face=S(256),radius=S(108); const ImVec2 center(origin.x+face/2,origin.y+face/2);
+    // The entire face is one focusable control. A drag may pass between the
+    // printed five-minute labels, and 24-hour selection distinguishes rings.
+    ImGui::InvisibleButton("##clock",ImVec2(face,face),ImGuiButtonFlags_EnableNav);
+    const ImGuiID clockId=ImGui::GetItemID();
+    const bool disabled=detail::Disabled();
+    if(!disabled) {
+        if(ImGui::IsItemActive()&&GImGui->ActiveIdSource==ImGuiInputSource_Mouse) {
+            const ImVec2 mouse=ImGui::GetIO().MousePos;
+            const float dx=mouse.x-center.x,dy=mouse.y-center.y;
+            // Keep the previous value close to the center where angle is unstable.
+            if(std::hypot(dx,dy)>S(8)) {
+                float turn=std::atan2(dy,dx)+3.14159265f*.5f;
+                if(turn<0) turn+=2*3.14159265f;
+                const int ticks=minutes?60:12;
+                const int tick=static_cast<int>(std::lround(turn*ticks/(2*3.14159265f)))%ticks;
+                if(minutes) value.minute=tick;
+                else if(use24Hour) {
+                    const bool inner=std::hypot(dx,dy)<S(90);
+                    value.hour=inner?(tick==0?0:tick+12):(tick==0?12:tick);
+                } else value.hour=tick+(value.hour>=12?12:0);
+                interacted=true;
+            }
+        }
+        if(ImGui::IsItemFocused()&&(GImGui->ActiveId==0||GImGui->ActiveId==clockId)) {
+            const ImGuiKey keys[]={ImGuiKey_LeftArrow,ImGuiKey_DownArrow,ImGuiKey_RightArrow,ImGuiKey_UpArrow};
+            for(int i=0;i<4;++i) {
+                ImGui::SetKeyOwner(keys[i],clockId);
+                if(ImGui::IsKeyPressed(keys[i],ImGuiInputFlags_Repeat,clockId)) {
+                    const int delta=i<2?-1:1;
+                    if(minutes) value.minute=(value.minute+delta+60)%60;
+                    else if(use24Hour) value.hour=(value.hour+delta+24)%24;
+                    else value.hour=(value.hour%12+delta+12)%12+(value.hour>=12?12:0);
+                    interacted=true;
+                }
+            }
+            if(GImGui->ActiveId==clockId) GImGui->ActiveIdUsingNavDirMask=0xf;
+        }
+        // Advance only after releasing the pointer so hour drags stay in hour mode.
+        if(!minutes&&ImGui::IsItemDeactivated()&&ImGui::IsMouseReleased(0)) minutes=true;
+    }
     auto* draw=ImGui::GetWindowDrawList(); draw->AddCircleFilled(center,face/2,C(t.surfaceContainerHigh),64);
     const bool drawMinutes=minutes;
     const int count=drawMinutes?12:(use24Hour?24:12),active=minutes?value.minute:(use24Hour?value.hour:value.hour%12);
@@ -311,19 +351,20 @@ bool TimePicker(const char* id,Time* time,bool use24Hour,bool enabled) {
     const float handRadius=!minutes&&use24Hour&&(value.hour==0||value.hour>12)?S(72):radius;
     const ImVec2 hand(center.x+std::cos(angle)*handRadius,center.y+std::sin(angle)*handRadius);
     draw->AddLine(center,hand,C(t.primary),S(2)); draw->AddCircleFilled(center,S(4),C(t.primary));
+    draw->AddCircleFilled(hand,S(18),C(t.primary));
     for(int i=0;i<count;++i) {
         const int number=drawMinutes?i*5:(use24Hour?i:((i+11)%12+1)),clockIndex=drawMinutes?i:use24Hour?i%12:number%12;
         const float a=(clockIndex*30.0f-90)*3.14159265f/180,r=!drawMinutes&&use24Hour&&(number==0||number>12)?S(72):radius;
-        ImGui::SetCursorScreenPos(ImVec2(center.x+std::cos(a)*r-S(18),center.y+std::sin(a)*r-S(18)));
-        char text[24]; std::snprintf(text,sizeof(text),"%02d##clock%d",number,i);
+        const ImVec2 p(center.x+std::cos(a)*r-S(18),center.y+std::sin(a)*r-S(18));
+        char text[8]; std::snprintf(text,sizeof(text),"%02d",number);
         const bool selected=drawMinutes?value.minute==number:use24Hour?value.hour==number:value.hour%12==number%12;
-        if(Action(text,ImVec2(36,36),selected)) {
-            if(drawMinutes) value.minute=number;
-            else { value.hour=use24Hour?number:number%12+(value.hour>=12?12:0); minutes=true; }
-            interacted=true;
-        }
+        Center(p,ImVec2(p.x+S(36),p.y+S(36)),text,selected?t.onPrimary:t.onSurface);
     }
-    ImGui::SetCursorScreenPos(origin); ImGui::Dummy(ImVec2(face,face)); storage->SetBool(modeId,minutes); ImGui::EndDisabled(); ImGui::PopStyleVar(); ImGui::PopFont(); ImGui::PopID();
+    // Unlabelled minute positions still expose a visible selected dot.
+    if(minutes&&value.minute%5) draw->AddCircleFilled(hand,S(3),C(t.onPrimary));
+    if(ImGui::IsItemFocused()&&GImGui->NavCursorVisible)
+        draw->AddCircle(center,face/2,C(t.primary),64,S(2));
+    storage->SetBool(modeId,minutes); ImGui::EndDisabled(); ImGui::PopStyleVar(); ImGui::PopFont(); ImGui::PopID();
     if(interacted&&(time->hour!=value.hour||time->minute!=value.minute)) { *time=value; return true; } return false;
 }
 }

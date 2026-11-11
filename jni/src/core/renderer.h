@@ -51,6 +51,10 @@ public:
         return 0;
     }
 
+    // Finish GPU work and forget imported capture buffers before their reader
+    // is stopped/recreated. Repeated glass toggles must not exhaust the cache.
+    virtual void ReleaseHardwareBuffers() {}
+
 #ifdef AIMGUI_LIVE2D
 
     virtual const Live2DVkContext* GetLive2DVkContext() { return nullptr; }

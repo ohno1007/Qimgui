@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/QimguiMD3Targets.cmake")
+set(QimguiMD3_MD3_FOUND TRUE)
+set(QimguiMD3_ImGui_FOUND TRUE)
+if(TARGET Qimgui::MD3Showcase)
+    set(QimguiMD3_Showcase_FOUND TRUE)
+endif()
+if(TARGET Qimgui::AndroidOverlay)
+    set(QimguiMD3_AndroidOverlay_FOUND TRUE)
+endif()
+check_required_components(QimguiMD3)

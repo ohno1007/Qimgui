@@ -1,5 +1,8 @@
 #pragma once
 
+struct ASensorEventQueue;
+struct ALooper;
+
 namespace aimgui {
 
 class SensorTilt {
@@ -16,8 +19,8 @@ public:
 
 private:
     void* m_Lib   = nullptr;
-    void* m_Queue = nullptr;
-    void* m_Looper = nullptr;
+    ASensorEventQueue* m_Queue = nullptr;
+    ALooper* m_Looper = nullptr;
     bool  m_Ok = false;
     float m_X = 0.0f, m_Y = 0.0f;
 };

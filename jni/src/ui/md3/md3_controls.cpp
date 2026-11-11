@@ -1,4 +1,5 @@
 #include "md3_internal.h"
+#include "ui/md3_icons.h"
 #include <cstdio>
 namespace aimgui::md3 {
 using namespace detail;
@@ -25,6 +26,10 @@ void Background(const ItemState &s, ImVec4 bg, ImVec4 fg, float r, bool outline 
 void Mark(const ItemState &s) {
     if (s.pressed)
         ImGui::MarkItemEdited(s.id);
+}
+void CenterIcon(const ImRect& rect, const char* icon, ImVec4 color, float size) {
+    if (!icons::DrawSymbol(ImGui::GetWindowDrawList(), rect.GetCenter(), Dp(size), Color(color), icon))
+        CenterText(rect, icon, color, size);
 }
 } // namespace
 bool Button(const char *label, ButtonStyle style, ImVec2 size, const char *icon) {
@@ -55,7 +60,9 @@ bool Button(const char *label, ButtonStyle style, ImVec2 size, const char *icon)
     Background(s, bg, fg, Dp(20), style == ButtonStyle::Outlined, style == ButtonStyle::Elevated);
     float x = (s.rect.Min.x + s.rect.Max.x - text.x - iw) * .5f;
     if (icon) {
-        Text(ImVec2(x, s.rect.GetCenter().y - Dp(9)), icon, fg, 18);
+        if (!icons::DrawSymbol(ImGui::GetWindowDrawList(),
+                               ImVec2(x + Dp(9), s.rect.GetCenter().y), Dp(18), Color(fg), icon))
+            Text(ImVec2(x, s.rect.GetCenter().y - Dp(9)), icon, fg, 18);
         x += iw;
     }
     Text(ImVec2(x, s.rect.GetCenter().y - text.y * .5f), label, fg, 14, true);
@@ -91,7 +98,7 @@ bool IconButton(const char *id, const char *icon, IconButtonStyle style, bool *s
     ItemState visual = s;
     visual.rect.Expand(-Dp(4));
     Background(visual, bg, fg, Dp(20), style == IconButtonStyle::Outlined);
-    CenterText(visual.rect, icon, fg, 24);
+    CenterIcon(visual.rect, icon, fg, 24);
     Mark(s);
     return s.pressed;
 }
@@ -111,10 +118,10 @@ bool Fab(const char *id, const char *icon, FabSize size, const char *label) {
            fg = Disabled() ? Faded(t.onSurface, .38f) : t.onPrimaryContainer;
     Background(s, bg, fg, Dp(r), false, true);
     if (label) {
-        CenterText(ImRect(s.rect.Min, ImVec2(s.rect.Min.x + Dp(48), s.rect.Max.y)), icon, fg, 24);
+        CenterIcon(ImRect(s.rect.Min, ImVec2(s.rect.Min.x + Dp(48), s.rect.Max.y)), icon, fg, 24);
         Text(ImVec2(s.rect.Min.x + Dp(48), s.rect.GetCenter().y - Dp(7)), label, fg, 14, true);
     } else
-        CenterText(s.rect, icon, fg, size == FabSize::Large ? 36 : 24);
+        CenterIcon(s.rect, icon, fg, size == FabSize::Large ? 36 : 24);
     Mark(s);
     return s.pressed;
 }
@@ -285,17 +292,33 @@ float Snap(float v, float lo, float hi, int steps) {
         v = lo + std::round((v - lo) / (hi - lo) * steps) * (hi - lo) / steps;
     return std::clamp(v, lo, hi);
 }
+// Move to the next tick in the requested direction, even for off-grid input.
+float NextTick(float value, float lo, float hi, int steps, int direction) {
+    if (hi <= lo)
+        return lo;
+    const float tick = Fraction(value, lo, hi) * steps;
+    const float next = direction > 0 ? std::floor(tick + .00001f) + 1
+                                    : std::ceil(tick - .00001f) - 1;
+    return lo + std::clamp(next, 0.f, float(steps)) * (hi - lo) / steps;
+}
 bool SliderKeys(ImGuiID id, float *value, float lo, float hi, int steps) {
     if (Disabled() || GImGui->NavId != id)
         return false;
     float old = *value;
     ImGui::SetKeyOwner(ImGuiKey_Home, id);
     ImGui::SetKeyOwner(ImGuiKey_End, id);
+    if (steps > 0) {
+        ImGui::SetKeyOwner(ImGuiKey_LeftArrow, id);
+        ImGui::SetKeyOwner(ImGuiKey_RightArrow, id);
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, ImGuiInputFlags_Repeat, id))
+            *value = NextTick(*value, lo, hi, steps, -1);
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, ImGuiInputFlags_Repeat, id))
+            *value = NextTick(*value, lo, hi, steps, 1);
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Home, ImGuiInputFlags_None, id))
         *value = lo;
     if (ImGui::IsKeyPressed(ImGuiKey_End, ImGuiInputFlags_None, id))
         *value = hi;
-    *value = Snap(*value, lo, hi, steps);
     return *value != old;
 }
 void DrawTrack(const ImRect &r, float low, float high, bool disabled, int steps) {
@@ -352,6 +375,8 @@ bool Slider(const char *label, float *value, float minimum, float maximum, float
             *value = minimum;
         bool click = hovered && ImGui::IsMouseClicked(0, ImGuiInputFlags_None, id);
         if (click || GImGui->NavActivateId == id) {
+            if (GImGui->ActiveId != id)
+                std::memcpy(&GImGui->ActiveIdValueOnActivation, value, sizeof(*value));
             if (click)
                 ImGui::SetKeyOwner(ImGuiKey_MouseLeft, id);
             ImGui::SetActiveID(id, w);
@@ -372,9 +397,17 @@ bool Slider(const char *label, float *value, float minimum, float maximum, float
                                         ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat,
                                         &grab);
         ImGui::PopStyleVar();
-        if (changed)
-            *value = Snap(*value, minimum, maximum, steps);
-        changed = (*value != old) || SliderKeys(id, value, minimum, maximum, steps);
+        // ImGui's continuous navigation delta can be smaller than one tick.
+        // Use explicit tick navigation instead of repeatedly rounding it away.
+        const bool tick_key = GImGui->NavId == id &&
+            (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, ImGuiInputFlags_Repeat, id) ||
+             ImGui::IsKeyPressed(ImGuiKey_RightArrow, ImGuiInputFlags_Repeat, id));
+        if (steps > 0 && tick_key)
+            *value = old;
+        else if (changed && GImGui->ActiveId == id)
+            *value = Snap(*value, minimum, maximum, steps); // Keep Escape's exact restored value.
+        const bool key_changed = SliderKeys(id, value, minimum, maximum, steps);
+        changed = (*value != old) || key_changed;
     }
     float ratio = Fraction(std::isfinite(*value) ? *value : minimum, minimum, maximum);
     DrawTrack(frame, 0, ratio, disabled, steps);
@@ -409,10 +442,12 @@ bool RangeSlider(const char *label, float *lower, float *upper, float minimum, f
           u = Fraction(std::isfinite(*upper) ? *upper : maximum, minimum, maximum);
     float x0 = frame.Min.x + Dp(20), span = frame.GetWidth() - Dp(40);
     bool disabled = Disabled(), changed = false;
-    int nearest = std::abs(ImGui::GetIO().MousePos.x - (x0 + l * span)) <
-                          std::abs(ImGui::GetIO().MousePos.x - (x0 + u * span))
-                      ? 0
-                      : 1;
+    const float mouse_x = ImGui::GetIO().MousePos.x;
+    const float lower_distance = std::abs(mouse_x - (x0 + l * span));
+    const float upper_distance = std::abs(mouse_x - (x0 + u * span));
+    // Coincident thumbs must be separable in either direction by pointer.
+    int nearest = lower_distance == upper_distance ? (mouse_x < x0 + l * span ? 0 : 1)
+                                                   : (lower_distance < upper_distance ? 0 : 1);
     ImGuiID ids[] = {w->GetID("lower"), w->GetID("upper")};
     bool hover[2] = {}, held[2] = {};
     for (int i = 0; i < 2; ++i) {
@@ -442,9 +477,9 @@ bool RangeSlider(const char *label, float *lower, float *upper, float minimum, f
                 ImGui::SetKeyOwner(ImGuiKey_LeftArrow, ids[i]);
                 ImGui::SetKeyOwner(ImGuiKey_RightArrow, ids[i]);
                 if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, ImGuiInputFlags_Repeat, ids[i]))
-                    *v -= step;
+                    *v = steps > 0 ? NextTick(*v, minimum, maximum, steps, -1) : *v - step;
                 if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, ImGuiInputFlags_Repeat, ids[i]))
-                    *v += step;
+                    *v = steps > 0 ? NextTick(*v, minimum, maximum, steps, 1) : *v + step;
                 SliderKeys(ids[i], v, lo, hi, 0);
             }
             if (!std::isfinite(*v))

@@ -10,13 +10,15 @@ if [[ -f "$build/compiler" ]] && ! cmp -s "$build/compiler" "$build/compiler.new
   rm -f "$build"/objects/*.o
 fi
 mv "$build/compiler.new" "$build/compiler"
-sources=(tests/md3_test.cpp jni/src/ui/md3/*.cpp third_party/imgui/{imgui,imgui_draw,imgui_tables,imgui_widgets}.cpp)
+sources=(tests/md3_test.cpp tests/md3_selection_test.cpp tests/md3_layout_test.cpp jni/src/ui/md3/*.cpp third_party/imgui/{imgui,imgui_draw,imgui_tables,imgui_widgets}.cpp)
 objects=()
 for source in "${sources[@]}"; do
   object="$build/objects/$(basename "${source%.cpp}").o"
   headers=(config third_party/imgui)
   if [[ "$source" != third_party/imgui/* ]]; then headers+=(jni/include/ui jni/src/ui/md3 tests); fi
-  if [[ ! -f "$object" || "$source" -nt "$object" ]] || [[ -n "$(find "${headers[@]}" -name '*.h' -newer "$object" -print -quit 2>/dev/null)" ]]; then
+  if [[ ! -f "$object" || "$source" -nt "$object" ]] ||
+     [[ "$source" == */md3_shapes.cpp && third_party/material_shapes/material_shapes_data.inc -nt "$object" ]] ||
+     [[ -n "$(find "${headers[@]}" -name '*.h' -newer "$object" -print -quit 2>/dev/null)" ]]; then
     "${CXX:-g++}" "${flags[@]}" -c "$source" -o "$object"
   fi
   objects+=("$object")

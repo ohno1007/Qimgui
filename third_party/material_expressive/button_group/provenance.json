@@ -1,0 +1,26 @@
+{
+  "androidx_commit": "587b8da057e3dfa7fb908e4b62b1bb84271eb20d",
+  "license": "Apache-2.0",
+  "sources": [
+    {
+      "file": "ButtonGroup.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/ButtonGroup.kt",
+      "sha256": "4495eeecf9cc2efeea09d62bbc40bfe4287b4b17bce6f5c098b45f303234b799"
+    },
+    {
+      "file": "ConnectedButtonGroupSmallTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/ConnectedButtonGroupSmallTokens.kt",
+      "sha256": "f3d275b1d47624356f8794a6cb3fbb1dc8574e5237d5295f3403475f88281281"
+    },
+    {
+      "file": "ShapeTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/ShapeTokens.kt",
+      "sha256": "02178111f81c7f03135cc7157040fa903180e212fd52b8f686b4304080efb5a3"
+    },
+    {
+      "file": "ToggleButton.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/ToggleButton.kt",
+      "sha256": "b43d58cf4d2e69098bc462dfbe444648f5fab1e414ffd1924116da505595f055"
+    }
+  ]
+}

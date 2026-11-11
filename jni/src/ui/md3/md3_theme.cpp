@@ -1,4 +1,5 @@
 #include "md3_internal.h"
+#include "ui/md3_motion.h"
 #include <array>
 namespace aimgui::md3 {
 namespace {
@@ -55,6 +56,7 @@ struct Ripple {
 struct Context {
     ImGuiContext *owner = nullptr;
     Theme theme = Palette(false, 1);
+    MotionSettings motion;
     ImFont *body = nullptr;
     ImFont *label = nullptr;
     std::array<Animation, 256> animations{};
@@ -92,6 +94,15 @@ Context &Current() {
 } // namespace
 Theme &GetTheme() {
     return Current().theme;
+}
+void SetMotionSettings(const MotionSettings& settings) {
+    auto& motion = Current().motion;
+    motion.reduced = settings.reduced;
+    motion.durationScale = std::isfinite(settings.durationScale)
+        ? std::clamp(settings.durationScale, 0.f, 10.f) : 1.f;
+}
+const MotionSettings& GetMotionSettings() {
+    return Current().motion;
 }
 void SetTheme(bool dark, float scale) {
     Current().theme = Palette(dark, scale);
@@ -170,6 +181,7 @@ ItemState Item(const char *label, ImVec2 size, ImGuiButtonFlags flags) {
 }
 float Animate(ImGuiID id, int channel, float target, float rate) {
     auto &states = Current().animations;
+    const auto& motion = Current().motion;
     Animation *choice = &states[0];
     int frame = ImGui::GetFrameCount();
     for (auto &s : states) {
@@ -180,13 +192,15 @@ float Animate(ImGuiID id, int channel, float target, float rate) {
         if (s.frame < choice->frame)
             choice = &s;
     }
-    if (choice->id != id || choice->channel != channel || choice->frame < frame - 2) {
+    if (motion.reduced || motion.durationScale <= 0.f ||
+        choice->id != id || choice->channel != channel || choice->frame < frame - 2) {
         choice->id = id;
         choice->channel = channel;
         choice->value = target;
     } else if (choice->frame != frame)
         choice->value +=
-            (target - choice->value) * (1.f - std::exp(-rate * ImGui::GetIO().DeltaTime));
+            (target - choice->value) * (1.f - std::exp(-rate * ImGui::GetIO().DeltaTime /
+                                                     std::max(.01f, motion.durationScale)));
     choice->frame = frame;
     return choice->value;
 }
@@ -264,18 +278,21 @@ int ClipPolygon(Polygon &subject, int count, const Polygon &outline, int outline
 void RippleLayer(ImGuiID id, const ImRect &rect, ImVec4 color, float radius, bool held,
                  bool enabled, ImDrawFlags corners) {
     auto &pulses = Current().ripples;
+    const auto& motion = Current().motion;
     Ripple *pulse = nullptr;
     for (auto &p : pulses)
         if (p.id == id) {
             pulse = &p;
             break;
         }
-    if (!enabled || Disabled() || id == 0 || rect.GetWidth() <= 0 || rect.GetHeight() <= 0) {
+    if (!enabled || Disabled() || motion.reduced || motion.durationScale <= 0.f ||
+        id == 0 || rect.GetWidth() <= 0 || rect.GetHeight() <= 0) {
         if (pulse)
             pulse->id = 0;
         return;
     }
     const int frame = ImGui::GetFrameCount();
+    const double duration = std::max(.01f, motion.durationScale);
     if (pulse && pulse->frame < frame - 1) {
         pulse->id = 0;
         pulse = nullptr;
@@ -310,14 +327,14 @@ void RippleLayer(ImGuiID id, const ImRect &rect, ImVec4 color, float radius, boo
         return;
     pulse->frame = frame;
     if (!held && pulse->released < 0)
-        pulse->released = std::max(now, pulse->started + .18);
+        pulse->released = std::max(now, pulse->started + .18 * duration);
     const float fade =
-        pulse->released < 0 ? 1.f : 1.f - float(std::max(0., now - pulse->released) / .20);
+        pulse->released < 0 ? 1.f : 1.f - float(std::max(0., now - pulse->released) / (.20 * duration));
     if (fade <= 0) {
         pulse->id = 0;
         return;
     }
-    const float growth = std::clamp(float((now - pulse->started) / .30), 0.f, 1.f);
+    const float growth = std::clamp(float((now - pulse->started) / (.30 * duration)), 0.f, 1.f);
     const float eased = 1.f - std::pow(1.f - growth, 3.f);
     const ImVec2 origin(rect.Min.x + rect.GetWidth() * pulse->origin.x,
                         rect.Min.y + rect.GetHeight() * pulse->origin.y);

@@ -13,6 +13,7 @@
 
 #include "imgui.h"
 #include "TouchHelperA.h"
+#include "touch_slots.h"
 #include "Utils.h"
 
 #define maxE 5
@@ -199,31 +200,8 @@ namespace Touch {
                 input_event &ie = inputEvent[j];
                 if (blockGrabbed.load() && device.pendN < (int)(sizeof(device.pend) / sizeof(device.pend[0])))
                     device.pend[device.pendN++] = ie;
-                if (ie.type == EV_ABS) {
-                    if (ie.code == ABS_MT_SLOT) {
-                        latest = ie.value;
-                        continue;
-                    }
-                    if (ie.code == ABS_MT_TRACKING_ID) {
-                        if (ie.value == -1) {
-                            device.Finger[latest].isDown = false;
-                        } else {
-                            device.Finger[latest].id = (i * 2 + 1) * maxF + latest;
-                            device.Finger[latest].isDown = true;
-                        }
-                        continue;
-                    }
-                    if (ie.code == ABS_MT_POSITION_X) {
-                        device.Finger[latest].id = (i * 2 + 1) * maxF + latest;
-                        device.Finger[latest].pos.x = (float) ie.value * device.S2TX;
-                        continue;
-                    }
-                    if (ie.code == ABS_MT_POSITION_Y) {
-                        device.Finger[latest].id = (i * 2 + 1) * maxF + latest;
-                        device.Finger[latest].pos.y = (float) ie.value * device.S2TY;
-                        continue;
-                    }
-                }
+                if (ie.type == EV_ABS && detail::ApplySlotEvent(device, i, latest, ie.code, ie.value))
+                    continue;
                 if (ie.code == SYN_REPORT) {
 
                     if (blockGrabbed.load()) {
@@ -245,10 +223,11 @@ namespace Touch {
                                   sizeof(input_event) * (size_t)device.pendN);
                         device.pendN = 0;
                     }
-                    if (ImGui::GetCurrentContext() != nullptr) {
+                    touchObj* finger = detail::CurrentFinger(device, latest);
+                    if (finger && ImGui::GetCurrentContext() != nullptr) {
                         ImGuiIO &io = ImGui::GetIO();
-                        if (device.Finger[latest].isDown) {
-                            auto pos = Touch2Screen(device.Finger[latest].pos);
+                        if (finger->isDown) {
+                            auto pos = Touch2Screen(finger->pos);
                             io.MousePos = ImVec2(pos.x, pos.y);
                             io.MouseDown[0] = true;
                         } else {

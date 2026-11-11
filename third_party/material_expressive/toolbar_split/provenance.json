@@ -1,0 +1,41 @@
+{
+  "androidx_commit": "587b8da057e3dfa7fb908e4b62b1bb84271eb20d",
+  "license": "Apache-2.0",
+  "sources": [
+    {
+      "path": "FloatingToolbar.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/FloatingToolbar.kt",
+      "sha256": "7c014d29baef68f505a624b26e4c264bce2e7f72726d29dfcc09869c81142598"
+    },
+    {
+      "path": "SplitButton.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/SplitButton.kt",
+      "sha256": "30df4269cd5dbff9490dd44257648ea7b56447c28fdf71f8a66d463ea96990ca"
+    },
+    {
+      "path": "FloatingToolbarTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/FloatingToolbarTokens.kt",
+      "sha256": "1c1485693112cdf4012fa78f4d44f48d3c1c0fd72aa9e3f727f54160b4c3271f"
+    },
+    {
+      "path": "SplitButtonSmallTokens.kt",
+      "url": "https://raw.githubusercontent.com/androidx/androidx/587b8da057e3dfa7fb908e4b62b1bb84271eb20d/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/SplitButtonSmallTokens.kt",
+      "sha256": "f7e378dd30c7bc0e2a15939f48805ee372544fca4fa01f0baa7636456e1f0a7a"
+    }
+  ],
+  "native_tokens": {
+    "toolbar": {
+      "height_dp": 64,
+      "item_dp": 48,
+      "end_padding_dp": 8,
+      "spacing_dp": 4
+    },
+    "small_split_button": {
+      "height_dp": 40,
+      "spacing_dp": 2,
+      "trailing_width_dp": 48,
+      "inner_radius_dp": 4,
+      "interaction_inner_radius_dp": 12
+    }
+  }
+}
