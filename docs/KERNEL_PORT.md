@@ -200,6 +200,23 @@ kernel/check-gki-symbols.sh kernel/.build/qimgui.ko /path/to/kernel-source
 已用 `android15-6.6`（6.6.144）实际构建验证：clang 18 + kCFI + Shadow Call Stack + MODVERSIONS，
 88 个符号带上了 CRC，全部符号都在 KMI 列表内。
 
+### 跨内核版本的接口差异
+
+模块对 mainline 5.15、GKI android15-6.6 和 GKI android16-6.12 都构建过，这三棵树在三处不兼容，
+都已按"能运行时判断就判断、不能判断就绕开"处理：
+
+| 接口 | 差异 | 处理 |
+| --- | --- | --- |
+| `drm_minor_acquire` | DRM 6.9 起多了 xarray 参数（Android 6.6 已经是新签名） | 同时解析 `drm_minors_xa`，有它就用新签名 |
+| `kernel_neon_begin/end` | Android arm64 把它们写成**必须同块成对**的宏，保存的寄存器状态在调用者栈上 | `qk_fpu.h` 改为成对宏 `QK_FPU_BEGIN/END`，两种内核都适用 |
+| `drm_atomic_set_property` | 6.12 多了 `async_flip` 参数，6.6 没有，且没有符号能区分 | 不再调它，改调 plane 自己的 `atomic_set_property` 回调（签名稳定） |
+
+6.12 还把 `vmalloc` 改名为 `vmalloc_noprof`、`kernel_neon_begin` 改为 `__kernel_neon_begin`
+（内存分配 profiling），这些由编译时的头文件自动处理。
+GKI 的符号列表也从 `android/abi_gki_aarch64*` 搬到了 `gki/aarch64/symbols/`，检查脚本两种都认。
+
+**这正是"必须对着目标内核的源码构建"的具体含义**：靠版本号猜签名早晚会猜错，而编译器看着目标内核的头文件不会。
+
 **vermagic 必须对上。** 模块记录了编译时的内核版本串，和运行内核不一致就会被拒。
 同一个 KMI 代次内接口是冻结的，所以用该代次的 common 内核编出来的模块通常能用，
 `kernel/set-vermagic.sh` 可以把版本串改成设备自己的：
