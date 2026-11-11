@@ -35,8 +35,15 @@ stage:
 	@cp $(CURDIR)/Kbuild $(STAGE)/Kbuild
 	@cp $(CURDIR)/Kbuild $(STAGE)/Makefile
 
+# PAHOLE/RESOLVE_BTFIDS can be pointed at /bin/true when the host's pahole is
+# older than the target kernel wants. The module then carries no BTF, which
+# the kernel does not need to load it -- but CONFIG_DEBUG_INFO_BTF_MODULES
+# must stay as the target kernel has it, because it changes struct module's
+# size and the kernel refuses a module that disagrees about that.
 modules: stage
-	$(MAKE) -C $(KDIR) M=$(STAGE) $(if $(QK_CXX),QK_CXX=$(QK_CXX),) modules
+	$(MAKE) -C $(KDIR) M=$(STAGE) $(if $(QK_CXX),QK_CXX=$(QK_CXX),) \
+		$(if $(PAHOLE),PAHOLE=$(PAHOLE),) \
+		$(if $(RESOLVE_BTFIDS),RESOLVE_BTFIDS=$(RESOLVE_BTFIDS),) modules
 
 clean:
 	@rm -rf $(STAGE)

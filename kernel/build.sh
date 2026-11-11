@@ -56,7 +56,9 @@ echo "c++    : $QK_CXX"
 echo
 
 make KDIR="$KDIR" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" QK_CXX="$QK_CXX" \
-     ${LLVM:+LLVM=1} ${CC:+CC="$CC"} modules
+     ${LLVM:+LLVM=1} ${CC:+CC="$CC"} \
+     ${PAHOLE:+PAHOLE="$PAHOLE"} ${RESOLVE_BTFIDS:+RESOLVE_BTFIDS="$RESOLVE_BTFIDS"} \
+     modules
 
 echo
 echo "built: $(pwd)/.build/qimgui.ko"
