@@ -4,12 +4,14 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
 
 #include "qk_input.h"
 #include "qk_utils.h"
 
 #define QK_RING_SIZE   256
 #define QK_FRAME_MAX   64
+#define QK_REPLAY_MAX  256
 
 /* One multitouch frame as it arrived, so the parts that belong to Android can
  * be replayed once the frame's positions are known.
@@ -25,6 +27,12 @@ struct qk_device {
     bool touchscreen;
     bool replaying;
     int slot;
+    /* Events bound for Android, handed back from a worker: see qk_replay. */
+    struct work_struct replay_work;
+    spinlock_t replay_lock;
+    struct qk_recorded replay[QK_REPLAY_MAX];
+    unsigned int replay_head, replay_tail;
+    u64 replay_dropped;
     struct qk_recorded frame[QK_FRAME_MAX];
     unsigned int recorded;
     bool overflow;
@@ -100,34 +108,82 @@ static void qk_record(struct qk_device *device, unsigned int type, unsigned int 
     device->recorded++;
 }
 
-/* Hands a frame's untaken events back to the input core. They reach every
- * other handler, this filter included, so the replay flag lets them past.
+/* Hands a frame's untaken events back to the input core.
+ *
+ * This cannot happen inside the filter: input_event() takes the same
+ * dev->event_lock the filter is already holding, and that spinlock is not
+ * recursive. So the events are queued here and replayed from a worker, which
+ * costs them a scheduling delay and nothing else. The replay flag lets them
+ * back past this filter; it is read in the worker's own call stack.
  */
+static void qk_replay_worker(struct work_struct *work)
+{
+    struct qk_device *device = container_of(work, struct qk_device, replay_work);
+    struct input_dev *dev = device->handle.dev;
+    unsigned long flags;
+    bool wrote = false;
+
+    device->replaying = true;
+    for (;;) {
+        struct qk_recorded event;
+
+        spin_lock_irqsave(&device->replay_lock, flags);
+        if (device->replay_tail == device->replay_head) {
+            spin_unlock_irqrestore(&device->replay_lock, flags);
+            break;
+        }
+        event = device->replay[device->replay_tail];
+        device->replay_tail = (device->replay_tail + 1) % QK_REPLAY_MAX;
+        spin_unlock_irqrestore(&device->replay_lock, flags);
+
+        input_event(dev, event.type, event.code, event.value);
+        wrote = event.type != EV_SYN || event.code != SYN_REPORT;
+        if (!wrote)
+            replayed_frames++;
+    }
+    device->replaying = false;
+}
+
+static void qk_replay_queue(struct qk_device *device, unsigned int type,
+                            unsigned int code, int value)
+{
+    const unsigned int next = (device->replay_head + 1) % QK_REPLAY_MAX;
+
+    if (next == device->replay_tail) {
+        device->replay_dropped++;
+        return;
+    }
+    device->replay[device->replay_head].type = type;
+    device->replay[device->replay_head].code = code;
+    device->replay[device->replay_head].value = value;
+    device->replay_head = next;
+}
+
 static void qk_replay(struct qk_device *device, const bool *claimed)
 {
-    struct input_dev *dev = device->handle.dev;
+    unsigned long flags;
     unsigned int i;
     int last_slot = -2;
     bool wrote = false;
 
-    device->replaying = true;
+    spin_lock_irqsave(&device->replay_lock, flags);
     for (i = 0; i < device->recorded; i++) {
         const struct qk_recorded *event = &device->frame[i];
 
         if (event->slot >= 0 && event->slot < QK_MAX_SLOTS && claimed[event->slot])
             continue;
         if (event->slot >= 0 && event->slot != last_slot) {
-            input_event(dev, EV_ABS, ABS_MT_SLOT, event->slot);
+            qk_replay_queue(device, EV_ABS, ABS_MT_SLOT, event->slot);
             last_slot = event->slot;
         }
-        input_event(dev, event->type, event->code, event->value);
+        qk_replay_queue(device, event->type, event->code, event->value);
         wrote = true;
     }
-    if (wrote) {
-        input_event(dev, EV_SYN, SYN_REPORT, 0);
-        replayed_frames++;
-    }
-    device->replaying = false;
+    if (wrote)
+        qk_replay_queue(device, EV_SYN, SYN_REPORT, 0);
+    spin_unlock_irqrestore(&device->replay_lock, flags);
+    if (wrote)
+        schedule_work(&device->replay_work);
 }
 
 static void qk_reset_frame(struct qk_device *device)
@@ -248,8 +304,10 @@ static bool qk_filter(struct input_handle *handle, unsigned int type,
         return false;
     }
 
-    /* With interception off the touchscreen is not touched at all. */
-    if (!READ_ONCE(window->grab))
+    /* Until the window is on screen there is nothing to intercept for, and
+     * the window rect is still a placeholder: leave the device alone.
+     */
+    if (!READ_ONCE(window->grab) || !READ_ONCE(window->live))
         return false;
 
     switch (type) {
@@ -324,6 +382,8 @@ static int qk_connect(struct input_handler *handler, struct input_dev *dev,
     if (!device)
         return -ENOMEM;
     device->touchscreen = qk_is_touchscreen(dev);
+    spin_lock_init(&device->replay_lock);
+    INIT_WORK(&device->replay_work, qk_replay_worker);
     device->handle.dev = dev;
     device->handle.handler = handler;
     device->handle.name = QK_TAG;
@@ -354,6 +414,8 @@ static void qk_disconnect(struct input_handle *handle)
 
     input_close_device(handle);
     input_unregister_handle(handle);
+    /* No event can reach the filter any more; drain the pending replay. */
+    cancel_work_sync(&device->replay_work);
     kfree(device);
 }
 
@@ -408,7 +470,8 @@ void qk_input_status(struct seq_file *seq)
     spin_lock_irqsave(&ring_lock, flags);
     queued = (ring_head + QK_RING_SIZE - ring_tail) % QK_RING_SIZE;
     spin_unlock_irqrestore(&ring_lock, flags);
-    seq_printf(seq, "input_queued=%u\ninput_dropped=%llu\n", queued, dropped_events);
+    seq_printf(seq, "input_queued=%u\ninput_dropped=%llu\nwindow_live=%u\n", queued,
+               dropped_events, window ? READ_ONCE(window->live) : 0);
     seq_printf(seq, "gestures_claimed=%llu\ngestures_passed=%llu\nframes_replayed=%llu\n",
                claimed_gestures, passed_gestures, replayed_frames);
 }

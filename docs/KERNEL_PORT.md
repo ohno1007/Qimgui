@@ -146,8 +146,14 @@ arm64 内核用 `-mgeneral-regs-only` 编译，内核态使用 FP/SIMD 寄存器
 
 filter 在原子上下文运行，而一个触点的 X、Y 是分开到达、到 `SYN_REPORT` 才完整的。
 所以做法是：开启拦截时先把整帧事件记下并全部拦截，在 `SYN_REPORT` 处判定，
-属于 Android 的部分用 `input_event()` **回放**（带重入标志避免被自己再次拦截）。
-代价是窗口可见且 `grab=1` 时，交给 Android 的触摸延迟一帧（约 8–16 ms）。`grab=0` 时 filter 完全不介入。
+属于 Android 的那部分**回放**回输入核心。
+
+回放不能在 filter 里直接做：`input_event()` 要拿的 `dev->event_lock` 正是 filter 当前持有的那把，
+而它不可重入 —— 直接调用会死锁整机。所以回放事件进一个队列，由 workqueue 在进程上下文发出，
+期间置重入标志让它们穿过自己的 filter。代价是交给 Android 的触摸多一次调度延迟。
+
+`grab=0`，或窗口尚未真正接入屏幕（`window_live=0`）时，filter 完全不介入 ——
+接入失败的模块不会把触摸从系统手里拿走。
 
 按键只观察不拦截：UI 和 Android 同时收到。键码到 `ImGuiKey` 和字符的映射是 US 布局的一张小表，在 `kernel/ui/qk_ui.cpp` 里。
 
@@ -178,10 +184,15 @@ filter 在原子上下文运行，而一个触点的 X、Y 是分开到达、到
 ## 构建
 
 ```bash
+kernel/build.sh /path/to/kernel-source          # clang 内核：LLVM=1 kernel/build.sh ...
+# 等价于
 make -C kernel KDIR=/path/to/kernel/source \
      ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- QK_CXX=aarch64-linux-gnu-g++
 # 产物：kernel/.build/qimgui.ko
 ```
+
+`KDIR` 必须是**目标设备那个内核**的源码树（已 `make modules_prepare`）。
+别的内核树编出来的 `.ko` 装不上：vermagic、CFI、结构体布局和模块签名都要对上。
 
 必须用**目标内核自己的工具链**：模块与内核在 CFI、栈保护和结构体布局上必须一致。
 内核用 clang 构建时传 `CC=clang LLVM=1 QK_CXX=clang++`。
@@ -225,7 +236,8 @@ echo 0 > /sys/module/qimgui/parameters/enabled  # 撤下画面（模块仍在）
 - DRM plane 筛选、atomic_check 注入、提交，以及与 Android 合成的实际共存。
 - `input_handler` 的 filter 与回放在真实触摸驱动上的行为。
 - `kernel_neon_begin()` 区间内运行整帧 UI 的实际延迟影响，以及 `may_use_simd()` 失败的频率。
-- 内核工具链下 C++ 的编译与 modpost（主机 freestanding 构建只是强证据，不是等价物）。
+- **内核工具链下的编译本身**：这些内核源码还没有对着任何内核树编译过，只做过 freestanding 主机编译和符号检查。
+  第一次用真内核树构建时大概率还要改几处（缺头文件、下游 API 签名差异）。
 - 真机帧率、功耗，以及录屏兼容性。
 
 ## 已知限制与后续

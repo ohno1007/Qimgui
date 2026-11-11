@@ -30,6 +30,7 @@ struct qk_window {
     s32 device_max_x, device_max_y; /* Touch device range; 0 means pixels already. */
     u8 swap_xy, invert_x, invert_y; /* Panel-to-digitiser orientation. */
     u8 grab;                        /* Take gestures that start inside the window. */
+    u8 live;                        /* The window is on screen and its rect is final. */
 };
 
 struct qk_slots {

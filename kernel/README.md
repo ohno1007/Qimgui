@@ -17,11 +17,12 @@
 ## 构建
 
 ```bash
-make -C kernel KDIR=/path/to/kernel/source \
-     ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- QK_CXX=aarch64-linux-gnu-g++
+kernel/build.sh /path/to/kernel-source
+LLVM=1 kernel/build.sh /path/to/kernel-source    # clang 构建的内核
 ```
 
-必须使用目标内核自己的工具链；内核用 clang 构建时传 `CC=clang LLVM=1 QK_CXX=clang++`。
+`KDIR` 必须是**目标设备那个内核**的源码树（已 `make modules_prepare`），工具链也要和它一致：
+vermagic、CFI、结构体布局和模块签名都要对上，否则 `insmod` 会被拒。
 产物是 `kernel/.build/qimgui.ko`。
 
 ## 运行

@@ -80,9 +80,15 @@ static int qk_render(const struct qk_draw_data *data)
     surface.pixels = qk_present_back_buffer(&pitch);
     if (!surface.pixels)
         return -ENODEV;
-    surface.width = frame.window->width;
-    surface.height = frame.window->height;
+    /* The buffers were allocated for the plane's rect: take the size from
+     * there, not from the window, so a rect the two disagree on cannot run
+     * the rasteriser off the end of the mapping.
+     */
+    qk_present_window_rect(NULL, NULL, &surface.width, &surface.height);
     surface.pitch = pitch;
+    if (surface.width <= 0 || surface.height <= 0 ||
+        pitch < (u32)surface.width * 4)
+        return -EINVAL;
     /* Transparent is what lets Android show through, so every pixel this
      * buffer still has ink on is cleared -- and only those: the rest of the
      * plane was never written and is already clear.
@@ -188,6 +194,8 @@ static void qk_worker(struct work_struct *work)
                 }
             }
             frame.dirty[0] = frame.dirty[1] = (struct qk_clip){ 0, 0, 0, 0 };
+            /* Only now may the input filter act on the window's rect. */
+            WRITE_ONCE(frame.window->live, 1);
         }
     }
     if (frame.ui_ready)
@@ -274,6 +282,8 @@ free_arena:
 void qk_frame_stop(void)
 {
     WRITE_ONCE(frame.running, false);
+    if (frame.window)
+        WRITE_ONCE(frame.window->live, 0);
     if (frame.queue) {
         cancel_delayed_work_sync(&frame.work);
         destroy_workqueue(frame.queue);
