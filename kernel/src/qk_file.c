@@ -5,16 +5,65 @@
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
 
+#include "qk_utils.h"
+
+/* filp_open, filp_close, kernel_read and kernel_write are exported by the
+ * kernel but are not in the GKI symbol list, so a production GKI kernel does
+ * not offer them to a module. They are resolved by name instead; the module
+ * still loads without them, and then has no fonts and no saved settings.
+ */
+static struct file *(*filp_open_fn)(const char *, int, umode_t);
+static int (*filp_close_fn)(struct file *, fl_owner_t);
+static ssize_t (*kernel_read_fn)(struct file *, void *, size_t, loff_t *);
+static ssize_t (*kernel_write_fn)(struct file *, const void *, size_t, loff_t *);
+static bool file_ready;
+
+int qk_file_init(void)
+{
+    filp_open_fn = (typeof(filp_open_fn))qk_lookup_name("filp_open");
+    filp_close_fn = (typeof(filp_close_fn))qk_lookup_name("filp_close");
+    kernel_read_fn = (typeof(kernel_read_fn))qk_lookup_name("kernel_read");
+    kernel_write_fn = (typeof(kernel_write_fn))qk_lookup_name("kernel_write");
+    file_ready = filp_open_fn && filp_close_fn && kernel_read_fn && kernel_write_fn;
+    if (!file_ready)
+        LOGW("File access unavailable: no device font and no saved settings");
+    return file_ready ? 0 : -ENOENT;
+}
+
+static struct file *NO_CFI qk_open(const char *path, int flags, umode_t mode)
+{
+    return filp_open_fn(path, flags, mode);
+}
+
+static void NO_CFI qk_close(struct file *file)
+{
+    filp_close_fn(file, NULL);
+}
+
+static ssize_t NO_CFI qk_read(struct file *file, void *buffer, size_t size,
+                              loff_t *position)
+{
+    return kernel_read_fn(file, buffer, size, position);
+}
+
+static ssize_t NO_CFI qk_write(struct file *file, const void *buffer, size_t size,
+                               loff_t *position)
+{
+    return kernel_write_fn(file, buffer, size, position);
+}
+
 long qk_file_size(const char *path)
 {
     struct file *file;
     long size;
 
-    file = filp_open(path, O_RDONLY, 0);
+    if (!file_ready)
+        return -ENOSYS;
+    file = qk_open(path, O_RDONLY, 0);
     if (IS_ERR(file))
         return PTR_ERR(file);
     size = (long)i_size_read(file_inode(file));
-    filp_close(file, NULL);
+    qk_close(file);
     return size;
 }
 
@@ -26,11 +75,13 @@ long qk_file_read(const char *path, void *buffer, unsigned long size)
 
     if (!buffer || !size)
         return -EINVAL;
-    file = filp_open(path, O_RDONLY, 0);
+    if (!file_ready)
+        return -ENOSYS;
+    file = qk_open(path, O_RDONLY, 0);
     if (IS_ERR(file))
         return PTR_ERR(file);
-    got = kernel_read(file, buffer, size, &position);
-    filp_close(file, NULL);
+    got = qk_read(file, buffer, size, &position);
+    qk_close(file);
     return (long)got;
 }
 
@@ -42,11 +93,13 @@ int qk_file_write(const char *path, const void *buffer, unsigned long size)
 
     if (!buffer)
         return -EINVAL;
-    file = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (!file_ready)
+        return -ENOSYS;
+    file = qk_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (IS_ERR(file))
         return PTR_ERR(file);
-    written = kernel_write(file, buffer, size, &position);
-    filp_close(file, NULL);
+    written = qk_write(file, buffer, size, &position);
+    qk_close(file);
     if (written < 0)
         return (int)written;
     return (unsigned long)written == size ? 0 : -EIO;
@@ -86,6 +139,12 @@ void qk_file_release(void *buffer)
 #else /* Host build: the same contract over stdio, for the tests. */
 
 #include <errno.h>
+
+int qk_file_init(void)
+{
+    return 0;
+}
+
 #include <stdio.h>
 #include <stdlib.h>
 

@@ -181,6 +181,32 @@ filter 在原子上下文运行，而一个触点的 X、Y 是分开到达、到
 早期逐像素做内外测试的版本是 67 ms/帧；现在按扫描线解边不等式求跨度，并对不透明纯色走直写路径。
 手机 CPU 比这台主机慢，**真机数字需要实测**；窗口越小越便宜，而且静止时整帧被跳过。
 
+## GKI 约束
+
+设备跑 GKI 内核时，还有两道关：
+
+**符号必须在 KMI 列表里。** 量产 GKI 内核只导出 `android/abi_gki_aarch64*` 里列出的符号，
+其余一律不可见，模块会以 `Unknown symbol` 加载失败。本模块的 93 个外部符号对着
+android15-6.6 的列表核过，只有 `filp_open`、`kernel_read`、`kernel_write` 不在其中 ——
+所以文件访问和 msm 显示接口一样，改为用 kallsyms 按名解析（`register_kprobe` 在列表里）。
+解析不到时模块照常加载，只是没有设备字体和设置持久化。
+
+核对方法：
+
+```bash
+kernel/check-gki-symbols.sh kernel/.build/qimgui.ko /path/to/kernel-source
+```
+
+**vermagic 必须对上。** 模块记录了编译时的内核版本串，和运行内核不一致就会被拒。
+同一个 KMI 代次内接口是冻结的，所以用该代次的 common 内核编出来的模块通常能用，
+`kernel/set-vermagic.sh` 可以把版本串改成设备自己的：
+
+```bash
+kernel/set-vermagic.sh kernel/.build/qimgui.ko "$(adb shell uname -r)"
+```
+
+这是**声明**而不是事实。真正可靠的做法仍然是对着设备那个内核的源码编译。
+
 ## 构建
 
 ```bash

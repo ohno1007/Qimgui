@@ -14,6 +14,13 @@ extern "C" {
 
 #include "qk_types.h"
 
+/* Resolves the file calls this module needs. They are not part of the GKI
+ * kernel module interface, so they are looked up by name rather than linked
+ * against, exactly as the display symbols are. Returns 0, or a negative
+ * errno, in which case fonts and settings are simply unavailable.
+ */
+int qk_file_init(void);
+
 /* Size in bytes, or a negative errno. */
 long qk_file_size(const char *path);
 /* Reads at most size bytes. Returns the count read, or a negative errno. */

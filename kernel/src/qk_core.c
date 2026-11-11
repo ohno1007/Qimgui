@@ -236,6 +236,7 @@ static int __init qk_init(void)
     ret = qk_input_init(&window);
     if (ret)
         goto release_present;
+    qk_file_init();
     qk_load_font();
     setup.arena_mb = arena_mb;
     setup.interval_ms = interval_ms;
